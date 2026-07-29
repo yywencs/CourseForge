@@ -11,7 +11,8 @@ import (
 	"prizeforge/internal/metrics"
 	"prizeforge/pkg/config"
 
-	"gorm.io/driver/mysql"
+	mysqldriver "github.com/go-sql-driver/mysql"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
@@ -22,6 +23,26 @@ func NewDB(cfg *config.DatabaseConfig) *gorm.DB {
 	defaultCfg.Dsn = resolveDatabaseDSN(cfg.Dsn, "")
 	db, sqlDB := openMySQLDB(&defaultCfg)
 	startMySQLStatsCollector(sqlDB, "default", "primary")
+	return db
+}
+
+// NewCourseforgeDB 创建选课单库连接。
+// 未显式配置 courseforge_dsn 时，从现有 DSN 复制连接参数并将数据库名改为 courseforge。
+func NewCourseforgeDB(cfg *config.DatabaseConfig) *gorm.DB {
+	courseCfg := *cfg
+	if strings.TrimSpace(courseCfg.CourseforgeDsn) != "" {
+		courseCfg.Dsn = courseCfg.CourseforgeDsn
+	} else {
+		baseDSN := resolveDatabaseDSN(cfg.Dsn, "")
+		parsed, err := mysqldriver.ParseDSN(baseDSN)
+		if err != nil {
+			panic(fmt.Sprintf("failed to parse base database DSN: %v", err))
+		}
+		parsed.DBName = "courseforge"
+		courseCfg.Dsn = parsed.FormatDSN()
+	}
+	db, sqlDB := openMySQLDB(&courseCfg)
+	startMySQLStatsCollector(sqlDB, "courseforge", "primary")
 	return db
 }
 
@@ -49,7 +70,7 @@ func openMySQLDB(cfg *config.DatabaseConfig) (*gorm.DB, *sql.DB) {
 
 	dsn := cfg.Dsn
 
-	db, err := gorm.Open(mysql.Open(dsn), gormConfig)
+	db, err := gorm.Open(gormmysql.Open(dsn), gormConfig)
 	if err != nil {
 		panic(fmt.Sprintf("failed to connect database: %v", err))
 	}

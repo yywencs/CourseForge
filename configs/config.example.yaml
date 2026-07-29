@@ -19,16 +19,19 @@ rabbitmq:
       default_concurrency: 1
       concurrency:
         draw_result_queue: 8
+        selection_result_queue: 8
         send_award_queue: 4
   topic:
     activity_sku_stock_zero: "activity_sku_stock_zero"
     send_award: "send_award"
     send_rebate: "send_rebate"
     draw_result: "draw_result"
+    selection_result: "selection_result"
 
 data:
   mysql:
     dsn: "root:password@tcp(127.0.0.1:3306)/prizeforge%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=30s"
+    courseforge_dsn: "root:password@tcp(127.0.0.1:3306)/courseforge?charset=utf8mb4&parseTime=True&loc=Local&timeout=30s"
     max_open_conns: 25
     # minimum-idle: 15 -> SetMaxIdleConns
     # (在 Go 中，MaxIdleConns 既控制最小空闲也控制最大空闲，通常设置为和 Open 一样或略小)

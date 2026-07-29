@@ -19,16 +19,19 @@ rabbitmq:
       default_concurrency: 1
       concurrency:
         draw_result_queue: 8
+        selection_result_queue: 8
         send_award_queue: 4
   topic:
     activity_sku_stock_zero: activity_sku_stock_zero
     send_award: send_award
     send_rebate: send_rebate
     draw_result: draw_result
+    selection_result: selection_result
 
 data:
   mysql:
     dsn: overridden_by_environment
+    courseforge_dsn: overridden_by_environment
     max_open_conns: 20
     max_idle_conns: 10
     max_life_time: 1800s

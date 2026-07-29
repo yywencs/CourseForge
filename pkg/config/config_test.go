@@ -13,6 +13,7 @@ func TestInitViperConfigEnvironmentOverrides(t *testing.T) {
 data:
   mysql:
     dsn: file-dsn
+    courseforge_dsn: file-courseforge-dsn
   redis:
     password: file-redis-password
 asynq:
@@ -28,6 +29,7 @@ rabbitmq:
     send_award: file-send-award
     send_rebate: file-send-rebate
     draw_result: file-draw-result
+    selection_result: file-selection-result
   listener:
     simple:
       prefetch: 1
@@ -53,6 +55,7 @@ rabbitmq:
 	})
 
 	t.Setenv("PRIZEFORGE_DATA_MYSQL_DSN", "env-dsn")
+	t.Setenv("PRIZEFORGE_DATA_MYSQL_COURSEFORGE_DSN", "env-courseforge-dsn")
 	t.Setenv("PRIZEFORGE_DATA_REDIS_PASSWORD", "env-redis-password")
 	t.Setenv("PRIZEFORGE_ASYNQ_REDIS_PASSWORD", "env-asynq-password")
 	t.Setenv("PRIZEFORGE_RABBITMQ_USERNAME", "env-user")
@@ -62,6 +65,7 @@ rabbitmq:
 	t.Setenv("PRIZEFORGE_RABBITMQ_TOPIC_SEND_AWARD", "env-send-award")
 	t.Setenv("PRIZEFORGE_RABBITMQ_TOPIC_SEND_REBATE", "env-send-rebate")
 	t.Setenv("PRIZEFORGE_RABBITMQ_TOPIC_DRAW_RESULT", "env-draw-result")
+	t.Setenv("PRIZEFORGE_RABBITMQ_TOPIC_SELECTION_RESULT", "env-selection-result")
 	t.Setenv("PRIZEFORGE_RABBITMQ_LISTENER_SIMPLE_DEFAULT_CONCURRENCY", "2")
 	t.Setenv("PRIZEFORGE_RABBITMQ_LISTENER_SIMPLE_CONCURRENCY_DRAW_RESULT_QUEUE", "6")
 	t.Setenv("PRIZEFORGE_RABBITMQ_LISTENER_SIMPLE_CONCURRENCY_SEND_AWARD_QUEUE", "3")
@@ -70,6 +74,12 @@ rabbitmq:
 
 	if Conf.Data.Database.Dsn != "env-dsn" {
 		t.Fatalf("mysql dsn = %q, want environment override", Conf.Data.Database.Dsn)
+	}
+	if Conf.Data.Database.CourseforgeDsn != "env-courseforge-dsn" {
+		t.Fatalf(
+			"courseforge mysql dsn = %q, want environment override",
+			Conf.Data.Database.CourseforgeDsn,
+		)
 	}
 	if Conf.Data.Redis.Password != "env-redis-password" {
 		t.Fatalf("redis password = %q, want environment override", Conf.Data.Redis.Password)
@@ -86,7 +96,8 @@ rabbitmq:
 	if Conf.RabbitMQ.Topic.ActivitySkuStockZero != "env-stock-zero" ||
 		Conf.RabbitMQ.Topic.SendAward != "env-send-award" ||
 		Conf.RabbitMQ.Topic.SendRebate != "env-send-rebate" ||
-		Conf.RabbitMQ.Topic.DrawResult != "env-draw-result" {
+		Conf.RabbitMQ.Topic.DrawResult != "env-draw-result" ||
+		Conf.RabbitMQ.Topic.SelectionResult != "env-selection-result" {
 		t.Fatalf("rabbitmq topic config = %#v, want environment overrides", Conf.RabbitMQ.Topic)
 	}
 	if Conf.RabbitMQ.Listener.Simple.Prefetch != 1 ||
@@ -104,6 +115,7 @@ func TestRabbitMQTopicConfigValidate(t *testing.T) {
 		SendAward:            "send-award",
 		SendRebate:           "send-rebate",
 		DrawResult:           "draw-result",
+		SelectionResult:      "selection-result",
 	}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)

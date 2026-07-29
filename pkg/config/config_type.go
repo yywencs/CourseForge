@@ -40,13 +40,14 @@ type DataConfig struct {
 }
 
 type DatabaseConfig struct {
-	Dsn          string        `mapstructure:"dsn"`
-	MaxOpenConns int           `mapstructure:"max_open_conns"`
-	MaxIdleConns int           `mapstructure:"max_idle_conns"`
-	MaxLifeTime  time.Duration `mapstructure:"max_life_time"`
-	MaxIdleTime  time.Duration `mapstructure:"max_idle_time"`
-	DbCount      int           `mapstructure:"db_count"`
-	TbCount      int           `mapstructure:"tb_count"`
+	Dsn            string        `mapstructure:"dsn"`
+	CourseforgeDsn string        `mapstructure:"courseforge_dsn"`
+	MaxOpenConns   int           `mapstructure:"max_open_conns"`
+	MaxIdleConns   int           `mapstructure:"max_idle_conns"`
+	MaxLifeTime    time.Duration `mapstructure:"max_life_time"`
+	MaxIdleTime    time.Duration `mapstructure:"max_idle_time"`
+	DbCount        int           `mapstructure:"db_count"`
+	TbCount        int           `mapstructure:"tb_count"`
 }
 
 type RedisConfig struct {
@@ -100,6 +101,7 @@ type RabbitMQTopicConfig struct {
 	SendAward            string `mapstructure:"send_award"`
 	SendRebate           string `mapstructure:"send_rebate"`
 	DrawResult           string `mapstructure:"draw_result"`
+	SelectionResult      string `mapstructure:"selection_result"`
 }
 
 func (c RabbitMQTopicConfig) Validate() error {
@@ -108,6 +110,7 @@ func (c RabbitMQTopicConfig) Validate() error {
 		"send_award":              c.SendAward,
 		"send_rebate":             c.SendRebate,
 		"draw_result":             c.DrawResult,
+		"selection_result":        c.SelectionResult,
 	}
 	seen := make(map[string]string, len(topics))
 	for name, topic := range topics {

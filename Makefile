@@ -62,12 +62,14 @@ integration-up: ## 启动并等待临时 MySQL、Redis、RabbitMQ 集成测试�
 
 .PHONY: integration-db-check
 integration-db-check: ## 验证集成测试分库和返利表已经初始化
-	@db_count="$$( $(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name IN ('"'"'prizeforge'"'"', '"'"'prizeforge_01'"'"', '"'"'prizeforge_02'"'"')"' )"; \
+	@db_count="$$( $(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name IN ('"'"'prizeforge'"'"', '"'"'prizeforge_01'"'"', '"'"'prizeforge_02'"'"', '"'"'courseforge'"'"')"' )"; \
 	rebate_config_count="$$( $(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '"'"'prizeforge'"'"' AND table_name = '"'"'daily_behavior_rebate'"'"'"' )"; \
 	rebate_order_table_count="$$( $(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema IN ('"'"'prizeforge_01'"'"', '"'"'prizeforge_02'"'"') AND table_name LIKE '"'"'user_behavior_rebate_order_%'"'"'"' )"; \
-	test "$$db_count" = "3"; \
+	courseforge_table_count="$$( $(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '"'"'courseforge'"'"'"' )"; \
+	test "$$db_count" = "4"; \
 	test "$$rebate_config_count" = "1"; \
 	test "$$rebate_order_table_count" = "8"; \
+	test "$$courseforge_table_count" = "18"; \
 	printf '%s\n' "integration MySQL schema is ready"
 
 .PHONY: integration-redis-check

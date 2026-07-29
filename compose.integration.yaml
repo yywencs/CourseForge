@@ -19,6 +19,7 @@ services:
       - ./docs/sql/prizeforge_01.sql:/docker-entrypoint-initdb.d/20-prizeforge-01.sql:ro
       - ./docs/sql/prizeforge_02.sql:/docker-entrypoint-initdb.d/30-prizeforge-02.sql:ro
       - ./docs/sql/prizeforge_rebate.sql:/docker-entrypoint-initdb.d/40-prizeforge-rebate.sql:ro
+      - ./docs/sql/courseforge.sql:/docker-entrypoint-initdb.d/50-courseforge.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
       interval: 2s

@@ -34,6 +34,7 @@ const defaultIntegrationRabbitMQPassword = "prizeforge-integration"
 var (
 	integrationDBRouter           *adapter.DBRouter
 	integrationDefaultDB          *gorm.DB
+	integrationCourseforgeDB      *gorm.DB
 	integrationRedis              *cache.Cache
 	integrationRedisClient        *redis.Client
 	integrationRabbitMQConfig     *config.RabbitMQConfig
@@ -94,6 +95,17 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	integrationDBRouter = adapter.NewDBRouter(cfg)
+	courseDSN, courseDSNErr := mysqlDriver.ParseDSN(strings.Replace(dsn, "%s", "", 1))
+	if courseDSNErr != nil {
+		fmt.Fprintf(os.Stderr, "parse integration courseforge DSN: %v\n", courseDSNErr)
+		os.Exit(1)
+	}
+	courseDSN.DBName = "courseforge"
+	integrationCourseforgeDB, err = gorm.Open(gormMySQL.Open(courseDSN.FormatDSN()), &gorm.Config{})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "open integration courseforge database: %v\n", err)
+		os.Exit(1)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if sqlDB, dbErr := integrationDefaultDB.DB(); dbErr != nil {
@@ -108,6 +120,15 @@ func TestMain(m *testing.M) {
 	if err := integrationDBRouter.Ping(ctx); err != nil {
 		cancel()
 		fmt.Fprintf(os.Stderr, "ping integration database shards: %v\n", err)
+		os.Exit(1)
+	}
+	if sqlDB, dbErr := integrationCourseforgeDB.DB(); dbErr != nil {
+		cancel()
+		fmt.Fprintf(os.Stderr, "get integration courseforge database: %v\n", dbErr)
+		os.Exit(1)
+	} else if pingErr := sqlDB.PingContext(ctx); pingErr != nil {
+		cancel()
+		fmt.Fprintf(os.Stderr, "ping integration courseforge database: %v\n", pingErr)
 		os.Exit(1)
 	}
 	integrationRedisClient = redis.NewClient(&redis.Options{Addr: redisAddr})
@@ -127,6 +148,7 @@ func TestMain(m *testing.M) {
 			SendAward:            "send_award",
 			SendRebate:           "send_rebate",
 			DrawResult:           "draw_result",
+			SelectionResult:      "selection_result",
 		},
 	}
 	integrationRabbitMQConnection, err = adapter.NewConnection(integrationRabbitMQConfig)
@@ -202,6 +224,11 @@ func validateIntegrationRabbitMQAddr(addr string) (string, int, error) {
 func closeIntegrationDatabases() {
 	if integrationDefaultDB != nil {
 		if sqlDB, err := integrationDefaultDB.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	}
+	if integrationCourseforgeDB != nil {
+		if sqlDB, err := integrationCourseforgeDB.DB(); err == nil {
 			_ = sqlDB.Close()
 		}
 	}

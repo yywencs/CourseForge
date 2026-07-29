@@ -1,0 +1,268 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"prizeforge/internal/domain/enrollment"
+)
+
+type fakeEnrollmentRepository struct {
+	round      *enrollment.SelectionRound
+	class      *enrollment.TeachingClass
+	quota      *enrollment.StudentSelectionQuota
+	active     bool
+	existing   bool
+	reserved   *enrollment.SelectionApplication
+	completed  *enrollment.SelectionResult
+	claimOwner string
+}
+
+func (f *fakeEnrollmentRepository) QuerySelectionRound(
+	context.Context,
+	uint64,
+) (*enrollment.SelectionRound, error) {
+	return f.round, nil
+}
+
+func (f *fakeEnrollmentRepository) QueryTeachingClass(
+	context.Context,
+	uint64,
+	uint64,
+) (*enrollment.TeachingClass, error) {
+	return f.class, nil
+}
+
+func (f *fakeEnrollmentRepository) QueryStudentSelectionQuota(
+	context.Context,
+	uint64,
+	uint64,
+) (*enrollment.StudentSelectionQuota, error) {
+	return f.quota, nil
+}
+
+func (f *fakeEnrollmentRepository) IsStudentActive(context.Context, uint64) (bool, error) {
+	return f.active, nil
+}
+
+func (f *fakeEnrollmentRepository) HasExistingEnrollment(
+	context.Context,
+	uint64,
+	uint64,
+	uint64,
+) (bool, error) {
+	return f.existing, nil
+}
+
+func (f *fakeEnrollmentRepository) ReserveSelection(
+	_ context.Context,
+	application *enrollment.SelectionApplication,
+) (*enrollment.SelectionReservation, error) {
+	if err := application.Reserve(); err != nil {
+		return nil, err
+	}
+	f.reserved = application
+	return &enrollment.SelectionReservation{
+		Status:      enrollment.ReservationStatusAcquired,
+		Application: application,
+	}, nil
+}
+
+func (f *fakeEnrollmentRepository) TryClaimSelection(
+	context.Context,
+	uint64,
+	uint64,
+	string,
+	string,
+) (*enrollment.SelectionClaim, error) {
+	f.claimOwner = "owner-001"
+	return &enrollment.SelectionClaim{
+		Status: enrollment.ClaimStatusAcquired,
+		Owner:  f.claimOwner,
+	}, nil
+}
+
+func (f *fakeEnrollmentRepository) ReleaseSelectionClaim(
+	context.Context,
+	uint64,
+	uint64,
+	string,
+	string,
+) error {
+	return nil
+}
+
+func (f *fakeEnrollmentRepository) CompleteSelection(
+	_ context.Context,
+	result *enrollment.SelectionResult,
+	owner string,
+) (*enrollment.SelectionResultPublication, error) {
+	if owner != f.claimOwner {
+		return nil, enrollment.ErrClaimOwnerMismatch
+	}
+	f.completed = result
+	return &enrollment.SelectionResultPublication{
+		StreamID: "1-0",
+		Result:   result,
+	}, nil
+}
+
+func (f *fakeEnrollmentRepository) QueryPendingSelectionResults(
+	context.Context,
+	int64,
+) ([]*enrollment.SelectionResultPublication, error) {
+	return nil, nil
+}
+
+func (f *fakeEnrollmentRepository) MarkSelectionResultPublished(
+	context.Context,
+	*enrollment.SelectionResultPublication,
+) error {
+	return nil
+}
+
+type fakeSelectionPublisher struct {
+	publication *enrollment.SelectionResultPublication
+	err         error
+}
+
+func (f *fakeSelectionPublisher) Publish(
+	_ context.Context,
+	publication *enrollment.SelectionResultPublication,
+) error {
+	f.publication = publication
+	if f.err == nil {
+		publication.BrokerConfirmed = true
+	}
+	return f.err
+}
+
+func newSuccessfulEnrollmentUsecase(
+	t *testing.T,
+) (*EnrollmentUsecase, *fakeEnrollmentRepository, *fakeSelectionPublisher, time.Time) {
+	t.Helper()
+	now := time.Date(2026, time.September, 1, 8, 30, 0, 0, time.Local)
+	repo := &fakeEnrollmentRepository{
+		round: &enrollment.SelectionRound{
+			ID:        101,
+			TermID:    202601,
+			StartTime: now.Add(-time.Hour),
+			EndTime:   now.Add(time.Hour),
+			State:     enrollment.SelectionRoundStateOpen,
+		},
+		class: &enrollment.TeachingClass{
+			ID:       30001,
+			TermID:   202601,
+			CourseID: 20001,
+			Credits:  enrollment.Credit(35),
+			Capacity: 100,
+			State:    enrollment.TeachingClassStateOpen,
+		},
+		quota: &enrollment.StudentSelectionQuota{
+			RoundID:     101,
+			TermID:      202601,
+			StudentID:   10001,
+			CreditLimit: enrollment.Credit(200),
+			CourseLimit: 6,
+		},
+		active: true,
+	}
+	publisher := &fakeSelectionPublisher{}
+	usecase := NewEnrollmentUsecase(repo, repo, publisher)
+	usecase.now = func() time.Time { return now }
+	usecase.newID = func() (string, error) { return "application-001", nil }
+	return usecase, repo, publisher, now
+}
+
+// TestEnrollmentUsecaseSelectCourse 验证最小主链路会完成预占、抢占、结果保存和消息发布。
+func TestEnrollmentUsecaseSelectCourse(t *testing.T) {
+	usecase, repo, publisher, _ := newSuccessfulEnrollmentUsecase(t)
+	receipt, err := usecase.SelectCourse(context.Background(), &SelectCourseCommand{
+		RequestID:       "request-001",
+		RoundID:         101,
+		StudentID:       10001,
+		TeachingClassID: 30001,
+		Source:          enrollment.ApplicationSourceWeb,
+	})
+	if err != nil {
+		t.Fatalf("SelectCourse() error = %v", err)
+	}
+	if receipt.ApplicationID != "application-001" ||
+		receipt.State != enrollment.ApplicationStateSelected ||
+		!receipt.BrokerConfirmed ||
+		receipt.MySQLPersisted {
+		t.Fatalf("SelectCourse() receipt = %#v", receipt)
+	}
+	if repo.reserved == nil || repo.completed == nil || publisher.publication == nil {
+		t.Fatalf(
+			"main chain calls = reserved:%v completed:%v published:%v",
+			repo.reserved != nil,
+			repo.completed != nil,
+			publisher.publication != nil,
+		)
+	}
+}
+
+// TestEnrollmentUsecaseRejectsBeforeReservation 验证重复课程和已关闭轮次不会进入Redis预占。
+func TestEnrollmentUsecaseRejectsBeforeReservation(t *testing.T) {
+	t.Run("duplicate course", func(t *testing.T) {
+		usecase, repo, _, _ := newSuccessfulEnrollmentUsecase(t)
+		repo.existing = true
+		_, err := usecase.SelectCourse(context.Background(), &SelectCourseCommand{
+			RequestID:       "request-001",
+			RoundID:         101,
+			StudentID:       10001,
+			TeachingClassID: 30001,
+			Source:          enrollment.ApplicationSourceWeb,
+		})
+		if !errors.Is(err, enrollment.ErrDuplicateSelection) {
+			t.Fatalf("SelectCourse() error = %v, want %v", err, enrollment.ErrDuplicateSelection)
+		}
+		if repo.reserved != nil {
+			t.Fatal("duplicate course should not reserve Redis resources")
+		}
+	})
+
+	t.Run("closed round", func(t *testing.T) {
+		usecase, repo, _, _ := newSuccessfulEnrollmentUsecase(t)
+		repo.round.State = enrollment.SelectionRoundStateClosed
+		_, err := usecase.SelectCourse(context.Background(), &SelectCourseCommand{
+			RequestID:       "request-001",
+			RoundID:         101,
+			StudentID:       10001,
+			TeachingClassID: 30001,
+			Source:          enrollment.ApplicationSourceWeb,
+		})
+		if !errors.Is(err, enrollment.ErrRoundNotOpen) {
+			t.Fatalf("SelectCourse() error = %v, want %v", err, enrollment.ErrRoundNotOpen)
+		}
+		if repo.reserved != nil {
+			t.Fatal("closed round should not reserve Redis resources")
+		}
+	})
+}
+
+// TestEnrollmentUsecaseKeepsRecoverableResult 验证RabbitMQ失败时向客户端返回处理中，
+// 结果仍由Repository保存在Redis Stream中等待补偿。
+func TestEnrollmentUsecaseKeepsRecoverableResult(t *testing.T) {
+	usecase, repo, publisher, _ := newSuccessfulEnrollmentUsecase(t)
+	publishErr := errors.New("confirm timeout")
+	publisher.err = publishErr
+
+	_, err := usecase.SelectCourse(context.Background(), &SelectCourseCommand{
+		RequestID:       "request-001",
+		RoundID:         101,
+		StudentID:       10001,
+		TeachingClassID: 30001,
+		Source:          enrollment.ApplicationSourceWeb,
+	})
+	if !errors.Is(err, enrollment.ErrApplicationInProgress) ||
+		!errors.Is(err, publishErr) {
+		t.Fatalf("SelectCourse() error = %v, want in-progress wrapping publish error", err)
+	}
+	if repo.completed == nil || publisher.publication == nil {
+		t.Fatal("publish failure should happen after Redis result completion")
+	}
+}

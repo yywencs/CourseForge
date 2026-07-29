@@ -15,6 +15,7 @@ import (
 	"prizeforge/internal/infrastructure/adapter"
 	"prizeforge/internal/infrastructure/repository/activityrepo"
 	"prizeforge/internal/infrastructure/repository/awardrepo"
+	"prizeforge/internal/infrastructure/repository/enrollmentrepo"
 	"prizeforge/internal/infrastructure/repository/rebaterepo"
 	"prizeforge/internal/infrastructure/repository/strategyrepo"
 	"prizeforge/internal/infrastructure/repository/taskrepo"
@@ -131,6 +132,7 @@ func NewAPIApp() (*HTTPApp, error) {
 	cfg := b.cfg
 	dbRouter := b.dbRouter
 	gormDB := b.gormDB
+	courseforgeDB := adapter.NewCourseforgeDB(&cfg.Data.Database)
 	redis := b.redis
 	asynqClient := b.asynqClient
 	strategySvc := b.strategySvc
@@ -158,6 +160,7 @@ func NewAPIApp() (*HTTPApp, error) {
 	awardRepo := awardrepo.NewUserAwardRecordRepository(dbRouter, redis, typedPublisher)
 	taskRepo := taskrepo.NewTaskRepository(dbRouter, typedPublisher)
 	rebateRepo := rebaterepo.NewRebateRepository(gormDB, dbRouter, typedPublisher)
+	enrollmentRepo := enrollmentrepo.NewRepository(courseforgeDB, redis)
 
 	// domain service
 	activityPartakeSvc := activity.NewActivityPartakeUsecase(activityRepo)
@@ -174,15 +177,25 @@ func NewAPIApp() (*HTTPApp, error) {
 	strategyAwardStockJob := job.NewStrategyAwardStockConsumeJob(strategySvc)
 	drawResultPublisher := job.NewDrawResultPublisher(activityPartakeSvc, typedPublisher)
 	drawResultRecoveryJob := job.NewDrawResultRecoveryJob(activityPartakeSvc, drawResultPublisher)
+	selectionResultPublisher := job.NewSelectionResultPublisher(enrollmentRepo, typedPublisher)
+	selectionResultRecoveryJob := job.NewSelectionResultRecoveryJob(enrollmentRepo, selectionResultPublisher)
 
 	// RabbitMQ listeners
 	stockListener := listener.NewActivityStockListener(activityQuotaSvc)
 	rebateListener := listener.NewRebateListener(activityQuotaSvc)
 	drawResultListener := listener.NewDrawResultListener(activityPartakeSvc)
 	sendAwardListener := listener.NewSendAwardListener(awardSvc)
+	selectionResultListener := listener.NewSelectionResultListener(enrollmentRepo)
 
 	// Asynq worker + RabbitMQ consumer
-	asynqWorker := worker.NewAsynqWorker(&cfg.Asynq, skuStockJob, sendAwardMsgJob, strategyAwardStockJob, drawResultRecoveryJob)
+	asynqWorker := worker.NewAsynqWorker(
+		&cfg.Asynq,
+		skuStockJob,
+		sendAwardMsgJob,
+		strategyAwardStockJob,
+		drawResultRecoveryJob,
+		selectionResultRecoveryJob,
+	)
 	rabbitMQConsumer := listener.NewRabbitMQConsumer(
 		conn,
 		listener.WithPrefetch(cfg.RabbitMQ.Listener.Simple.Prefetch),
@@ -193,10 +206,12 @@ func NewAPIApp() (*HTTPApp, error) {
 	rabbitMQConsumer.RegisterListener(cfg.RabbitMQ.Topic.SendRebate, rebateListener)
 	rabbitMQConsumer.RegisterListener(cfg.RabbitMQ.Topic.DrawResult, drawResultListener)
 	rabbitMQConsumer.RegisterListener(cfg.RabbitMQ.Topic.SendAward, sendAwardListener)
+	rabbitMQConsumer.RegisterListener(cfg.RabbitMQ.Topic.SelectionResult, selectionResultListener)
 
 	// application usecases
 	apiStrategyUsecase := api.NewStrategyUsecase(strategySvc)
 	apiActivityUsecase := api.NewActivityUsecase(activityPartakeSvc, activityQuotaSvc, stockManager, strategySvc, drawResultPublisher, rebateSvc)
+	apiEnrollmentUsecase := api.NewEnrollmentUsecase(enrollmentRepo, enrollmentRepo, selectionResultPublisher)
 
 	readinessChecks := baseReadinessChecks(b)
 	readinessChecks["asynq_redis"] = func(context.Context) error {
@@ -208,7 +223,20 @@ func NewAPIApp() (*HTTPApp, error) {
 		}
 		return nil
 	}
-	apiServer := apihttp.NewServer(resolveAPIAddr(cfg), apiStrategyUsecase, apiActivityUsecase, readinessChecks)
+	readinessChecks["courseforge_mysql"] = func(ctx context.Context) error {
+		sqlDB, err := courseforgeDB.DB()
+		if err != nil {
+			return fmt.Errorf("get courseforge database: %w", err)
+		}
+		return sqlDB.PingContext(ctx)
+	}
+	apiServer := apihttp.NewServer(
+		resolveAPIAddr(cfg),
+		apiStrategyUsecase,
+		apiActivityUsecase,
+		apiEnrollmentUsecase,
+		readinessChecks,
+	)
 
 	return &HTTPApp{
 		Config:           cfg,

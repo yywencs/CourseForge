@@ -11,6 +11,11 @@ package api
 //	POST /api/v1/raffle/activity/query_user_activity_account → QueryUserActivityAccount
 //	POST /api/v1/raffle/activity/load_user_activity_account → LoadUserActivityAccount
 func (s *Server) registerRoutes() {
+	selectionGroup := s.engine.Group("/api/v1/enrollments")
+	{
+		selectionGroup.POST("", s.SelectCourse)
+	}
+
 	g := s.engine.Group("/api/v1/raffle")
 	{
 		// Strategy

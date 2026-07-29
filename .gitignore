@@ -54,6 +54,13 @@ frontend/logs/
 frontend/*.local
 frontend/.env.local
 frontend/.env.*.local
+web/node_modules/
+web/dist/
+web/.vite/
+web/.cache/
+web/*.local
+web/.env.local
+web/.env.*.local
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

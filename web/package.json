@@ -1,0 +1,31 @@
+{
+  "name": "courseforge-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "typecheck": "vue-tsc -b --pretty false",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@lucide/vue": "^1.27.0",
+    "@tanstack/vue-query": "^5.101.4",
+    "axios": "^1.18.1",
+    "element-plus": "^2.14.3",
+    "pinia": "^4.0.2",
+    "vue": "^3.5.40",
+    "vue-router": "^5.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.1.2",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "5.9.3",
+    "unplugin-vue-components": "^32.1.0",
+    "vite": "^8.1.5",
+    "vue-tsc": "^3.3.8"
+  }
+}

@@ -1,0 +1,59 @@
+package listener
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"prizeforge/internal/domain/enrollment"
+	"prizeforge/pkg/rabbitmq"
+)
+
+type selectionResultPersistenceService interface {
+	SaveSelectionResult(context.Context, *enrollment.SelectionResult) error
+}
+
+// SelectionResultListener 消费选课标准结果，并在成功落库后由通用消费者 ACK。
+type SelectionResultListener struct {
+	service selectionResultPersistenceService
+}
+
+func NewSelectionResultListener(
+	service selectionResultPersistenceService,
+) *SelectionResultListener {
+	return &SelectionResultListener{service: service}
+}
+
+func (l *SelectionResultListener) Handle(
+	ctx context.Context,
+	body []byte,
+) (retry bool, err error) {
+	var event rabbitmq.BaseEvent
+	if err := json.Unmarshal(body, &event); err != nil {
+		return false, fmt.Errorf("解析选课结果信封失败: %w", err)
+	}
+	data, err := json.Marshal(event.Data)
+	if err != nil {
+		return false, fmt.Errorf("序列化选课结果失败: %w", err)
+	}
+	var result enrollment.SelectionResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return false, fmt.Errorf("解析选课结果失败: %w", err)
+	}
+	if err := result.Validate(); err != nil {
+		return false, err
+	}
+	expectedEventID := fmt.Sprintf(
+		"selection:%d:%s",
+		result.StudentID,
+		result.ApplicationID,
+	)
+	if event.ID != expectedEventID {
+		return false, errors.New("选课结果消息ID与载荷不一致")
+	}
+	if err := l.service.SaveSelectionResult(ctx, &result); err != nil {
+		return true, err
+	}
+	return false, nil
+}

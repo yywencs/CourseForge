@@ -191,3 +191,8 @@ func (p *Publisher) PublishTopic(ctx context.Context, topic string, event *rabbi
 func (p *Publisher) PublishDrawResult(ctx context.Context, event *rabbitmq.BaseEvent) error {
 	return p.client.Publish(ctx, p.topic.DrawResult, event)
 }
+
+// PublishSelectionResult 发布选课标准结果并等待 RabbitMQ Confirm。
+func (p *Publisher) PublishSelectionResult(ctx context.Context, event *rabbitmq.BaseEvent) error {
+	return p.client.Publish(ctx, p.topic.SelectionResult, event)
+}

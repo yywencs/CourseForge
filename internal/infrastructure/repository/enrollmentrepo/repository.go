@@ -17,9 +17,14 @@ type Repository struct {
 }
 
 var (
-	_ enrollment.QueryRepository             = (*Repository)(nil)
-	_ enrollment.ApplicationRepository       = (*Repository)(nil)
-	_ enrollment.ResultPersistenceRepository = (*Repository)(nil)
+	_ enrollment.QueryRepository                = (*Repository)(nil)
+	_ enrollment.EligibilityRepository          = (*Repository)(nil)
+	_ enrollment.EnrollmentRepository           = (*Repository)(nil)
+	_ enrollment.EnrollmentProjectionRepository = (*Repository)(nil)
+	_ enrollment.WaitlistRepository             = (*Repository)(nil)
+	_ enrollment.ProjectionRepairRepository     = (*Repository)(nil)
+	_ enrollment.ApplicationRepository          = (*Repository)(nil)
+	_ enrollment.ResultPersistenceRepository    = (*Repository)(nil)
 )
 
 func NewRepository(db *gorm.DB, redis *cache.Cache) *Repository {

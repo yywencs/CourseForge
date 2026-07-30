@@ -77,9 +77,15 @@ func (r *Repository) SaveSelectionResult(
 				"teaching_class_id": result.TeachingClassID,
 				"credits":           creditToDecimal(result.Credits),
 				"state":             "enrolled",
-				"enrolled_at":       result.CompletedAt,
-				"create_time":       time.Now(),
-				"update_time":       time.Now(),
+				"active_key": fmt.Sprintf(
+					"%d:%d:%d",
+					result.TermID,
+					result.StudentID,
+					result.CourseID,
+				),
+				"enrolled_at": result.CompletedAt,
+				"create_time": time.Now(),
+				"update_time": time.Now(),
 			}).Error; err != nil {
 				return err
 			}

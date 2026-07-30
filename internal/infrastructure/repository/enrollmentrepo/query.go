@@ -13,6 +13,23 @@ import (
 	"gorm.io/gorm"
 )
 
+type selectionApplicationRow struct {
+	ApplicationID   string
+	RequestID       string
+	RoundID         uint64
+	TermID          uint64
+	StudentID       uint64
+	CourseID        uint64
+	TeachingClassID uint64
+	Credits         string
+	State           string
+	FailureCode     string
+	FailureMessage  string
+	AppliedAt       timeValue
+	CompletedAt     *time.Time
+	Source          string
+}
+
 func (r *Repository) QuerySelectionByRequest(
 	ctx context.Context,
 	roundID uint64,
@@ -38,22 +55,7 @@ func (r *Repository) querySelectionByRequestFromMySQL(
 	studentID uint64,
 	requestID string,
 ) (*enrollment.SelectionRequestRecord, error) {
-	var row struct {
-		ApplicationID   string
-		RequestID       string
-		RoundID         uint64
-		TermID          uint64
-		StudentID       uint64
-		CourseID        uint64
-		TeachingClassID uint64
-		Credits         string
-		State           string
-		FailureCode     string
-		FailureMessage  string
-		AppliedAt       timeValue
-		CompletedAt     *time.Time
-		Source          string
-	}
+	var row selectionApplicationRow
 	err := r.db.WithContext(ctx).
 		Table("selection_application").
 		Select(`
@@ -85,6 +87,159 @@ func (r *Repository) querySelectionByRequestFromMySQL(
 	if err != nil {
 		return nil, err
 	}
+	application, err := row.toEntity()
+	if err != nil {
+		return nil, err
+	}
+	if application.ApplicationID == "" ||
+		!application.Source.Valid() ||
+		!application.State.Terminal() ||
+		application.CompletedAt == nil {
+		return nil, errors.New("MySQL选课申请状态非法")
+	}
+	return &enrollment.SelectionRequestRecord{
+		Application:    application,
+		MySQLPersisted: true,
+	}, nil
+}
+
+func (r *Repository) QuerySelectionApplication(
+	ctx context.Context,
+	applicationID string,
+	studentID uint64,
+) (*enrollment.SelectionApplicationRecord, error) {
+	if strings.TrimSpace(applicationID) == "" || studentID == 0 {
+		return nil, enrollment.ErrInvalidParams
+	}
+
+	var row selectionApplicationRow
+	err := r.db.WithContext(ctx).
+		Table("selection_application").
+		Select(`
+			application_id,
+			request_id,
+			round_id,
+			term_id,
+			student_id,
+			course_id,
+			teaching_class_id,
+			CAST(credits AS CHAR) AS credits,
+			state,
+			failure_code,
+			failure_message,
+			applied_at,
+			completed_at,
+			source
+		`).
+		Where("application_id = ? AND student_id = ?", applicationID, studentID).
+		Take(&row).Error
+	if err == nil {
+		application, convertErr := row.toEntity()
+		if convertErr != nil {
+			return nil, convertErr
+		}
+		return &enrollment.SelectionApplicationRecord{
+			Application:     application,
+			BrokerConfirmed: true,
+			MySQLPersisted:  true,
+		}, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	return r.querySelectionApplicationFromRedis(ctx, applicationID, studentID)
+}
+
+func (r *Repository) ListStudentEnrollments(
+	ctx context.Context,
+	studentID uint64,
+	termID uint64,
+	limit int,
+	offset int,
+) (*enrollment.EnrollmentPage, error) {
+	if studentID == 0 || termID == 0 || limit <= 0 || limit > 100 || offset < 0 {
+		return nil, enrollment.ErrInvalidParams
+	}
+
+	query := r.db.WithContext(ctx).
+		Table("student_course_enrollment AS sce").
+		Joins("JOIN selection_application sa ON sa.application_id = sce.application_id").
+		Where("sce.student_id = ? AND sce.term_id = ?", studentID, termID)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	var rows []struct {
+		EnrollmentID    string
+		ApplicationID   string
+		RoundID         uint64
+		TermID          uint64
+		StudentID       uint64
+		CourseID        uint64
+		TeachingClassID uint64
+		Credits         string
+		State           string
+		EnrolledAt      timeValue
+		DroppedAt       *time.Time
+	}
+	if err := query.
+		Select(`
+			sce.enrollment_id,
+			sce.application_id,
+			sa.round_id,
+			sce.term_id,
+			sce.student_id,
+			sce.course_id,
+			sce.teaching_class_id,
+			CAST(sce.credits AS CHAR) AS credits,
+			sce.state,
+			sce.enrolled_at,
+			sce.dropped_at
+		`).
+		Order("sce.enrolled_at DESC, sce.id DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]*enrollment.StudentEnrollment, 0, len(rows))
+	for _, row := range rows {
+		credits, err := creditFromDecimal(row.Credits)
+		if err != nil {
+			return nil, fmt.Errorf("解析正式选课记录学分: %w", err)
+		}
+		item := &enrollment.StudentEnrollment{
+			EnrollmentID:    row.EnrollmentID,
+			ApplicationID:   row.ApplicationID,
+			RoundID:         row.RoundID,
+			TermID:          row.TermID,
+			StudentID:       row.StudentID,
+			CourseID:        row.CourseID,
+			TeachingClassID: row.TeachingClassID,
+			Credits:         credits,
+			State:           enrollment.EnrollmentState(row.State),
+			EnrolledAt:      row.EnrolledAt.Time,
+			DroppedAt:       row.DroppedAt,
+		}
+		if err := item.Validate(); err != nil {
+			return nil, fmt.Errorf("正式选课记录非法: %w", err)
+		}
+		items = append(items, item)
+	}
+	return &enrollment.EnrollmentPage{
+		Items:  items,
+		Limit:  limit,
+		Offset: offset,
+		Total:  total,
+	}, nil
+}
+
+func (row *selectionApplicationRow) toEntity() (*enrollment.SelectionApplication, error) {
+	if row == nil {
+		return nil, enrollment.ErrRecordNotFound
+	}
 	credits, err := creditFromDecimal(row.Credits)
 	if err != nil {
 		return nil, fmt.Errorf("解析已有选课申请学分: %w", err)
@@ -100,7 +255,7 @@ func (r *Repository) querySelectionByRequestFromMySQL(
 		}
 		failure = &reason
 	}
-	application := &enrollment.SelectionApplication{
+	return &enrollment.SelectionApplication{
 		ApplicationID:   row.ApplicationID,
 		RequestID:       row.RequestID,
 		RoundID:         row.RoundID,
@@ -114,16 +269,6 @@ func (r *Repository) querySelectionByRequestFromMySQL(
 		Failure:         failure,
 		AppliedAt:       row.AppliedAt.Time,
 		CompletedAt:     row.CompletedAt,
-	}
-	if application.ApplicationID == "" ||
-		!application.Source.Valid() ||
-		!application.State.Terminal() ||
-		application.CompletedAt == nil {
-		return nil, errors.New("MySQL选课申请状态非法")
-	}
-	return &enrollment.SelectionRequestRecord{
-		Application:    application,
-		MySQLPersisted: true,
 	}, nil
 }
 

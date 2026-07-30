@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"prizeforge/internal/domain/enrollment"
+	"prizeforge/pkg/cache"
 )
 
 const (
@@ -30,8 +31,9 @@ const reserveSelectionScript = `
 	local course_quota_key = KEYS[2]
 	local seat_key = KEYS[3]
 	local pending_key = KEYS[4]
-	local result_key = KEYS[5]
-	local course_guard_key = KEYS[6]
+		local result_key = KEYS[5]
+		local course_guard_key = KEYS[6]
+		local application_key = KEYS[7]
 
 	local request_id = ARGV[1]
 	local application_id = ARGV[2]
@@ -93,9 +95,10 @@ const reserveSelectionScript = `
 	redis.call('DECRBY', credit_key, credits)
 	redis.call('DECR', course_quota_key)
 	redis.call('DECR', seat_key)
-	redis.call('SET', course_guard_key, application_id)
-	redis.call('SET', pending_key, stored_application)
-	return {0, stored_application}
+		redis.call('SET', course_guard_key, application_id)
+		redis.call('SET', pending_key, stored_application)
+		redis.call('SET', application_key, stored_application, 'EX', ARGV[5])
+		return {0, stored_application}
 `
 
 const completeSelectionScript = `
@@ -151,9 +154,10 @@ const completeSelectionScript = `
 	application.state = result.state
 	application.failure = result.failure
 	application.completed_at = result.completed_at
-	redis.call('SET', KEYS[1], cjson.encode(application))
-	redis.call('SET', KEYS[2], stored_publication, 'EX', ARGV[4])
-	return {0, stored_publication}
+		redis.call('SET', KEYS[1], cjson.encode(application))
+		redis.call('SET', KEYS[2], stored_publication, 'EX', ARGV[4])
+		redis.call('SET', KEYS[8], stored_publication, 'EX', ARGV[4])
+		return {0, stored_publication}
 `
 
 const markSelectionResultPublishedScript = `
@@ -167,9 +171,11 @@ const markSelectionResultPublishedScript = `
 	   publication.stream_id ~= ARGV[2] then
 		return -2
 	end
-	publication.broker_confirmed = true
-	redis.call('SET', KEYS[1], cjson.encode(publication), 'KEEPTTL')
-	redis.call('XDEL', KEYS[2], ARGV[2])
+		publication.broker_confirmed = true
+		local stored = cjson.encode(publication)
+		redis.call('SET', KEYS[1], stored, 'KEEPTTL')
+		redis.call('SET', KEYS[3], stored, 'KEEPTTL')
+		redis.call('XDEL', KEYS[2], ARGV[2])
 	return 1
 `
 
@@ -200,6 +206,29 @@ const clearPersistedSelectionScript = `
 	end
 	redis.call('DEL', KEYS[1])
 	return 1
+`
+
+const releaseDroppedEnrollmentScript = `
+		if redis.call('EXISTS', KEYS[1]) == 1 then
+			return 0
+		end
+		if redis.call('EXISTS', KEYS[2]) == 0 or
+		   redis.call('EXISTS', KEYS[3]) == 0 or
+		   redis.call('EXISTS', KEYS[4]) == 0 then
+			return -1
+		end
+		local credits = tonumber(ARGV[1])
+		if not credits or credits <= 0 then
+			return -2
+		end
+		redis.call('INCRBY', KEYS[2], credits)
+		redis.call('INCR', KEYS[3])
+		redis.call('INCR', KEYS[4])
+		if redis.call('GET', KEYS[5]) == ARGV[2] then
+			redis.call('DEL', KEYS[5])
+		end
+		redis.call('SET', KEYS[1], '1', 'EX', ARGV[3])
+		return 1
 `
 
 type selectionApplicationPayload struct {
@@ -276,6 +305,7 @@ func (r *Repository) ReserveSelection(
 		pendingApplicationKey(application.RoundID, application.StudentID),
 		requestResultKey(application.RoundID, application.StudentID, application.RequestID),
 		selectedCourseGuardKey(application.TermID, application.StudentID, application.CourseID),
+		applicationLookupKey(application.ApplicationID),
 	}
 
 	for attempt := 0; attempt < 2; attempt++ {
@@ -287,6 +317,7 @@ func (r *Repository) ReserveSelection(
 			application.ApplicationID,
 			int64(application.Credits),
 			string(payload),
+			int64(selectionRequestResultTTL/time.Second),
 		)
 		if err != nil {
 			return nil, err
@@ -396,6 +427,48 @@ func (r *Repository) querySelectionByRequestFromRedis(
 	}
 }
 
+func (r *Repository) querySelectionApplicationFromRedis(
+	ctx context.Context,
+	applicationID string,
+	studentID uint64,
+) (*enrollment.SelectionApplicationRecord, error) {
+	var raw []byte
+	err := r.redis.GetSkippingLocalCache(ctx, applicationLookupKey(applicationID), &raw)
+	if err != nil {
+		if errors.Is(err, cache.ErrCacheMiss) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var publication enrollment.SelectionResultPublication
+	if err := json.Unmarshal(raw, &publication); err == nil && publication.Result != nil {
+		if publication.Result.ApplicationID != applicationID ||
+			publication.Result.StudentID != studentID {
+			return nil, nil
+		}
+		if err := publication.Validate(); err != nil {
+			return nil, err
+		}
+		return &enrollment.SelectionApplicationRecord{
+			Application:     applicationFromResult(publication.Result),
+			BrokerConfirmed: publication.BrokerConfirmed,
+			MySQLPersisted:  false,
+		}, nil
+	}
+
+	var payload selectionApplicationPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("解析Redis申请状态: %w", err)
+	}
+	if payload.ApplicationID != applicationID || payload.StudentID != studentID {
+		return nil, nil
+	}
+	return &enrollment.SelectionApplicationRecord{
+		Application: payload.toEntity(),
+	}, nil
+}
+
 func (r *Repository) initializeSelectionResources(
 	ctx context.Context,
 	application *enrollment.SelectionApplication,
@@ -469,6 +542,7 @@ func (r *Repository) CompleteSelection(
 			studentCourseQuotaKey(result.RoundID, result.StudentID),
 			teachingClassSeatKey(result.TeachingClassID),
 			selectedCourseGuardKey(result.TermID, result.StudentID, result.CourseID),
+			applicationLookupKey(result.ApplicationID),
 		},
 		result.ApplicationID,
 		result.RequestID,
@@ -557,6 +631,7 @@ func (r *Repository) MarkSelectionResultPublished(
 		[]string{
 			requestResultKey(result.RoundID, result.StudentID, result.RequestID),
 			selectionResultStreamKey,
+			applicationLookupKey(result.ApplicationID),
 		},
 		result.ApplicationID,
 		publication.StreamID,
@@ -595,6 +670,41 @@ func (r *Repository) clearPersistedSelection(
 	}
 	if status < -1 {
 		return fmt.Errorf("清理选课pending失败: status=%d", status)
+	}
+	return nil
+}
+
+func (r *Repository) ReleaseDroppedEnrollment(
+	ctx context.Context,
+	target *enrollment.StudentEnrollment,
+) error {
+	if target == nil || target.State != enrollment.EnrollmentStateDropped ||
+		target.DroppedAt == nil {
+		return enrollment.ErrInvalidParams
+	}
+	raw, err := r.redis.Eval(
+		ctx,
+		releaseDroppedEnrollmentScript,
+		[]string{
+			droppedEnrollmentKey(target.EnrollmentID),
+			studentCreditKey(target.RoundID, target.StudentID),
+			studentCourseQuotaKey(target.RoundID, target.StudentID),
+			teachingClassSeatKey(target.TeachingClassID),
+			selectedCourseGuardKey(target.TermID, target.StudentID, target.CourseID),
+		},
+		int64(target.Credits),
+		target.ApplicationID,
+		int64(30*24*time.Hour/time.Second),
+	)
+	if err != nil {
+		return err
+	}
+	status, ok := raw.(int64)
+	if !ok {
+		return fmt.Errorf("退课Redis投影响应非法: %#v", raw)
+	}
+	if status < 0 {
+		return fmt.Errorf("退课Redis投影失败: status=%d", status)
 	}
 	return nil
 }

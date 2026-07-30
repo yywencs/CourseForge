@@ -63,7 +63,7 @@ integration-up: ## 启动并等待临时 MySQL、Redis、RabbitMQ 集成测试�
 .PHONY: integration-db-check
 integration-db-check: ## 验证 CourseForge 集成测试表已经初始化
 	@courseforge_table_count="$$( $(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '"'"'courseforge'"'"'"' )"; \
-	test "$$courseforge_table_count" = "18"; \
+	test "$$courseforge_table_count" = "20"; \
 	printf '%s\n' "CourseForge integration MySQL schema is ready"
 
 .PHONY: integration-redis-check

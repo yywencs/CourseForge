@@ -376,7 +376,7 @@ CREATE TABLE `selection_application` (
   `failure_message` varchar(256) NOT NULL DEFAULT '' COMMENT '失败原因说明',
   `applied_at` datetime(3) NOT NULL COMMENT '申请时间',
   `completed_at` datetime(3) DEFAULT NULL COMMENT '业务完成时间',
-  `source` varchar(16) NOT NULL DEFAULT 'web' COMMENT 'web/mobile/admin',
+  `source` varchar(16) NOT NULL DEFAULT 'web' COMMENT 'web/mobile/admin/system',
   `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     ON UPDATE CURRENT_TIMESTAMP(3),
@@ -399,9 +399,45 @@ CREATE TABLE `selection_application` (
       )
     ),
   CONSTRAINT `chk_application_source`
-    CHECK (`source` IN ('web', 'mobile', 'admin'))
+    CHECK (`source` IN ('web', 'mobile', 'admin', 'system'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='选课申请单；相同request_id重复消费时幂等';
+
+CREATE TABLE `selection_waitlist` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '候补顺序号',
+  `waitlist_id` varchar(32) NOT NULL COMMENT '候补申请业务ID',
+  `request_id` varchar(64) NOT NULL COMMENT '客户端幂等请求ID',
+  `round_id` bigint unsigned NOT NULL COMMENT '选课轮次ID',
+  `term_id` bigint unsigned NOT NULL COMMENT '学期ID',
+  `student_id` bigint unsigned NOT NULL COMMENT '学生ID',
+  `course_id` bigint unsigned NOT NULL COMMENT '课程ID快照',
+  `teaching_class_id` bigint unsigned NOT NULL COMMENT '教学班ID',
+  `credits` decimal(5,1) unsigned NOT NULL COMMENT '课程学分快照',
+  `state` varchar(16) NOT NULL DEFAULT 'waiting'
+    COMMENT 'waiting/promoting/promoted/cancelled',
+  `failure_code` varchar(32) NOT NULL DEFAULT '',
+  `failure_message` varchar(256) NOT NULL DEFAULT '',
+  `active_key` varchar(96) DEFAULT NULL
+    COMMENT '有效候补唯一键；完成或取消后置NULL，允许重新候补',
+  `joined_at` datetime(3) NOT NULL,
+  `promoted_at` datetime(3) DEFAULT NULL,
+  `cancelled_at` datetime(3) DEFAULT NULL,
+  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+    ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_waitlist_id` (`waitlist_id`),
+  UNIQUE KEY `uq_waitlist_request` (`round_id`, `student_id`, `request_id`),
+  UNIQUE KEY `uq_waitlist_active` (`active_key`),
+  KEY `idx_waitlist_promote`
+    (`state`, `teaching_class_id`, `id`),
+  KEY `idx_waitlist_student_term`
+    (`student_id`, `term_id`, `state`, `id`),
+  CONSTRAINT `chk_waitlist_credits` CHECK (`credits` > 0),
+  CONSTRAINT `chk_waitlist_state`
+    CHECK (`state` IN ('waiting', 'promoting', 'promoted', 'cancelled'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='教学班候补队列；自增主键同时作为全局稳定排队顺序';
 
 CREATE TABLE `student_course_enrollment` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '内部主键',
@@ -414,6 +450,8 @@ CREATE TABLE `student_course_enrollment` (
   `credits` decimal(5,1) unsigned NOT NULL COMMENT '选课时学分快照',
   `state` varchar(16) NOT NULL DEFAULT 'enrolled'
     COMMENT 'enrolled/dropped/completed',
+  `active_key` varchar(96) DEFAULT NULL
+    COMMENT '有效修读唯一键；退课后置NULL，允许重新选课',
   `enrolled_at` datetime(3) NOT NULL COMMENT '选课成功时间',
   `dropped_at` datetime(3) DEFAULT NULL COMMENT '退课时间',
   `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -422,7 +460,8 @@ CREATE TABLE `student_course_enrollment` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_enrollment_id` (`enrollment_id`),
   UNIQUE KEY `uq_enrollment_application` (`application_id`),
-  UNIQUE KEY `uq_term_student_course` (`term_id`, `student_id`, `course_id`),
+  UNIQUE KEY `uq_enrollment_active` (`active_key`),
+  KEY `idx_enrollment_term_student_course` (`term_id`, `student_id`, `course_id`),
   KEY `idx_enrollment_student_term_state`
     (`student_id`, `term_id`, `state`, `teaching_class_id`),
   KEY `idx_enrollment_class_state`
@@ -437,7 +476,7 @@ CREATE TABLE `student_course_enrollment` (
       OR (`state` <> 'dropped')
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-  COMMENT='学生正式选课记录；同一学期同一课程唯一';
+  COMMENT='学生正式选课记录；同一学期同一课程仅允许一条有效记录';
 
 CREATE TABLE `selection_event` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -461,6 +500,30 @@ CREATE TABLE `selection_event` (
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='选课事件审计，同时作为RabbitMQ消费幂等凭据';
+
+CREATE TABLE `enrollment_projection_repair` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `repair_id` varchar(64) NOT NULL COMMENT '修复任务业务ID',
+  `enrollment_id` varchar(32) NOT NULL COMMENT '退课记录ID',
+  `operation` varchar(32) NOT NULL COMMENT 'release_dropped',
+  `state` varchar(16) NOT NULL DEFAULT 'pending' COMMENT 'pending/completed',
+  `retry_count` int unsigned NOT NULL DEFAULT 0,
+  `next_retry_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `last_error` varchar(512) NOT NULL DEFAULT '',
+  `completed_at` datetime(3) DEFAULT NULL,
+  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+    ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_projection_repair_id` (`repair_id`),
+  UNIQUE KEY `uq_projection_repair_operation` (`enrollment_id`, `operation`),
+  KEY `idx_projection_repair_dispatch` (`state`, `next_retry_at`, `id`),
+  CONSTRAINT `chk_projection_repair_operation`
+    CHECK (`operation` IN ('release_dropped')),
+  CONSTRAINT `chk_projection_repair_state`
+    CHECK (`state` IN ('pending', 'completed'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='MySQL到Redis选课投影的可靠修复任务';
 
 CREATE TABLE `outbox_event` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -489,4 +552,3 @@ CREATE TABLE `outbox_event` (
     CHECK (`state` IN ('pending', 'publishing', 'published', 'failed'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='事务Outbox，用于选课落库后的后续事件';
-

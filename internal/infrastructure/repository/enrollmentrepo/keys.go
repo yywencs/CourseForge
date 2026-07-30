@@ -24,6 +24,14 @@ func requestResultKey(roundID, studentID uint64, requestID string) string {
 	return fmt.Sprintf("courseforge:selection:result:%d:%d:%s", roundID, studentID, requestID)
 }
 
+func applicationLookupKey(applicationID string) string {
+	return fmt.Sprintf("courseforge:selection:application:%s", applicationID)
+}
+
 func selectedCourseGuardKey(termID, studentID, courseID uint64) string {
 	return fmt.Sprintf("courseforge:selection:course:%d:%d:%d", termID, studentID, courseID)
+}
+
+func droppedEnrollmentKey(enrollmentID string) string {
+	return fmt.Sprintf("courseforge:selection:dropped:%s", enrollmentID)
 }

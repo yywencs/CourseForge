@@ -61,6 +61,9 @@ web/.cache/
 web/*.local
 web/.env.local
 web/.env.*.local
+web/test-results/
+web/playwright-report/
+web/blob-report/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

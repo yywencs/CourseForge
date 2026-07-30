@@ -1,6 +1,7 @@
-import axios from 'axios'
-import type { AxiosResponse } from 'axios'
+import axios, { AxiosError } from 'axios'
+import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 
+import { readStoredAccessToken } from '@/stores/session'
 import { ApiError, type ApiEnvelope } from '@/types/api'
 
 export const http = axios.create({
@@ -11,6 +12,14 @@ export const http = axios.create({
   },
 })
 
+http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  const accessToken = readStoredAccessToken()
+  if (accessToken) {
+    config.headers.Authorization = `Bearer ${accessToken}`
+  }
+  return config
+})
+
 http.interceptors.response.use(
   (response: AxiosResponse<ApiEnvelope<unknown>>) => {
     const body = response.data
@@ -19,7 +28,23 @@ http.interceptors.response.use(
     }
     return response
   },
-  (error: unknown) => Promise.reject(error),
+  (error: unknown) => {
+    if (error instanceof ApiError) {
+      return Promise.reject(error)
+    }
+    if (error instanceof AxiosError) {
+      const message =
+        error.code === 'ECONNABORTED'
+          ? '请求超时，请检查服务状态后重试'
+          : error.response
+            ? `服务返回 ${error.response.status}`
+            : '无法连接后端服务'
+      return Promise.reject(
+        new ApiError(error.response?.status ?? 0, message, true),
+      )
+    }
+    return Promise.reject(new ApiError(0, '发生未知请求错误', true))
+  },
 )
 
 export async function unwrap<T>(

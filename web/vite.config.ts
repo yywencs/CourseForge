@@ -9,6 +9,8 @@ import { defineConfig, loadEnv } from 'vite'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const backendTarget = env.VITE_DEV_PROXY_TARGET || 'http://127.0.0.1:8080'
+  const adminBackendTarget =
+    env.VITE_DEV_ADMIN_PROXY_TARGET || 'http://127.0.0.1:8081'
 
   return {
     plugins: [
@@ -35,6 +37,15 @@ export default defineConfig(({ mode }) => {
         '/health': {
           target: backendTarget,
           changeOrigin: true,
+        },
+        '/ready': {
+          target: backendTarget,
+          changeOrigin: true,
+        },
+        '/admin-api': {
+          target: adminBackendTarget,
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/admin-api/, ''),
         },
       },
     },

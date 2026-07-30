@@ -135,7 +135,6 @@ func persistSelectedResources(tx *gorm.DB, result *enrollment.SelectionResult) e
 		Updates(map[string]interface{}{
 			"selected_credits":      gorm.Expr("selected_credits + ?", credit),
 			"selected_course_count": gorm.Expr("selected_course_count + 1"),
-			"version":               gorm.Expr("version + 1"),
 			"update_time":           time.Now(),
 		})
 	if quotaUpdate.Error != nil {
@@ -154,7 +153,6 @@ func persistSelectedResources(tx *gorm.DB, result *enrollment.SelectionResult) e
 		).
 		Updates(map[string]interface{}{
 			"selected_count": gorm.Expr("selected_count + 1"),
-			"version":        gorm.Expr("version + 1"),
 			"update_time":    time.Now(),
 		})
 	if classUpdate.Error != nil {

@@ -20,136 +20,41 @@ CREATE DATABASE IF NOT EXISTS `courseforge`
 USE `courseforge`;
 
 -- --------------------------------------------------------------------------
--- Organization and identity
+-- Student identity
 -- --------------------------------------------------------------------------
-
-CREATE TABLE `department` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '内部主键',
-  `department_code` varchar(32) NOT NULL COMMENT '院系编码',
-  `department_name` varchar(128) NOT NULL COMMENT '院系名称',
-  `state` varchar(16) NOT NULL DEFAULT 'active' COMMENT 'active/inactive',
-  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
-    ON UPDATE CURRENT_TIMESTAMP(3),
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_department_code` (`department_code`),
-  KEY `idx_department_state` (`state`),
-  CONSTRAINT `chk_department_state`
-    CHECK (`state` IN ('active', 'inactive'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-  COMMENT='院系';
-
-CREATE TABLE `major` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '内部主键',
-  `department_id` bigint unsigned NOT NULL COMMENT '所属院系ID',
-  `major_code` varchar(32) NOT NULL COMMENT '专业编码',
-  `major_name` varchar(128) NOT NULL COMMENT '专业名称',
-  `degree_type` varchar(16) NOT NULL DEFAULT 'bachelor'
-    COMMENT 'bachelor/master/doctor',
-  `state` varchar(16) NOT NULL DEFAULT 'active' COMMENT 'active/inactive',
-  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
-    ON UPDATE CURRENT_TIMESTAMP(3),
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_major_code` (`major_code`),
-  KEY `idx_major_department_state` (`department_id`, `state`),
-  CONSTRAINT `chk_major_degree_type`
-    CHECK (`degree_type` IN ('bachelor', 'master', 'doctor')),
-  CONSTRAINT `chk_major_state`
-    CHECK (`state` IN ('active', 'inactive'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-  COMMENT='专业';
 
 CREATE TABLE `student` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '内部学生ID',
-  `student_no` varchar(32) NOT NULL COMMENT '学号，对外稳定标识',
-  `student_name` varchar(64) NOT NULL COMMENT '姓名',
-  `major_id` bigint unsigned NOT NULL COMMENT '专业ID',
+  `major_id` bigint unsigned NOT NULL COMMENT '专业标识',
   `grade_year` smallint unsigned NOT NULL COMMENT '入学年份',
-  `degree_type` varchar(16) NOT NULL DEFAULT 'bachelor'
-    COMMENT 'bachelor/master/doctor',
   `state` varchar(16) NOT NULL DEFAULT 'active'
     COMMENT 'active/suspended/graduated/withdrawn',
   `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_student_no` (`student_no`),
   KEY `idx_student_major_grade_state` (`major_id`, `grade_year`, `state`),
-  CONSTRAINT `chk_student_degree_type`
-    CHECK (`degree_type` IN ('bachelor', 'master', 'doctor')),
   CONSTRAINT `chk_student_state`
     CHECK (`state` IN ('active', 'suspended', 'graduated', 'withdrawn'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='学生';
 
-CREATE TABLE `teacher` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '内部教师ID',
-  `teacher_no` varchar(32) NOT NULL COMMENT '工号，对外稳定标识',
-  `teacher_name` varchar(64) NOT NULL COMMENT '姓名',
-  `department_id` bigint unsigned NOT NULL COMMENT '所属院系ID',
-  `title` varchar(32) NOT NULL DEFAULT '' COMMENT '职称',
-  `state` varchar(16) NOT NULL DEFAULT 'active' COMMENT 'active/inactive',
-  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
-    ON UPDATE CURRENT_TIMESTAMP(3),
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_teacher_no` (`teacher_no`),
-  KEY `idx_teacher_department_state` (`department_id`, `state`),
-  CONSTRAINT `chk_teacher_state`
-    CHECK (`state` IN ('active', 'inactive'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-  COMMENT='教师';
-
 -- --------------------------------------------------------------------------
 -- Academic catalog
 -- --------------------------------------------------------------------------
-
-CREATE TABLE `academic_term` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '学期ID',
-  `term_code` varchar(32) NOT NULL COMMENT '学期编码，例如 2026-SPRING',
-  `term_name` varchar(64) NOT NULL COMMENT '学期名称',
-  `start_date` date NOT NULL COMMENT '教学开始日期',
-  `end_date` date NOT NULL COMMENT '教学结束日期',
-  `state` varchar(16) NOT NULL DEFAULT 'planned'
-    COMMENT 'planned/active/closed',
-  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
-    ON UPDATE CURRENT_TIMESTAMP(3),
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_term_code` (`term_code`),
-  KEY `idx_term_state_dates` (`state`, `start_date`, `end_date`),
-  CONSTRAINT `chk_term_dates`
-    CHECK (`end_date` >= `start_date`),
-  CONSTRAINT `chk_term_state`
-    CHECK (`state` IN ('planned', 'active', 'closed'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-  COMMENT='学期';
 
 CREATE TABLE `course` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '课程ID',
   `course_code` varchar(32) NOT NULL COMMENT '课程编码',
   `course_name` varchar(128) NOT NULL COMMENT '课程名称',
-  `department_id` bigint unsigned NOT NULL COMMENT '开课院系ID',
   `credits` decimal(5,1) unsigned NOT NULL COMMENT '课程学分',
-  `total_hours` smallint unsigned NOT NULL DEFAULT 0 COMMENT '总学时',
-  `course_type` varchar(16) NOT NULL DEFAULT 'elective'
-    COMMENT 'required/elective/public',
-  `description` varchar(1024) NOT NULL DEFAULT '' COMMENT '课程简介',
-  `state` varchar(16) NOT NULL DEFAULT 'active' COMMENT 'active/inactive',
   `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_course_code` (`course_code`),
-  KEY `idx_course_department_type_state`
-    (`department_id`, `course_type`, `state`),
   CONSTRAINT `chk_course_credits`
-    CHECK (`credits` > 0),
-  CONSTRAINT `chk_course_type`
-    CHECK (`course_type` IN ('required', 'elective', 'public')),
-  CONSTRAINT `chk_course_state`
-    CHECK (`state` IN ('active', 'inactive'))
+    CHECK (`credits` > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='课程目录';
 
@@ -204,16 +109,12 @@ CREATE TABLE `teaching_class` (
   `class_code` varchar(32) NOT NULL COMMENT '教学班编码',
   `term_id` bigint unsigned NOT NULL COMMENT '学期ID',
   `course_id` bigint unsigned NOT NULL COMMENT '课程ID',
-  `teacher_id` bigint unsigned NOT NULL COMMENT '主讲教师ID',
-  `campus` varchar(64) NOT NULL DEFAULT '' COMMENT '校区',
-  `classroom` varchar(64) NOT NULL DEFAULT '' COMMENT '教室',
   `capacity` int unsigned NOT NULL COMMENT '教学班容量',
   `selected_count` int unsigned NOT NULL DEFAULT 0 COMMENT 'MySQL已确认选课人数',
   `minimum_grade_year` smallint unsigned DEFAULT NULL COMMENT '最小允许入学年份',
   `maximum_grade_year` smallint unsigned DEFAULT NULL COMMENT '最大允许入学年份',
   `state` varchar(16) NOT NULL DEFAULT 'planned'
     COMMENT 'planned/open/closed/cancelled',
-  `version` bigint unsigned NOT NULL DEFAULT 0 COMMENT '乐观锁版本',
   `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     ON UPDATE CURRENT_TIMESTAMP(3),
@@ -221,7 +122,6 @@ CREATE TABLE `teaching_class` (
   UNIQUE KEY `uq_term_class_code` (`term_id`, `class_code`),
   KEY `idx_class_term_state` (`term_id`, `state`),
   KEY `idx_class_term_course_state` (`term_id`, `course_id`, `state`),
-  KEY `idx_class_teacher_term` (`teacher_id`, `term_id`),
   CONSTRAINT `chk_class_capacity`
     CHECK (`capacity` > 0 AND `selected_count` <= `capacity`),
   CONSTRAINT `chk_class_grade_range`
@@ -243,7 +143,6 @@ CREATE TABLE `teaching_class_schedule` (
   `end_week` tinyint unsigned NOT NULL COMMENT '结束教学周',
   `start_section` tinyint unsigned NOT NULL COMMENT '起始节次',
   `end_section` tinyint unsigned NOT NULL COMMENT '结束节次',
-  `classroom` varchar(64) NOT NULL DEFAULT '' COMMENT '该时间段教室',
   `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     ON UPDATE CURRENT_TIMESTAMP(3),
@@ -288,8 +187,6 @@ CREATE TABLE `selection_round` (
   `round_name` varchar(64) NOT NULL COMMENT '轮次名称',
   `start_time` datetime(3) NOT NULL COMMENT '开放时间',
   `end_time` datetime(3) NOT NULL COMMENT '结束时间',
-  `default_credit_limit` decimal(5,1) unsigned NOT NULL COMMENT '默认学分上限',
-  `default_course_limit` smallint unsigned NOT NULL COMMENT '默认课程门数上限',
   `state` varchar(16) NOT NULL DEFAULT 'planned'
     COMMENT 'planned/open/closed',
   `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -300,8 +197,6 @@ CREATE TABLE `selection_round` (
   KEY `idx_round_state_time` (`state`, `start_time`, `end_time`),
   CONSTRAINT `chk_round_time`
     CHECK (`end_time` > `start_time`),
-  CONSTRAINT `chk_round_limits`
-    CHECK (`default_credit_limit` > 0 AND `default_course_limit` > 0),
   CONSTRAINT `chk_round_state`
     CHECK (`state` IN ('planned', 'open', 'closed'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
@@ -335,7 +230,6 @@ CREATE TABLE `student_selection_quota` (
   `course_limit` smallint unsigned NOT NULL COMMENT '课程门数上限',
   `selected_course_count` smallint unsigned NOT NULL DEFAULT 0
     COMMENT 'MySQL已确认课程门数',
-  `version` bigint unsigned NOT NULL DEFAULT 0 COMMENT '乐观锁版本',
   `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     ON UPDATE CURRENT_TIMESTAMP(3),

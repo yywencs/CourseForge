@@ -118,7 +118,6 @@ func (r *Repository) DropEnrollment(
 			Updates(map[string]interface{}{
 				"selected_credits":      gorm.Expr("selected_credits - ?", credit),
 				"selected_course_count": gorm.Expr("selected_course_count - 1"),
-				"version":               gorm.Expr("version + 1"),
 				"update_time":           now,
 			})
 		if quota.Error != nil {
@@ -131,7 +130,6 @@ func (r *Repository) DropEnrollment(
 			Where("id = ? AND selected_count > 0", target.TeachingClassID).
 			Updates(map[string]interface{}{
 				"selected_count": gorm.Expr("selected_count - 1"),
-				"version":        gorm.Expr("version + 1"),
 				"update_time":    now,
 			})
 		if class.Error != nil {

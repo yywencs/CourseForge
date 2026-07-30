@@ -22,10 +22,8 @@ import (
 // 原子预占 → 完成结果/Stream → RabbitMQ Confirm → MySQL幂等落库。
 func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 	const (
-		departmentID  = uint64(990001)
 		majorID       = uint64(990001)
 		studentID     = uint64(990001)
-		teacherID     = uint64(990001)
 		termID        = uint64(990001)
 		courseID      = uint64(990001)
 		classID       = uint64(990001)
@@ -38,10 +36,8 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 	seedEnrollmentIntegrationData(
 		t,
 		now,
-		departmentID,
 		majorID,
 		studentID,
-		teacherID,
 		termID,
 		courseID,
 		classID,
@@ -281,24 +277,20 @@ func TestEnrollmentRepositoryConcurrentReservationDoesNotOversell(t *testing.T) 
 		studentCount = 100
 		capacity     = 10
 
-		departmentID = uint64(991001)
-		majorID      = uint64(991001)
-		studentID    = uint64(991100)
-		teacherID    = uint64(991001)
-		termID       = uint64(991001)
-		courseID     = uint64(991001)
-		classID      = uint64(991001)
-		roundID      = uint64(991001)
+		majorID   = uint64(991001)
+		studentID = uint64(991100)
+		termID    = uint64(991001)
+		courseID  = uint64(991001)
+		classID   = uint64(991001)
+		roundID   = uint64(991001)
 	)
 
 	now := time.Now().Truncate(time.Millisecond)
 	seedEnrollmentIntegrationData(
 		t,
 		now,
-		departmentID,
 		majorID,
 		studentID,
-		teacherID,
 		termID,
 		courseID,
 		classID,
@@ -325,11 +317,9 @@ func TestEnrollmentRepositoryConcurrentReservationDoesNotOversell(t *testing.T) 
 	for index := 1; index < studentCount; index++ {
 		currentStudentID := studentID + uint64(index)
 		if err := integrationCourseforgeDB.Table("student").Create(map[string]interface{}{
-			"id":           currentStudentID,
-			"student_no":   fmt.Sprintf("IT-CS-%03d", index),
-			"student_name": fmt.Sprintf("并发测试学生%03d", index),
-			"major_id":     majorID,
-			"grade_year":   2026,
+			"id":         currentStudentID,
+			"major_id":   majorID,
+			"grade_year": 2026,
 		}).Error; err != nil {
 			t.Fatalf("seed concurrent student %d: %v", currentStudentID, err)
 		}
@@ -460,10 +450,8 @@ func TestEnrollmentRepositoryConcurrentReservationDoesNotOversell(t *testing.T) 
 // 退课事务写入修复任务，Redis Lua 幂等返还额度与名额，任务最终标记完成。
 func TestEnrollmentRepositoryDropAndProjectionRepair(t *testing.T) {
 	const (
-		departmentID  = uint64(992001)
 		majorID       = uint64(992001)
 		studentID     = uint64(992001)
-		teacherID     = uint64(992001)
 		termID        = uint64(992001)
 		courseID      = uint64(992001)
 		classID       = uint64(992001)
@@ -473,7 +461,7 @@ func TestEnrollmentRepositoryDropAndProjectionRepair(t *testing.T) {
 	)
 	now := time.Now().Truncate(time.Millisecond)
 	seedEnrollmentIntegrationData(
-		t, now, departmentID, majorID, studentID, teacherID, termID, courseID, classID, roundID,
+		t, now, majorID, studentID, termID, courseID, classID, roundID,
 	)
 	db := integrationCourseforgeDB
 	if err := db.Table("student_selection_quota").
@@ -569,18 +557,16 @@ func TestEnrollmentRepositoryDropAndProjectionRepair(t *testing.T) {
 // TestEnrollmentRepositoryWaitlistLifecycle 验证候补加入、查询、原子抢占和晋级状态迁移。
 func TestEnrollmentRepositoryWaitlistLifecycle(t *testing.T) {
 	const (
-		departmentID = uint64(993001)
-		majorID      = uint64(993001)
-		studentID    = uint64(993001)
-		teacherID    = uint64(993001)
-		termID       = uint64(993001)
-		courseID     = uint64(993001)
-		classID      = uint64(993001)
-		roundID      = uint64(993001)
+		majorID   = uint64(993001)
+		studentID = uint64(993001)
+		termID    = uint64(993001)
+		courseID  = uint64(993001)
+		classID   = uint64(993001)
+		roundID   = uint64(993001)
 	)
 	now := time.Now().Truncate(time.Millisecond)
 	seedEnrollmentIntegrationData(
-		t, now, departmentID, majorID, studentID, teacherID, termID, courseID, classID, roundID,
+		t, now, majorID, studentID, termID, courseID, classID, roundID,
 	)
 	if err := integrationCourseforgeDB.Table("teaching_class").
 		Where("id = ?", classID).Update("selected_count", 2).Error; err != nil {
@@ -635,10 +621,8 @@ func TestEnrollmentRepositoryWaitlistLifecycle(t *testing.T) {
 // 学生状态、年级、专业、先修成绩和课表，并交给纯领域策略判断。
 func TestEnrollmentRepositoryLoadsEligibilitySnapshot(t *testing.T) {
 	const (
-		departmentID         = uint64(994001)
 		majorID              = uint64(994001)
 		studentID            = uint64(994001)
-		teacherID            = uint64(994001)
 		termID               = uint64(994001)
 		courseID             = uint64(994001)
 		prerequisiteCourseID = uint64(994002)
@@ -647,7 +631,7 @@ func TestEnrollmentRepositoryLoadsEligibilitySnapshot(t *testing.T) {
 	)
 	now := time.Now().Truncate(time.Millisecond)
 	seedEnrollmentIntegrationData(
-		t, now, departmentID, majorID, studentID, teacherID, termID, courseID, classID, roundID,
+		t, now, majorID, studentID, termID, courseID, classID, roundID,
 	)
 	db := integrationCourseforgeDB
 	t.Cleanup(func() {
@@ -659,8 +643,7 @@ func TestEnrollmentRepositoryLoadsEligibilitySnapshot(t *testing.T) {
 	})
 	if err := db.Table("course").Create(map[string]interface{}{
 		"id": prerequisiteCourseID, "course_code": "IT-C-PRE",
-		"course_name": "先修课程", "department_id": departmentID,
-		"credits": "2.0", "course_type": "required",
+		"course_name": "先修课程", "credits": "2.0",
 	}).Error; err != nil {
 		t.Fatalf("seed prerequisite course: %v", err)
 	}
@@ -746,7 +729,7 @@ func waitForSelectionResultPersisted(
 func seedEnrollmentIntegrationData(
 	t *testing.T,
 	now time.Time,
-	departmentID, majorID, studentID, teacherID, termID, courseID, classID, roundID uint64,
+	majorID, studentID, termID, courseID, classID, roundID uint64,
 ) {
 	t.Helper()
 	db := integrationCourseforgeDB
@@ -754,40 +737,22 @@ func seedEnrollmentIntegrationData(
 		table string
 		value map[string]interface{}
 	}{
-		{"department", map[string]interface{}{
-			"id": departmentID, "department_code": "IT-D", "department_name": "集成测试学院",
-		}},
-		{"major", map[string]interface{}{
-			"id": majorID, "department_id": departmentID, "major_code": "IT-M",
-			"major_name": "集成测试专业",
-		}},
 		{"student", map[string]interface{}{
-			"id": studentID, "student_no": "IT-S-001", "student_name": "测试学生",
-			"major_id": majorID, "grade_year": 2026,
-		}},
-		{"teacher", map[string]interface{}{
-			"id": teacherID, "teacher_no": "IT-T-001", "teacher_name": "测试教师",
-			"department_id": departmentID,
-		}},
-		{"academic_term", map[string]interface{}{
-			"id": termID, "term_code": "IT-2026", "term_name": "集成测试学期",
-			"start_date": now.AddDate(0, -1, 0), "end_date": now.AddDate(0, 1, 0),
-			"state": "active",
+			"id": studentID, "major_id": majorID, "grade_year": 2026,
 		}},
 		{"course", map[string]interface{}{
 			"id": courseID, "course_code": "IT-C-001", "course_name": "分布式系统",
-			"department_id": departmentID, "credits": "3.5", "course_type": "elective",
+			"credits": "3.5",
 		}},
 		{"teaching_class", map[string]interface{}{
 			"id": classID, "class_code": "IT-CL-001", "term_id": termID,
-			"course_id": courseID, "teacher_id": teacherID, "capacity": 2,
+			"course_id": courseID, "capacity": 2,
 			"selected_count": 0, "state": "open",
 		}},
 		{"selection_round", map[string]interface{}{
 			"id": roundID, "term_id": termID, "round_code": "IT-R-001",
 			"round_name": "集成测试轮次", "start_time": now.Add(-time.Hour),
-			"end_time": now.Add(time.Hour), "default_credit_limit": "20.0",
-			"default_course_limit": 6, "state": "open",
+			"end_time": now.Add(time.Hour), "state": "open",
 		}},
 		{"selection_round_class", map[string]interface{}{
 			"round_id": roundID, "teaching_class_id": classID, "state": "open",
@@ -823,11 +788,7 @@ func seedEnrollmentIntegrationData(
 		db.Exec("DELETE FROM selection_round WHERE id = ?", roundID)
 		db.Exec("DELETE FROM teaching_class WHERE id = ?", classID)
 		db.Exec("DELETE FROM course WHERE id = ?", courseID)
-		db.Exec("DELETE FROM academic_term WHERE id = ?", termID)
-		db.Exec("DELETE FROM teacher WHERE id = ?", teacherID)
 		db.Exec("DELETE FROM student WHERE id = ?", studentID)
-		db.Exec("DELETE FROM major WHERE id = ?", majorID)
-		db.Exec("DELETE FROM department WHERE id = ?", departmentID)
 	})
 }
 

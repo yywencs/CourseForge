@@ -23,9 +23,7 @@ const (
 	defaultBenchmarkClassID        uint64 = 9_000_000_000_301
 	defaultBenchmarkStudentIDStart uint64 = 9_100_000_000_000
 
-	benchmarkDepartmentID  uint64 = 9_000_000_000_001
 	benchmarkMajorID       uint64 = 9_000_000_000_002
-	benchmarkTeacherID     uint64 = 9_000_000_000_003
 	benchmarkTermID        uint64 = 9_000_000_000_004
 	benchmarkCourseID      uint64 = 9_000_000_000_005
 	benchmarkCourseCredits        = 3.0
@@ -218,9 +216,10 @@ func ensureBenchmarkStudentRangeSafe(
 		`SELECT COUNT(*)
 		   FROM student
 		  WHERE id BETWEEN ? AND ?
-		    AND student_no NOT LIKE 'BENCH-%'`,
+		    AND major_id <> ?`,
 		start,
 		end,
+		benchmarkMajorID,
 	).Scan(&count)
 	if err != nil {
 		return fmt.Errorf("检查压测学生ID范围: %w", err)
@@ -248,6 +247,10 @@ func prepareCourseSelectionData(
 		  JOIN selection_application sa ON sa.application_id = oe.aggregate_id
 		 WHERE oe.aggregate_type = 'selection_application'
 		   AND sa.student_id BETWEEN ? AND ?`,
+		`DELETE epr FROM enrollment_projection_repair epr
+		  JOIN student_course_enrollment sce ON sce.enrollment_id = epr.enrollment_id
+		 WHERE sce.student_id BETWEEN ? AND ?`,
+		`DELETE FROM selection_waitlist WHERE student_id BETWEEN ? AND ?`,
 		`DELETE FROM selection_event WHERE student_id BETWEEN ? AND ?`,
 		`DELETE FROM student_course_enrollment WHERE student_id BETWEEN ? AND ?`,
 		`DELETE FROM selection_application WHERE student_id BETWEEN ? AND ?`,
@@ -284,78 +287,41 @@ func upsertBenchmarkCatalog(ctx context.Context, tx *sql.Tx, config prepareConfi
 		args  []any
 	}{
 		{
-			`INSERT INTO department
-				(id, department_code, department_name, state)
-			 VALUES (?, 'BENCH-DEPT', 'Benchmark Department', 'active')
-			 ON DUPLICATE KEY UPDATE department_name = VALUES(department_name), state = 'active'`,
-			[]any{benchmarkDepartmentID},
-		},
-		{
-			`INSERT INTO major
-				(id, department_id, major_code, major_name, degree_type, state)
-			 VALUES (?, ?, 'BENCH-MAJOR', 'Benchmark Major', 'bachelor', 'active')
-			 ON DUPLICATE KEY UPDATE department_id = VALUES(department_id), state = 'active'`,
-			[]any{benchmarkMajorID, benchmarkDepartmentID},
-		},
-		{
-			`INSERT INTO teacher
-				(id, teacher_no, teacher_name, department_id, title, state)
-			 VALUES (?, 'BENCH-TEACHER', 'Benchmark Teacher', ?, 'Professor', 'active')
-			 ON DUPLICATE KEY UPDATE department_id = VALUES(department_id), state = 'active'`,
-			[]any{benchmarkTeacherID, benchmarkDepartmentID},
-		},
-		{
-			`INSERT INTO academic_term
-				(id, term_code, term_name, start_date, end_date, state)
-			 VALUES (?, 'BENCH-TERM', 'Benchmark Term', CURDATE(), DATE_ADD(CURDATE(), INTERVAL 180 DAY), 'active')
-			 ON DUPLICATE KEY UPDATE
-				start_date = VALUES(start_date), end_date = VALUES(end_date), state = 'active'`,
-			[]any{benchmarkTermID},
-		},
-		{
 			`INSERT INTO course
-				(id, course_code, course_name, department_id, credits, total_hours, course_type, description, state)
-			 VALUES (?, 'BENCH-COURSE', 'Benchmark Course', ?, ?, 48, 'elective', 'Course selection benchmark fixture', 'active')
+				(id, course_code, course_name, credits)
+			 VALUES (?, 'BENCH-COURSE', 'Benchmark Course', ?)
 			 ON DUPLICATE KEY UPDATE
-				department_id = VALUES(department_id), credits = VALUES(credits), state = 'active'`,
-			[]any{benchmarkCourseID, benchmarkDepartmentID, benchmarkCourseCredits},
+				course_name = VALUES(course_name), credits = VALUES(credits)`,
+			[]any{benchmarkCourseID, benchmarkCourseCredits},
 		},
 		{
 			`INSERT INTO teaching_class
-				(id, class_code, term_id, course_id, teacher_id, campus, classroom,
-				 capacity, selected_count, state, version)
-			 VALUES (?, ?, ?, ?, ?, 'benchmark', 'benchmark', ?, 0, 'open', 0)
+				(id, class_code, term_id, course_id, capacity, selected_count, state)
+			 VALUES (?, ?, ?, ?, ?, 0, 'open')
 			 ON DUPLICATE KEY UPDATE
 				term_id = VALUES(term_id), course_id = VALUES(course_id),
-				teacher_id = VALUES(teacher_id), capacity = VALUES(capacity),
-				selected_count = 0, state = 'open', version = version + 1`,
+				capacity = VALUES(capacity), selected_count = 0, state = 'open'`,
 			[]any{
 				config.TeachingClassID,
 				fmt.Sprintf("BENCH-%d", config.TeachingClassID),
 				benchmarkTermID,
 				benchmarkCourseID,
-				benchmarkTeacherID,
 				config.Capacity,
 			},
 		},
 		{
 			`INSERT INTO selection_round
-				(id, term_id, round_code, round_name, start_time, end_time,
-				 default_credit_limit, default_course_limit, state)
+				(id, term_id, round_code, round_name, start_time, end_time, state)
 			 VALUES (?, ?, ?, 'Benchmark Round',
 				 DATE_SUB(NOW(3), INTERVAL 1 DAY), DATE_ADD(NOW(3), INTERVAL 7 DAY),
-				 ?, ?, 'open')
+				 'open')
 			 ON DUPLICATE KEY UPDATE
 				term_id = VALUES(term_id), start_time = VALUES(start_time),
-				end_time = VALUES(end_time),
-				default_credit_limit = VALUES(default_credit_limit),
-				default_course_limit = VALUES(default_course_limit), state = 'open'`,
+				end_time = VALUES(end_time), state = 'open'`,
 			[]any{
 				config.RoundID,
 				benchmarkTermID,
 				fmt.Sprintf("BENCH-%d", config.RoundID),
-				decimalOnePlace(config.CreditLimit),
-				config.CourseLimit,
 			},
 		},
 		{
@@ -379,22 +345,18 @@ func upsertBenchmarkStudents(ctx context.Context, tx *sql.Tx, config prepareConf
 		end := min(start+config.BatchSize, config.Users)
 		count := end - start
 		query := `INSERT INTO student
-			(id, student_no, student_name, major_id, grade_year, degree_type, state)
-			VALUES ` + repeatedValues(count, "(?, ?, ?, ?, ?, 'bachelor', 'active')") + `
+			(id, major_id, grade_year, state)
+			VALUES ` + repeatedValues(count, "(?, ?, ?, 'active')") + `
 			ON DUPLICATE KEY UPDATE
-				student_no = VALUES(student_no),
-				student_name = VALUES(student_name),
 				major_id = VALUES(major_id),
 				grade_year = VALUES(grade_year),
 				state = 'active'`
-		args := make([]any, 0, count*5)
+		args := make([]any, 0, count*3)
 		for index := start; index < end; index++ {
 			studentID := config.StudentIDStart + uint64(index)
 			args = append(
 				args,
 				studentID,
-				fmt.Sprintf("BENCH-%d", studentID),
-				fmt.Sprintf("Benchmark Student %d", index+1),
 				benchmarkMajorID,
 				time.Now().Year(),
 			)
@@ -412,15 +374,14 @@ func upsertBenchmarkQuotas(ctx context.Context, tx *sql.Tx, config prepareConfig
 		count := end - start
 		query := `INSERT INTO student_selection_quota
 			(round_id, term_id, student_id, credit_limit, selected_credits,
-			 course_limit, selected_course_count, version)
-			VALUES ` + repeatedValues(count, "(?, ?, ?, ?, 0, ?, 0, 0)") + `
+			 course_limit, selected_course_count)
+			VALUES ` + repeatedValues(count, "(?, ?, ?, ?, 0, ?, 0)") + `
 			ON DUPLICATE KEY UPDATE
 				term_id = VALUES(term_id),
 				credit_limit = VALUES(credit_limit),
 				selected_credits = 0,
 				course_limit = VALUES(course_limit),
-				selected_course_count = 0,
-				version = version + 1`
+				selected_course_count = 0`
 		args := make([]any, 0, count*5)
 		for index := start; index < end; index++ {
 			args = append(

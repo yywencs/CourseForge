@@ -1,10 +1,20 @@
 server:
-  http:
+  api:
     addr: 0.0.0.0:8080
     timeout: 60s
-  grpc:
-    addr: 0.0.0.0:9000
+  admin:
+    addr: 0.0.0.0:8081
     timeout: 60s
+
+auth:
+  jwt:
+    # 仅供本地开发；生产环境必须通过 PRIZEFORGE_AUTH_JWT_SIGNING_KEY 覆盖。
+    signing_key: "courseforge-local-development-key-change-me"
+    issuer: "courseforge"
+    audience: "courseforge-student"
+    clock_skew: 30s
+    token_ttl: 2h
+    signing_methods: ["HS256"]
 
 rabbitmq:
   addresses: 127.0.0.1

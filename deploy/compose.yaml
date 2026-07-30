@@ -2,6 +2,7 @@ name: prizeforge
 
 x-app-environment: &app-environment
   TZ: Asia/Shanghai
+  PRIZEFORGE_AUTH_JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY is required}
   PRIZEFORGE_DATA_MYSQL_COURSEFORGE_DSN: root:${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}@tcp(mysql:3306)/courseforge?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s
   PRIZEFORGE_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
   PRIZEFORGE_ASYNQ_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}

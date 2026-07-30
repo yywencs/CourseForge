@@ -6,6 +6,15 @@ server:
     addr: 0.0.0.0:8081
     timeout: 60s
 
+auth:
+  jwt:
+    signing_key: overridden_by_environment
+    issuer: courseforge
+    audience: courseforge-student
+    clock_skew: 30s
+    token_ttl: 2h
+    signing_methods: ["HS256"]
+
 rabbitmq:
   addresses: rabbitmq
   port: 5672

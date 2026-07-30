@@ -9,12 +9,39 @@ import (
 // Config 对应整个 config.yaml 文件的根节点
 type Config struct {
 	Server   ServerConfig   `mapstructure:"server"`
+	Auth     AuthConfig     `mapstructure:"auth"`
 	Data     DataConfig     `mapstructure:"data"`
 	Log      LogConfig      `mapstructure:"log"`
 	RabbitMQ RabbitMQConfig `mapstructure:"rabbitmq"`
 	Asynq    AsynqConfig    `mapstructure:"asynq"`
 	Monitor  MonitorConfig  `mapstructure:"monitor"`
 	Dcc      DccConfig      `mapstructure:"dcc"`
+}
+
+type AuthConfig struct {
+	JWT JWTAuthConfig `mapstructure:"jwt"`
+}
+
+type JWTAuthConfig struct {
+	SigningKey     string        `mapstructure:"signing_key"`
+	Issuer         string        `mapstructure:"issuer"`
+	Audience       string        `mapstructure:"audience"`
+	ClockSkew      time.Duration `mapstructure:"clock_skew"`
+	TokenTTL       time.Duration `mapstructure:"token_ttl"`
+	SigningMethods []string      `mapstructure:"signing_methods"`
+}
+
+func (c JWTAuthConfig) Validate() error {
+	if len(c.SigningKey) < 32 {
+		return fmt.Errorf("auth.jwt.signing_key must contain at least 32 bytes")
+	}
+	if strings.TrimSpace(c.Issuer) == "" {
+		return fmt.Errorf("auth.jwt.issuer is required")
+	}
+	if strings.TrimSpace(c.Audience) == "" {
+		return fmt.Errorf("auth.jwt.audience is required")
+	}
+	return nil
 }
 
 // --- Server 部分 ---

@@ -1,10 +1,6 @@
 package middleware
 
-// Status: 已实现，未接入 —— Auth 中间件当前没有挂进任何 HTTP server。
-// 注意：默认 DefaultAuthOptions() 会同时启用 Gateway/JWT/Session 三种来源，未配置
-// signing key / session validator 时所有请求都会被 401。接入前需在 server 装配处按实际
-// 鉴权方式构造 AuthOptions（通常只开一种来源），再 Use(middleware.Auth(opts))。也可先
-// 用 NoopAuth() 放行用于联调。
+// API 启动层使用 NewStudentJWTAuth 只启用 JWT Bearer 来源。
 
 import (
 	"crypto/hmac"
@@ -140,6 +136,46 @@ type GatewayOptions struct {
 	NonceHeader       string
 	CanonicalHeaders  []string
 	Validator         GatewaySignatureValidator
+}
+
+// NewStudentJWTAuth 创建学生 API 使用的 JWT Bearer 鉴权中间件。
+func NewStudentJWTAuth(
+	signingKey string,
+	issuer string,
+	audience string,
+	clockSkew time.Duration,
+	signingMethods []string,
+) (gin.HandlerFunc, error) {
+	if len(signingKey) < 32 {
+		return nil, fmt.Errorf("JWT signing key must contain at least 32 bytes")
+	}
+	if strings.TrimSpace(issuer) == "" || strings.TrimSpace(audience) == "" {
+		return nil, fmt.Errorf("JWT issuer and audience are required")
+	}
+	if clockSkew <= 0 {
+		clockSkew = 30 * time.Second
+	}
+	if len(signingMethods) == 0 {
+		signingMethods = []string{"HS256"}
+	}
+	return Auth(AuthOptions{
+		Now:     time.Now,
+		Sources: []AuthSource{AuthSourceJWT},
+		JWT: JWTOptions{
+			Enabled:        true,
+			Header:         defaultAuthorizationHeader,
+			Prefix:         defaultBearerPrefix,
+			SigningKey:     []byte(signingKey),
+			SigningMethods: signingMethods,
+			Issuer:         issuer,
+			Audience:       []string{audience},
+			UserIDClaims:   []string{"student_id", "user_id", "sub"},
+			SubjectClaim:   "sub",
+			TokenIDClaim:   "jti",
+			ExpiryClaim:    "exp",
+			ClockSkew:      clockSkew,
+		},
+	}), nil
 }
 
 // ==================== Default Options ====================

@@ -210,6 +210,21 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 			enrollmentCount,
 		)
 	}
+	applicationRecord, err := repo.QuerySelectionApplication(
+		context.Background(), applicationID, studentID,
+	)
+	if err != nil || applicationRecord == nil ||
+		!applicationRecord.MySQLPersisted ||
+		applicationRecord.Application.ApplicationID != applicationID {
+		t.Fatalf("QuerySelectionApplication() = %#v, %v", applicationRecord, err)
+	}
+	enrollmentPage, err := repo.ListStudentEnrollments(
+		context.Background(), studentID, termID, 20, 0,
+	)
+	if err != nil || enrollmentPage.Total != 1 || len(enrollmentPage.Items) != 1 ||
+		enrollmentPage.Items[0].RoundID != roundID {
+		t.Fatalf("ListStudentEnrollments() = %#v, %v", enrollmentPage, err)
+	}
 	var persistedQuota struct {
 		SelectedCredits     string
 		SelectedCourseCount uint16
@@ -441,6 +456,266 @@ func TestEnrollmentRepositoryConcurrentReservationDoesNotOversell(t *testing.T) 
 	)
 }
 
+// TestEnrollmentRepositoryDropAndProjectionRepair 使用真实 MySQL/Redis 验证：
+// 退课事务写入修复任务，Redis Lua 幂等返还额度与名额，任务最终标记完成。
+func TestEnrollmentRepositoryDropAndProjectionRepair(t *testing.T) {
+	const (
+		departmentID  = uint64(992001)
+		majorID       = uint64(992001)
+		studentID     = uint64(992001)
+		teacherID     = uint64(992001)
+		termID        = uint64(992001)
+		courseID      = uint64(992001)
+		classID       = uint64(992001)
+		roundID       = uint64(992001)
+		applicationID = "019d0000000000000000000000000201"
+		enrollmentID  = "019d0000000000000000000000000202"
+	)
+	now := time.Now().Truncate(time.Millisecond)
+	seedEnrollmentIntegrationData(
+		t, now, departmentID, majorID, studentID, teacherID, termID, courseID, classID, roundID,
+	)
+	db := integrationCourseforgeDB
+	if err := db.Table("student_selection_quota").
+		Where("round_id = ? AND student_id = ?", roundID, studentID).
+		Updates(map[string]interface{}{
+			"selected_credits":      "3.5",
+			"selected_course_count": 1,
+		}).Error; err != nil {
+		t.Fatalf("seed selected quota: %v", err)
+	}
+	if err := db.Table("teaching_class").Where("id = ?", classID).
+		Update("selected_count", 1).Error; err != nil {
+		t.Fatalf("seed selected class count: %v", err)
+	}
+	if err := db.Table("selection_application").Create(map[string]interface{}{
+		"application_id": applicationID, "request_id": "drop-request-1",
+		"round_id": roundID, "term_id": termID, "student_id": studentID,
+		"course_id": courseID, "teaching_class_id": classID, "credits": "3.5",
+		"state": "selected", "source": "web", "applied_at": now,
+		"completed_at": now,
+	}).Error; err != nil {
+		t.Fatalf("seed selection application: %v", err)
+	}
+	if err := db.Table("student_course_enrollment").Create(map[string]interface{}{
+		"enrollment_id": enrollmentID, "application_id": applicationID,
+		"term_id": termID, "student_id": studentID, "course_id": courseID,
+		"teaching_class_id": classID, "credits": "3.5", "state": "enrolled",
+		"active_key":  fmt.Sprintf("%d:%d:%d", termID, studentID, courseID),
+		"enrolled_at": now,
+	}).Error; err != nil {
+		t.Fatalf("seed enrollment: %v", err)
+	}
+
+	redisKeys := []string{
+		fmt.Sprintf("courseforge:selection:quota:credit:%d:%d", roundID, studentID),
+		fmt.Sprintf("courseforge:selection:quota:course:%d:%d", roundID, studentID),
+		fmt.Sprintf("courseforge:selection:class:seat:%d", classID),
+		fmt.Sprintf("courseforge:selection:course:%d:%d:%d", termID, studentID, courseID),
+		fmt.Sprintf("courseforge:selection:dropped:%s", enrollmentID),
+	}
+	if err := integrationRedisClient.Del(context.Background(), redisKeys...).Err(); err != nil {
+		t.Fatalf("cleanup drop Redis: %v", err)
+	}
+	t.Cleanup(func() { _ = integrationRedisClient.Del(context.Background(), redisKeys...).Err() })
+	if err := integrationRedisClient.MSet(context.Background(),
+		redisKeys[0], 165,
+		redisKeys[1], 5,
+		redisKeys[2], 1,
+		redisKeys[3], applicationID,
+	).Err(); err != nil {
+		t.Fatalf("seed drop Redis: %v", err)
+	}
+
+	repo := enrollmentrepo.NewRepository(db, integrationRedis)
+	target, err := repo.QueryStudentEnrollment(context.Background(), enrollmentID, studentID)
+	if err != nil || target == nil {
+		t.Fatalf("QueryStudentEnrollment() = %#v, %v", target, err)
+	}
+	if _, err := target.Drop(now.Add(time.Minute)); err != nil {
+		t.Fatalf("domain Drop() error = %v", err)
+	}
+	if applied, err := repo.DropEnrollment(context.Background(), target); err != nil || !applied {
+		t.Fatalf("DropEnrollment() = %v, %v", applied, err)
+	}
+	repairs, err := repo.QueryPendingProjectionRepairs(
+		context.Background(),
+		now.Add(2*time.Minute),
+		10,
+	)
+	if err != nil || len(repairs) != 1 || repairs[0].RepairID != "drop:"+enrollmentID {
+		t.Fatalf("QueryPendingProjectionRepairs() = %#v, %v", repairs, err)
+	}
+	if err := repo.ReleaseDroppedEnrollment(context.Background(), target); err != nil {
+		t.Fatalf("ReleaseDroppedEnrollment() error = %v", err)
+	}
+	// Lua 必须幂等，重复修复不能重复返还资源。
+	if err := repo.ReleaseDroppedEnrollment(context.Background(), target); err != nil {
+		t.Fatalf("ReleaseDroppedEnrollment(retry) error = %v", err)
+	}
+	if err := repo.MarkProjectionRepairCompleted(
+		context.Background(), repairs[0].RepairID, time.Now(),
+	); err != nil {
+		t.Fatalf("MarkProjectionRepairCompleted() error = %v", err)
+	}
+	assertRedisInt(t, redisKeys[0], 200)
+	assertRedisInt(t, redisKeys[1], 6)
+	assertRedisInt(t, redisKeys[2], 2)
+	if exists := integrationRedisClient.Exists(context.Background(), redisKeys[3]).Val(); exists != 0 {
+		t.Fatalf("course guard still exists after drop")
+	}
+}
+
+// TestEnrollmentRepositoryWaitlistLifecycle 验证候补加入、查询、原子抢占和晋级状态迁移。
+func TestEnrollmentRepositoryWaitlistLifecycle(t *testing.T) {
+	const (
+		departmentID = uint64(993001)
+		majorID      = uint64(993001)
+		studentID    = uint64(993001)
+		teacherID    = uint64(993001)
+		termID       = uint64(993001)
+		courseID     = uint64(993001)
+		classID      = uint64(993001)
+		roundID      = uint64(993001)
+	)
+	now := time.Now().Truncate(time.Millisecond)
+	seedEnrollmentIntegrationData(
+		t, now, departmentID, majorID, studentID, teacherID, termID, courseID, classID, roundID,
+	)
+	if err := integrationCourseforgeDB.Table("teaching_class").
+		Where("id = ?", classID).Update("selected_count", 2).Error; err != nil {
+		t.Fatalf("fill teaching class: %v", err)
+	}
+	request := &enrollment.SelectionRequest{
+		RequestID: "waitlist-request-1", RoundID: roundID, TermID: termID,
+		StudentID: studentID, CourseID: courseID, TeachingClassID: classID,
+		Credits: enrollment.Credit(35), Source: enrollment.ApplicationSourceWeb,
+	}
+	entry, err := enrollment.NewWaitlistEntry(
+		"019d0000000000000000000000000301", request, now,
+	)
+	if err != nil {
+		t.Fatalf("NewWaitlistEntry() error = %v", err)
+	}
+	repo := enrollmentrepo.NewRepository(integrationCourseforgeDB, integrationRedis)
+	joined, err := repo.JoinWaitlist(context.Background(), entry)
+	if err != nil || joined.Position == 0 {
+		t.Fatalf("JoinWaitlist() = %#v, %v", joined, err)
+	}
+	reused, err := repo.JoinWaitlist(context.Background(), entry)
+	if err != nil || reused.WaitlistID != entry.WaitlistID {
+		t.Fatalf("JoinWaitlist(retry) = %#v, %v", reused, err)
+	}
+	page, err := repo.ListStudentWaitlist(context.Background(), studentID, termID, 20, 0)
+	if err != nil || page.Total != 1 || len(page.Items) != 1 {
+		t.Fatalf("ListStudentWaitlist() = %#v, %v", page, err)
+	}
+	// 释放一个 MySQL 名额后，队首候补才可被原子抢占。
+	if err := integrationCourseforgeDB.Table("teaching_class").
+		Where("id = ?", classID).Update("selected_count", 1).Error; err != nil {
+		t.Fatalf("release class seat: %v", err)
+	}
+	claimed, err := repo.ClaimPromotableEntries(context.Background(), time.Now(), 10)
+	if err != nil || len(claimed) != 1 || claimed[0].State != enrollment.WaitlistStatePromoting {
+		t.Fatalf("ClaimPromotableEntries() = %#v, %v", claimed, err)
+	}
+	if err := claimed[0].MarkPromoted(time.Now()); err != nil {
+		t.Fatalf("MarkPromoted() domain error = %v", err)
+	}
+	if err := repo.MarkWaitlistPromoted(context.Background(), claimed[0]); err != nil {
+		t.Fatalf("MarkWaitlistPromoted() error = %v", err)
+	}
+	persisted, err := repo.QueryWaitlist(context.Background(), entry.WaitlistID, studentID)
+	if err != nil || persisted.State != enrollment.WaitlistStatePromoted {
+		t.Fatalf("QueryWaitlist() = %#v, %v", persisted, err)
+	}
+}
+
+// TestEnrollmentRepositoryLoadsEligibilitySnapshot 验证基础设施层能一次性装配
+// 学生状态、年级、专业、先修成绩和课表，并交给纯领域策略判断。
+func TestEnrollmentRepositoryLoadsEligibilitySnapshot(t *testing.T) {
+	const (
+		departmentID         = uint64(994001)
+		majorID              = uint64(994001)
+		studentID            = uint64(994001)
+		teacherID            = uint64(994001)
+		termID               = uint64(994001)
+		courseID             = uint64(994001)
+		prerequisiteCourseID = uint64(994002)
+		classID              = uint64(994001)
+		roundID              = uint64(994001)
+	)
+	now := time.Now().Truncate(time.Millisecond)
+	seedEnrollmentIntegrationData(
+		t, now, departmentID, majorID, studentID, teacherID, termID, courseID, classID, roundID,
+	)
+	db := integrationCourseforgeDB
+	t.Cleanup(func() {
+		db.Exec("DELETE FROM student_course_history WHERE student_id = ?", studentID)
+		db.Exec("DELETE FROM course_prerequisite WHERE course_id = ?", courseID)
+		db.Exec("DELETE FROM teaching_class_schedule WHERE teaching_class_id = ?", classID)
+		db.Exec("DELETE FROM teaching_class_major_scope WHERE teaching_class_id = ?", classID)
+		db.Exec("DELETE FROM course WHERE id = ?", prerequisiteCourseID)
+	})
+	if err := db.Table("course").Create(map[string]interface{}{
+		"id": prerequisiteCourseID, "course_code": "IT-C-PRE",
+		"course_name": "先修课程", "department_id": departmentID,
+		"credits": "2.0", "course_type": "required",
+	}).Error; err != nil {
+		t.Fatalf("seed prerequisite course: %v", err)
+	}
+	if err := db.Table("course_prerequisite").Create(map[string]interface{}{
+		"course_id": courseID, "prerequisite_course_id": prerequisiteCourseID,
+		"minimum_score": "60.0",
+	}).Error; err != nil {
+		t.Fatalf("seed prerequisite: %v", err)
+	}
+	if err := db.Table("student_course_history").Create(map[string]interface{}{
+		"student_id": studentID, "course_id": prerequisiteCourseID,
+		"term_id": termID, "score": "85.0", "result": "passed", "completed_at": now,
+	}).Error; err != nil {
+		t.Fatalf("seed course history: %v", err)
+	}
+	if err := db.Table("teaching_class_major_scope").Create(map[string]interface{}{
+		"teaching_class_id": classID, "major_id": majorID, "scope_type": "allow",
+	}).Error; err != nil {
+		t.Fatalf("seed major scope: %v", err)
+	}
+	if err := db.Table("teaching_class_schedule").Create(map[string]interface{}{
+		"teaching_class_id": classID, "day_of_week": 1,
+		"start_week": 1, "end_week": 16, "start_section": 1, "end_section": 2,
+	}).Error; err != nil {
+		t.Fatalf("seed schedule: %v", err)
+	}
+	minimumGrade := uint16(2025)
+	maximumGrade := uint16(2027)
+	if err := db.Table("teaching_class").Where("id = ?", classID).Updates(map[string]interface{}{
+		"minimum_grade_year": minimumGrade,
+		"maximum_grade_year": maximumGrade,
+	}).Error; err != nil {
+		t.Fatalf("seed grade scope: %v", err)
+	}
+
+	repo := enrollmentrepo.NewRepository(db, integrationRedis)
+	snapshot, err := repo.QueryEligibilitySnapshot(
+		context.Background(), studentID, termID, courseID, classID,
+	)
+	if err != nil {
+		t.Fatalf("QueryEligibilitySnapshot() error = %v", err)
+	}
+	if len(snapshot.Prerequisites) != 1 || len(snapshot.Achievements) != 1 ||
+		len(snapshot.MajorScopes) != 1 || len(snapshot.TargetSchedules) != 1 {
+		t.Fatalf("eligibility snapshot = %#v", snapshot)
+	}
+	if err := (enrollment.EligibilityPolicy{}).Evaluate(snapshot); err != nil {
+		t.Fatalf("EligibilityPolicy.Evaluate() error = %v", err)
+	}
+	snapshot.Achievements = nil
+	if err := (enrollment.EligibilityPolicy{}).Evaluate(snapshot); !errors.Is(err, enrollment.ErrPrerequisiteNotMet) {
+		t.Fatalf("missing prerequisite error = %v", err)
+	}
+}
+
 func waitForSelectionResultPersisted(
 	t *testing.T,
 	ctx context.Context,
@@ -529,6 +804,17 @@ func seedEnrollmentIntegrationData(
 		}
 	}
 	t.Cleanup(func() {
+		db.Exec(
+			`DELETE epr FROM enrollment_projection_repair epr
+			 JOIN student_course_enrollment sce ON sce.enrollment_id = epr.enrollment_id
+			 WHERE sce.student_id = ?`,
+			studentID,
+		)
+		db.Exec("DELETE FROM selection_waitlist WHERE student_id = ?", studentID)
+		db.Exec("DELETE FROM student_course_history WHERE student_id = ?", studentID)
+		db.Exec("DELETE FROM teaching_class_schedule WHERE teaching_class_id = ?", classID)
+		db.Exec("DELETE FROM teaching_class_major_scope WHERE teaching_class_id = ?", classID)
+		db.Exec("DELETE FROM course_prerequisite WHERE course_id = ?", courseID)
 		db.Exec("DELETE FROM selection_event WHERE student_id = ?", studentID)
 		db.Exec("DELETE FROM student_course_enrollment WHERE student_id = ?", studentID)
 		db.Exec("DELETE FROM selection_application WHERE student_id = ?", studentID)

@@ -12,11 +12,11 @@ var (
 	ErrCourseQuotaExceeded     = xerr.New("ENROLLMENT_COURSE_QUOTA_EXCEEDED", "学生剩余课程门数不足")
 	ErrTeachingClassFull       = xerr.New("ENROLLMENT_CLASS_FULL", "教学班名额已满")
 	ErrDuplicateSelection      = xerr.New("ENROLLMENT_DUPLICATE_SELECTION", "同一学期不能重复选择同一课程")
+	ErrIdempotencyConflict     = xerr.New("ENROLLMENT_IDEMPOTENCY_CONFLICT", "幂等请求ID已绑定其他选课参数")
 	ErrApplicationInProgress   = xerr.New("ENROLLMENT_APPLICATION_IN_PROGRESS", "选课申请正在处理中")
 	ErrApplicationCancelled    = xerr.New("ENROLLMENT_APPLICATION_CANCELLED", "选课申请已取消")
 	ErrInvalidApplicationState = xerr.New(
 		"ENROLLMENT_INVALID_APPLICATION_STATE",
 		"选课申请状态不允许执行当前操作",
 	)
-	ErrClaimOwnerMismatch = xerr.New("ENROLLMENT_CLAIM_OWNER_MISMATCH", "选课申请处理权已失效")
 )

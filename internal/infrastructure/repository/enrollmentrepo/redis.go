@@ -8,11 +8,9 @@ import (
 	"time"
 
 	"prizeforge/internal/domain/enrollment"
-	"prizeforge/pkg/idgen"
 )
 
 const (
-	selectionProcessingLease     = 30 * time.Second
 	selectionRequestResultTTL    = 7 * 24 * time.Hour
 	selectionResultRecoveryBatch = 100
 )
@@ -90,8 +88,6 @@ const reserveSelectionScript = `
 	end
 
 	application.state = 'reserved'
-	application.processing_at = nil
-	application.owner = nil
 	local stored_application = cjson.encode(application)
 
 	redis.call('DECRBY', credit_key, credits)
@@ -100,58 +96,6 @@ const reserveSelectionScript = `
 	redis.call('SET', course_guard_key, application_id)
 	redis.call('SET', pending_key, stored_application)
 	return {0, stored_application}
-`
-
-const claimSelectionScript = `
-	local pending = redis.call('GET', KEYS[1])
-	if not pending then
-		return {-1, ''}
-	end
-	local ok, application = pcall(cjson.decode, pending)
-	if not ok or application.application_id ~= ARGV[1] or
-	   application.request_id ~= ARGV[2] then
-		return {-2, ''}
-	end
-
-	if application.state == 'selected' or application.state == 'rejected' then
-		local result = redis.call('GET', KEYS[2])
-		return {2, result or ''}
-	end
-	if application.state == 'cancelled' then
-		return {3, ''}
-	end
-
-	local now = tonumber(ARGV[4])
-	local stale_before = tonumber(ARGV[5])
-	if application.state == 'reserved' or
-	   (application.state == 'processing' and
-	    (not application.processing_at or tonumber(application.processing_at) < stale_before)) then
-		application.state = 'processing'
-		application.processing_at = now
-		application.owner = ARGV[3]
-		redis.call('SET', KEYS[1], cjson.encode(application))
-		return {0, ARGV[3]}
-	end
-	return {1, ''}
-`
-
-const releaseSelectionClaimScript = `
-	local pending = redis.call('GET', KEYS[1])
-	if not pending then
-		return 0
-	end
-	local ok, application = pcall(cjson.decode, pending)
-	if not ok or application.application_id ~= ARGV[1] then
-		return -1
-	end
-	if application.state == 'processing' and application.owner == ARGV[2] then
-		application.state = 'reserved'
-		application.processing_at = nil
-		application.owner = nil
-		redis.call('SET', KEYS[1], cjson.encode(application))
-		return 1
-	end
-	return 0
 `
 
 const completeSelectionScript = `
@@ -169,11 +113,11 @@ const completeSelectionScript = `
 	if existing then
 		return {1, existing}
 	end
-	if application.state ~= 'processing' or application.owner ~= ARGV[3] then
+	if application.state ~= 'reserved' then
 		return {-3, ''}
 	end
 
-	local result_ok, result = pcall(cjson.decode, ARGV[4])
+	local result_ok, result = pcall(cjson.decode, ARGV[3])
 	if not result_ok or result.application_id ~= ARGV[1] or
 	   result.request_id ~= ARGV[2] then
 		return {-4, ''}
@@ -196,7 +140,7 @@ const completeSelectionScript = `
 		end
 	end
 
-	local stream_id = redis.call('XADD', KEYS[3], '*', 'event', ARGV[4])
+	local stream_id = redis.call('XADD', KEYS[3], '*', 'event', ARGV[3])
 	local publication = {
 		stream_id = stream_id,
 		broker_confirmed = false,
@@ -207,10 +151,8 @@ const completeSelectionScript = `
 	application.state = result.state
 	application.failure = result.failure
 	application.completed_at = result.completed_at
-	application.processing_at = nil
-	application.owner = nil
 	redis.call('SET', KEYS[1], cjson.encode(application))
-	redis.call('SET', KEYS[2], stored_publication, 'EX', ARGV[5])
+	redis.call('SET', KEYS[2], stored_publication, 'EX', ARGV[4])
 	return {0, stored_publication}
 `
 
@@ -233,6 +175,18 @@ const markSelectionResultPublishedScript = `
 
 const querySelectionResultStreamScript = `
 	return redis.call('XRANGE', KEYS[1], '-', '+', 'COUNT', ARGV[1])
+`
+
+const querySelectionByRequestScript = `
+	local result = redis.call('GET', KEYS[1])
+	if result then
+		return {2, result}
+	end
+	local pending = redis.call('GET', KEYS[2])
+	if pending then
+		return {1, pending}
+	end
+	return {0, ''}
 `
 
 const clearPersistedSelectionScript = `
@@ -262,8 +216,6 @@ type selectionApplicationPayload struct {
 	Failure         *enrollment.FailureReason    `json:"failure,omitempty"`
 	AppliedAt       time.Time                    `json:"applied_at"`
 	CompletedAt     *time.Time                   `json:"completed_at,omitempty"`
-	ProcessingAt    int64                        `json:"processing_at,omitempty"`
-	Owner           string                       `json:"owner,omitempty"`
 }
 
 func newSelectionApplicationPayload(
@@ -283,10 +235,6 @@ func newSelectionApplicationPayload(
 		Failure:         application.Failure,
 		AppliedAt:       application.AppliedAt,
 		CompletedAt:     application.CompletedAt,
-		Owner:           application.Owner,
-	}
-	if application.ProcessingAt != nil {
-		payload.ProcessingAt = application.ProcessingAt.UnixMilli()
 	}
 	return payload
 }
@@ -306,11 +254,6 @@ func (p *selectionApplicationPayload) toEntity() *enrollment.SelectionApplicatio
 		Failure:         p.Failure,
 		AppliedAt:       p.AppliedAt,
 		CompletedAt:     p.CompletedAt,
-		Owner:           p.Owner,
-	}
-	if p.ProcessingAt > 0 {
-		processingAt := time.UnixMilli(p.ProcessingAt)
-		application.ProcessingAt = &processingAt
 	}
 	return application
 }
@@ -402,6 +345,57 @@ func (r *Repository) ReserveSelection(
 	return nil, errors.New("选课资源初始化重试耗尽")
 }
 
+func (r *Repository) querySelectionByRequestFromRedis(
+	ctx context.Context,
+	roundID uint64,
+	studentID uint64,
+	requestID string,
+) (*enrollment.SelectionRequestRecord, error) {
+	raw, err := r.redis.Eval(
+		ctx,
+		querySelectionByRequestScript,
+		[]string{
+			requestResultKey(roundID, studentID, requestID),
+			pendingApplicationKey(roundID, studentID),
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	status, stored, err := parseScriptPair(raw)
+	if err != nil {
+		return nil, err
+	}
+	switch status {
+	case 0:
+		return nil, nil
+	case 1:
+		var payload selectionApplicationPayload
+		if err := json.Unmarshal([]byte(stored), &payload); err != nil {
+			return nil, fmt.Errorf("解析Redis选课pending: %w", err)
+		}
+		// pending 按学生和轮次串行化，可能属于另一笔请求；这种情况继续回退 MySQL
+		// 查询当前 request_id，而不是把不同幂等键误判为冲突。
+		if payload.RequestID != requestID {
+			return nil, nil
+		}
+		return &enrollment.SelectionRequestRecord{
+			Application: payload.toEntity(),
+		}, nil
+	case 2:
+		publication, err := decodePublication(stored)
+		if err != nil {
+			return nil, err
+		}
+		return &enrollment.SelectionRequestRecord{
+			Application: applicationFromResult(publication.Result),
+			Publication: publication,
+		}, nil
+	default:
+		return nil, fmt.Errorf("未知Redis选课幂等查询状态: %d", status)
+	}
+}
+
 func (r *Repository) initializeSelectionResources(
 	ctx context.Context,
 	application *enrollment.SelectionApplication,
@@ -453,107 +447,12 @@ func (r *Repository) initializeSelectionResources(
 	return err
 }
 
-func (r *Repository) TryClaimSelection(
-	ctx context.Context,
-	studentID uint64,
-	roundID uint64,
-	requestID string,
-	applicationID string,
-) (*enrollment.SelectionClaim, error) {
-	if studentID == 0 || roundID == 0 || requestID == "" || applicationID == "" {
-		return nil, enrollment.ErrInvalidParams
-	}
-	owner, err := idgen.NewOrderID()
-	if err != nil {
-		return nil, fmt.Errorf("生成选课处理权令牌: %w", err)
-	}
-	now := time.Now()
-	raw, err := r.redis.Eval(
-		ctx,
-		claimSelectionScript,
-		[]string{
-			pendingApplicationKey(roundID, studentID),
-			requestResultKey(roundID, studentID, requestID),
-		},
-		applicationID,
-		requestID,
-		owner,
-		now.UnixMilli(),
-		now.Add(-selectionProcessingLease).UnixMilli(),
-	)
-	if err != nil {
-		return nil, err
-	}
-	status, payload, err := parseScriptPair(raw)
-	if err != nil {
-		return nil, err
-	}
-	switch status {
-	case 0:
-		return &enrollment.SelectionClaim{
-			Status: enrollment.ClaimStatusAcquired,
-			Owner:  owner,
-		}, nil
-	case 1:
-		return &enrollment.SelectionClaim{Status: enrollment.ClaimStatusProcessing}, nil
-	case 2:
-		publication, err := decodePublication(payload)
-		if err != nil {
-			return nil, err
-		}
-		return &enrollment.SelectionClaim{
-			Status:      enrollment.ClaimStatusCompleted,
-			Publication: publication,
-		}, nil
-	case 3:
-		return &enrollment.SelectionClaim{Status: enrollment.ClaimStatusCancelled}, nil
-	case -1:
-		return nil, enrollment.ErrRecordNotFound
-	default:
-		return nil, fmt.Errorf("抢占选课申请失败: status=%d", status)
-	}
-}
-
-func (r *Repository) ReleaseSelectionClaim(
-	ctx context.Context,
-	studentID uint64,
-	roundID uint64,
-	applicationID string,
-	owner string,
-) error {
-	if studentID == 0 || roundID == 0 || applicationID == "" || owner == "" {
-		return enrollment.ErrInvalidParams
-	}
-	raw, err := r.redis.Eval(
-		ctx,
-		releaseSelectionClaimScript,
-		[]string{pendingApplicationKey(roundID, studentID)},
-		applicationID,
-		owner,
-	)
-	if err != nil {
-		return err
-	}
-	status, ok := raw.(int64)
-	if !ok {
-		return fmt.Errorf("未知释放处理权响应: %#v", raw)
-	}
-	if status < 0 {
-		return enrollment.ErrClaimOwnerMismatch
-	}
-	return nil
-}
-
 func (r *Repository) CompleteSelection(
 	ctx context.Context,
 	result *enrollment.SelectionResult,
-	owner string,
 ) (*enrollment.SelectionResultPublication, error) {
 	if err := result.Validate(); err != nil {
 		return nil, err
-	}
-	if owner == "" {
-		return nil, enrollment.ErrInvalidParams
 	}
 	payload, err := json.Marshal(result)
 	if err != nil {
@@ -573,7 +472,6 @@ func (r *Repository) CompleteSelection(
 		},
 		result.ApplicationID,
 		result.RequestID,
-		owner,
 		string(payload),
 		int64(selectionRequestResultTTL/time.Second),
 	)

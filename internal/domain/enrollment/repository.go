@@ -5,6 +5,14 @@ import "context"
 // QueryRepository 提供选课资格预检所需的只读数据。
 // 这些检查用于快速失败，最终额度和名额仍以 Redis Lua 原子校验结果为准。
 type QueryRepository interface {
+	// QuerySelectionByRequest 按业务幂等键查询已有申请。
+	// 实现必须优先查询 Redis result/pending；Redis 未命中时再回退 MySQL。
+	QuerySelectionByRequest(
+		ctx context.Context,
+		roundID uint64,
+		studentID uint64,
+		requestID string,
+	) (*SelectionRequestRecord, error)
 	QuerySelectionRound(ctx context.Context, roundID uint64) (*SelectionRound, error)
 	QueryTeachingClass(
 		ctx context.Context,
@@ -25,6 +33,14 @@ type QueryRepository interface {
 	) (bool, error)
 }
 
+// SelectionRequestRecord 是按幂等键找到的已有选课申请。
+// Publication 仅在 Redis 已保存标准结果时存在；MySQLPersisted 表示申请已完成持久化。
+type SelectionRequestRecord struct {
+	Application    *SelectionApplication
+	Publication    *SelectionResultPublication
+	MySQLPersisted bool
+}
+
 // ReservationStatus 表示 Redis 原子预占的结果类型。
 type ReservationStatus string
 
@@ -41,23 +57,6 @@ type SelectionReservation struct {
 	Publication *SelectionResultPublication
 }
 
-// ClaimStatus 表示申请单处理权抢占结果。
-type ClaimStatus string
-
-const (
-	ClaimStatusAcquired   ClaimStatus = "acquired"
-	ClaimStatusProcessing ClaimStatus = "processing"
-	ClaimStatusCompleted  ClaimStatus = "completed"
-	ClaimStatusCancelled  ClaimStatus = "cancelled"
-)
-
-// SelectionClaim 是一次处理权抢占结果。
-type SelectionClaim struct {
-	Status      ClaimStatus
-	Owner       string
-	Publication *SelectionResultPublication
-}
-
 // ApplicationRepository 定义 Redis-first 选课申请生命周期。
 type ApplicationRepository interface {
 	// ReserveSelection 必须在一个 Lua 中完成幂等检查、学生额度占用、
@@ -67,29 +66,11 @@ type ApplicationRepository interface {
 		application *SelectionApplication,
 	) (*SelectionReservation, error)
 
-	// TryClaimSelection 使用带租约的 Owner 令牌抢占申请单处理权。
-	TryClaimSelection(
-		ctx context.Context,
-		studentID uint64,
-		roundID uint64,
-		requestID string,
-		applicationID string,
-	) (*SelectionClaim, error)
-
-	ReleaseSelectionClaim(
-		ctx context.Context,
-		studentID uint64,
-		roundID uint64,
-		applicationID string,
-		owner string,
-	) error
-
 	// CompleteSelection 必须原子保存标准结果并写入 Redis Stream。
 	// 失败或取消结果还必须在同一个 Lua 中归还学生额度和教学班名额。
 	CompleteSelection(
 		ctx context.Context,
 		result *SelectionResult,
-		owner string,
 	) (*SelectionResultPublication, error)
 
 	QueryPendingSelectionResults(

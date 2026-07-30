@@ -85,6 +85,7 @@ func handleSelectionError(c *gin.Context, req selectCourseRequest, err error) {
 		errors.Is(err, enrollment.ErrCourseQuotaExceeded),
 		errors.Is(err, enrollment.ErrTeachingClassFull),
 		errors.Is(err, enrollment.ErrDuplicateSelection),
+		errors.Is(err, enrollment.ErrIdempotencyConflict),
 		errors.Is(err, enrollment.ErrApplicationInProgress),
 		errors.Is(err, enrollment.ErrApplicationCancelled):
 		logger.Debug("selection rejected", fields...)

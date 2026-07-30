@@ -6,11 +6,126 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"prizeforge/internal/domain/enrollment"
 
 	"gorm.io/gorm"
 )
+
+func (r *Repository) QuerySelectionByRequest(
+	ctx context.Context,
+	roundID uint64,
+	studentID uint64,
+	requestID string,
+) (*enrollment.SelectionRequestRecord, error) {
+	if roundID == 0 || studentID == 0 || strings.TrimSpace(requestID) == "" {
+		return nil, enrollment.ErrInvalidParams
+	}
+	record, err := r.querySelectionByRequestFromRedis(ctx, roundID, studentID, requestID)
+	if err != nil {
+		return nil, err
+	}
+	if record != nil {
+		return record, nil
+	}
+	return r.querySelectionByRequestFromMySQL(ctx, roundID, studentID, requestID)
+}
+
+func (r *Repository) querySelectionByRequestFromMySQL(
+	ctx context.Context,
+	roundID uint64,
+	studentID uint64,
+	requestID string,
+) (*enrollment.SelectionRequestRecord, error) {
+	var row struct {
+		ApplicationID   string
+		RequestID       string
+		RoundID         uint64
+		TermID          uint64
+		StudentID       uint64
+		CourseID        uint64
+		TeachingClassID uint64
+		Credits         string
+		State           string
+		FailureCode     string
+		FailureMessage  string
+		AppliedAt       timeValue
+		CompletedAt     *time.Time
+		Source          string
+	}
+	err := r.db.WithContext(ctx).
+		Table("selection_application").
+		Select(`
+			application_id,
+			request_id,
+			round_id,
+			term_id,
+			student_id,
+			course_id,
+			teaching_class_id,
+			CAST(credits AS CHAR) AS credits,
+			state,
+			failure_code,
+			failure_message,
+			applied_at,
+			completed_at,
+			source
+		`).
+		Where(
+			"round_id = ? AND student_id = ? AND request_id = ?",
+			roundID,
+			studentID,
+			requestID,
+		).
+		Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	credits, err := creditFromDecimal(row.Credits)
+	if err != nil {
+		return nil, fmt.Errorf("解析已有选课申请学分: %w", err)
+	}
+	var failure *enrollment.FailureReason
+	if row.FailureCode != "" || row.FailureMessage != "" {
+		reason := enrollment.FailureReason{
+			Code:    enrollment.FailureCode(row.FailureCode),
+			Message: row.FailureMessage,
+		}
+		if !reason.Valid() {
+			return nil, errors.New("MySQL选课申请失败原因非法")
+		}
+		failure = &reason
+	}
+	application := &enrollment.SelectionApplication{
+		ApplicationID:   row.ApplicationID,
+		RequestID:       row.RequestID,
+		RoundID:         row.RoundID,
+		TermID:          row.TermID,
+		StudentID:       row.StudentID,
+		CourseID:        row.CourseID,
+		TeachingClassID: row.TeachingClassID,
+		Credits:         credits,
+		Source:          enrollment.ApplicationSource(row.Source),
+		State:           enrollment.ApplicationState(row.State),
+		Failure:         failure,
+		AppliedAt:       row.AppliedAt.Time,
+		CompletedAt:     row.CompletedAt,
+	}
+	if application.ApplicationID == "" ||
+		!application.Source.Valid() ||
+		!application.State.Terminal() ||
+		application.CompletedAt == nil {
+		return nil, errors.New("MySQL选课申请状态非法")
+	}
+	return &enrollment.SelectionRequestRecord{
+		Application:    application,
+		MySQLPersisted: true,
+	}, nil
+}
 
 func (r *Repository) QuerySelectionRound(
 	ctx context.Context,

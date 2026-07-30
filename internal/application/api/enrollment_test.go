@@ -10,14 +10,23 @@ import (
 )
 
 type fakeEnrollmentRepository struct {
-	round      *enrollment.SelectionRound
-	class      *enrollment.TeachingClass
-	quota      *enrollment.StudentSelectionQuota
-	active     bool
-	existing   bool
-	reserved   *enrollment.SelectionApplication
-	completed  *enrollment.SelectionResult
-	claimOwner string
+	lookup    *enrollment.SelectionRequestRecord
+	round     *enrollment.SelectionRound
+	class     *enrollment.TeachingClass
+	quota     *enrollment.StudentSelectionQuota
+	active    bool
+	existing  bool
+	reserved  *enrollment.SelectionApplication
+	completed *enrollment.SelectionResult
+}
+
+func (f *fakeEnrollmentRepository) QuerySelectionByRequest(
+	context.Context,
+	uint64,
+	uint64,
+	string,
+) (*enrollment.SelectionRequestRecord, error) {
+	return f.lookup, nil
 }
 
 func (f *fakeEnrollmentRepository) QuerySelectionRound(
@@ -70,38 +79,10 @@ func (f *fakeEnrollmentRepository) ReserveSelection(
 	}, nil
 }
 
-func (f *fakeEnrollmentRepository) TryClaimSelection(
-	context.Context,
-	uint64,
-	uint64,
-	string,
-	string,
-) (*enrollment.SelectionClaim, error) {
-	f.claimOwner = "owner-001"
-	return &enrollment.SelectionClaim{
-		Status: enrollment.ClaimStatusAcquired,
-		Owner:  f.claimOwner,
-	}, nil
-}
-
-func (f *fakeEnrollmentRepository) ReleaseSelectionClaim(
-	context.Context,
-	uint64,
-	uint64,
-	string,
-	string,
-) error {
-	return nil
-}
-
 func (f *fakeEnrollmentRepository) CompleteSelection(
 	_ context.Context,
 	result *enrollment.SelectionResult,
-	owner string,
 ) (*enrollment.SelectionResultPublication, error) {
-	if owner != f.claimOwner {
-		return nil, enrollment.ErrClaimOwnerMismatch
-	}
 	f.completed = result
 	return &enrollment.SelectionResultPublication{
 		StreamID: "1-0",
@@ -264,5 +245,131 @@ func TestEnrollmentUsecaseKeepsRecoverableResult(t *testing.T) {
 	}
 	if repo.completed == nil || publisher.publication == nil {
 		t.Fatal("publish failure should happen after Redis result completion")
+	}
+}
+
+// TestEnrollmentUsecaseReturnsPersistedIdempotentResultBeforeMutableChecks 验证相同请求在
+// 轮次关闭、正式选课记录已存在后重试，仍返回最初已落库结果。
+func TestEnrollmentUsecaseReturnsPersistedIdempotentResultBeforeMutableChecks(t *testing.T) {
+	usecase, repo, _, now := newSuccessfulEnrollmentUsecase(t)
+	completedAt := now.Add(time.Second)
+	repo.lookup = &enrollment.SelectionRequestRecord{
+		Application: &enrollment.SelectionApplication{
+			ApplicationID:   "application-001",
+			RequestID:       "request-001",
+			RoundID:         101,
+			TermID:          202601,
+			StudentID:       10001,
+			CourseID:        20001,
+			TeachingClassID: 30001,
+			Credits:         enrollment.Credit(35),
+			Source:          enrollment.ApplicationSourceWeb,
+			State:           enrollment.ApplicationStateSelected,
+			AppliedAt:       now,
+			CompletedAt:     &completedAt,
+		},
+		MySQLPersisted: true,
+	}
+	repo.round.State = enrollment.SelectionRoundStateClosed
+	repo.existing = true
+
+	receipt, err := usecase.SelectCourse(context.Background(), &SelectCourseCommand{
+		RequestID:       "request-001",
+		RoundID:         101,
+		StudentID:       10001,
+		TeachingClassID: 30001,
+		Source:          enrollment.ApplicationSourceWeb,
+	})
+	if err != nil {
+		t.Fatalf("SelectCourse() error = %v", err)
+	}
+	if receipt.ApplicationID != "application-001" ||
+		receipt.State != enrollment.ApplicationStateSelected ||
+		!receipt.BrokerConfirmed ||
+		!receipt.MySQLPersisted {
+		t.Fatalf("SelectCourse() receipt = %#v", receipt)
+	}
+	if repo.reserved != nil {
+		t.Fatal("persisted idempotent result should bypass a new reservation")
+	}
+}
+
+// TestEnrollmentUsecaseRejectsIdempotencyFingerprintConflict 验证相同 request_id
+// 不能重新绑定到另一个教学班。
+func TestEnrollmentUsecaseRejectsIdempotencyFingerprintConflict(t *testing.T) {
+	usecase, repo, _, now := newSuccessfulEnrollmentUsecase(t)
+	repo.lookup = &enrollment.SelectionRequestRecord{
+		Application: &enrollment.SelectionApplication{
+			ApplicationID:   "application-001",
+			RequestID:       "request-001",
+			RoundID:         101,
+			TermID:          202601,
+			StudentID:       10001,
+			CourseID:        20001,
+			TeachingClassID: 30001,
+			Credits:         enrollment.Credit(35),
+			Source:          enrollment.ApplicationSourceWeb,
+			State:           enrollment.ApplicationStateReserved,
+			AppliedAt:       now,
+		},
+	}
+
+	_, err := usecase.SelectCourse(context.Background(), &SelectCourseCommand{
+		RequestID:       "request-001",
+		RoundID:         101,
+		StudentID:       10001,
+		TeachingClassID: 30002,
+		Source:          enrollment.ApplicationSourceWeb,
+	})
+	if !errors.Is(err, enrollment.ErrIdempotencyConflict) {
+		t.Fatalf("SelectCourse() error = %v, want %v", err, enrollment.ErrIdempotencyConflict)
+	}
+	if repo.reserved != nil {
+		t.Fatal("idempotency conflict should not reserve new resources")
+	}
+}
+
+// TestEnrollmentUsecaseResumesMatchingPendingBeforeMutableChecks 验证相同 request_id
+// 找到 Redis pending 后会继续原申请，而不会因轮次后来关闭而改变首次请求语义。
+func TestEnrollmentUsecaseResumesMatchingPendingBeforeMutableChecks(t *testing.T) {
+	usecase, repo, publisher, now := newSuccessfulEnrollmentUsecase(t)
+	repo.lookup = &enrollment.SelectionRequestRecord{
+		Application: &enrollment.SelectionApplication{
+			ApplicationID:   "application-001",
+			RequestID:       "request-001",
+			RoundID:         101,
+			TermID:          202601,
+			StudentID:       10001,
+			CourseID:        20001,
+			TeachingClassID: 30001,
+			Credits:         enrollment.Credit(35),
+			Source:          enrollment.ApplicationSourceWeb,
+			State:           enrollment.ApplicationStateReserved,
+			AppliedAt:       now,
+		},
+	}
+	repo.round.State = enrollment.SelectionRoundStateClosed
+
+	receipt, err := usecase.SelectCourse(context.Background(), &SelectCourseCommand{
+		RequestID:       "request-001",
+		RoundID:         101,
+		StudentID:       10001,
+		TeachingClassID: 30001,
+		Source:          enrollment.ApplicationSourceWeb,
+	})
+	if err != nil {
+		t.Fatalf("SelectCourse() error = %v", err)
+	}
+	if receipt.State != enrollment.ApplicationStateSelected ||
+		repo.reserved != nil ||
+		repo.completed == nil ||
+		publisher.publication == nil {
+		t.Fatalf(
+			"pending resume = receipt:%#v reserved:%v completed:%v published:%v",
+			receipt,
+			repo.reserved != nil,
+			repo.completed != nil,
+			publisher.publication != nil,
+		)
 	}
 }

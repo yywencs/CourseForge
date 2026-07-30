@@ -10,7 +10,6 @@ import (
 const (
 	maxApplicationIDLength = 32
 	maxRequestIDLength     = 64
-	maxOwnerLength         = 64
 
 	// CreditScale 表示领域内使用十分之一学分作为最小单位。
 	// 例如 3.5 学分保存为 Credit(35)，避免 Redis/MySQL 额度计算出现浮点误差。

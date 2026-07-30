@@ -8,7 +8,6 @@ import (
 
 	"prizeforge/internal/domain/enrollment"
 	"prizeforge/pkg/idgen"
-	"prizeforge/pkg/logger"
 )
 
 // SelectCourseCommand 是 HTTP 层提交给应用层的选课命令。
@@ -74,6 +73,28 @@ func (u *EnrollmentUsecase) SelectCourse(
 ) (*SelectionReceipt, error) {
 	if err := validateSelectCourseCommand(command); err != nil {
 		return nil, err
+	}
+
+	existing, err := u.queryRepo.QuerySelectionByRequest(
+		ctx,
+		command.RoundID,
+		command.StudentID,
+		command.RequestID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		if err := validateSelectionRequestFingerprint(command, existing.Application); err != nil {
+			return nil, err
+		}
+		if existing.MySQLPersisted {
+			return selectionReceiptFromPersisted(existing.Application), nil
+		}
+		if existing.Publication != nil {
+			return u.publishCompleted(ctx, existing.Publication)
+		}
+		return u.processReservedSelection(ctx, existing.Application)
 	}
 
 	now := u.now()
@@ -166,71 +187,54 @@ func (u *EnrollmentUsecase) SelectCourse(
 	if reservation.Status == enrollment.ReservationStatusCompleted {
 		return u.publishCompleted(ctx, reservation.Publication)
 	}
+	return u.processReservedSelection(ctx, application)
+}
 
-	claim, err := u.appRepo.TryClaimSelection(
-		ctx,
-		application.StudentID,
-		application.RoundID,
-		application.RequestID,
-		application.ApplicationID,
-	)
+func (u *EnrollmentUsecase) processReservedSelection(
+	ctx context.Context,
+	application *enrollment.SelectionApplication,
+) (*SelectionReceipt, error) {
+	if application == nil {
+		return nil, enrollment.ErrRecordNotFound
+	}
+	result, err := application.CompleteSelected(u.now())
 	if err != nil {
 		return nil, err
 	}
-	if claim == nil {
-		return nil, enrollment.ErrApplicationInProgress
-	}
-	switch claim.Status {
-	case enrollment.ClaimStatusCompleted:
-		return u.publishCompleted(ctx, claim.Publication)
-	case enrollment.ClaimStatusProcessing:
-		return nil, enrollment.ErrApplicationInProgress
-	case enrollment.ClaimStatusCancelled:
-		return nil, enrollment.ErrApplicationCancelled
-	case enrollment.ClaimStatusAcquired:
-		// 当前最小链路在原子预占后不执行额外慢规则，因此直接完成为选课成功。
-	default:
-		return nil, enrollment.ErrApplicationInProgress
-	}
 
-	releaseClaim := func() {
-		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		defer cancel()
-		if err := u.appRepo.ReleaseSelectionClaim(
-			releaseCtx,
-			application.StudentID,
-			application.RoundID,
-			application.ApplicationID,
-			claim.Owner,
-		); err != nil {
-			logger.Warn(
-				"释放选课申请处理权失败",
-				"applicationID", application.ApplicationID,
-				"err", err,
-			)
-		}
-	}
-
-	if application.State != enrollment.ApplicationStateReserved {
-		releaseClaim()
-		return nil, enrollment.ErrInvalidApplicationState
-	}
-	if err := application.Claim(claim.Owner, u.now()); err != nil {
-		releaseClaim()
-		return nil, err
-	}
-	result, err := application.CompleteSelected(claim.Owner, u.now())
+	publication, err := u.appRepo.CompleteSelection(ctx, result)
 	if err != nil {
-		releaseClaim()
-		return nil, err
-	}
-
-	publication, err := u.appRepo.CompleteSelection(ctx, result, claim.Owner)
-	if err != nil {
-		releaseClaim()
 		return nil, err
 	}
 	return u.publishCompleted(ctx, publication)
+}
+
+func validateSelectionRequestFingerprint(
+	command *SelectCourseCommand,
+	application *enrollment.SelectionApplication,
+) error {
+	if command == nil || application == nil {
+		return enrollment.ErrInvalidParams
+	}
+	if application.RequestID != command.RequestID ||
+		application.RoundID != command.RoundID ||
+		application.StudentID != command.StudentID ||
+		application.TeachingClassID != command.TeachingClassID ||
+		application.Source != command.Source {
+		return enrollment.ErrIdempotencyConflict
+	}
+	return nil
+}
+
+func selectionReceiptFromPersisted(
+	application *enrollment.SelectionApplication,
+) *SelectionReceipt {
+	return &SelectionReceipt{
+		ApplicationID:   application.ApplicationID,
+		State:           application.State,
+		BrokerConfirmed: true,
+		MySQLPersisted:  true,
+	}
 }
 
 func (u *EnrollmentUsecase) publishCompleted(

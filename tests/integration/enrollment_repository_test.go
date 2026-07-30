@@ -92,37 +92,56 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		reservation.Application.State != enrollment.ApplicationStateReserved {
 		t.Fatalf("ReserveSelection() = %#v", reservation)
 	}
+	pendingRecord, err := repo.QuerySelectionByRequest(
+		context.Background(),
+		roundID,
+		studentID,
+		requestID,
+	)
+	if err != nil ||
+		pendingRecord == nil ||
+		pendingRecord.Application == nil ||
+		pendingRecord.Application.ApplicationID != applicationID ||
+		pendingRecord.Application.State != enrollment.ApplicationStateReserved ||
+		pendingRecord.Publication != nil ||
+		pendingRecord.MySQLPersisted {
+		t.Fatalf("QuerySelectionByRequest(pending) = %#v, %v", pendingRecord, err)
+	}
 
 	assertRedisInt(t, fmt.Sprintf("courseforge:selection:quota:credit:%d:%d", roundID, studentID), 165)
 	assertRedisInt(t, fmt.Sprintf("courseforge:selection:quota:course:%d:%d", roundID, studentID), 5)
 	assertRedisInt(t, fmt.Sprintf("courseforge:selection:class:seat:%d", classID), 1)
 
-	claim, err := repo.TryClaimSelection(
-		context.Background(),
-		studentID,
-		roundID,
-		requestID,
-		applicationID,
-	)
-	if err != nil || claim.Status != enrollment.ClaimStatusAcquired {
-		t.Fatalf("TryClaimSelection() = %#v, %v", claim, err)
-	}
-	if err := reservation.Application.Claim(claim.Owner, now.Add(time.Second)); err != nil {
-		t.Fatalf("application.Claim() error = %v", err)
-	}
-	result, err := reservation.Application.CompleteSelected(
-		claim.Owner,
-		now.Add(2*time.Second),
-	)
+	result, err := reservation.Application.CompleteSelected(now.Add(2 * time.Second))
 	if err != nil {
 		t.Fatalf("CompleteSelected() error = %v", err)
 	}
-	publication, err := repo.CompleteSelection(context.Background(), result, claim.Owner)
+	publication, err := repo.CompleteSelection(context.Background(), result)
 	if err != nil {
 		t.Fatalf("CompleteSelection() error = %v", err)
 	}
 	if publication.StreamID == "" || publication.BrokerConfirmed {
 		t.Fatalf("CompleteSelection() publication = %#v", publication)
+	}
+	reusedPublication, err := repo.CompleteSelection(context.Background(), result)
+	if err != nil ||
+		reusedPublication.StreamID != publication.StreamID ||
+		reusedPublication.Result.ApplicationID != applicationID {
+		t.Fatalf("CompleteSelection(retry) = %#v, %v", reusedPublication, err)
+	}
+	completedRecord, err := repo.QuerySelectionByRequest(
+		context.Background(),
+		roundID,
+		studentID,
+		requestID,
+	)
+	if err != nil ||
+		completedRecord == nil ||
+		completedRecord.Publication == nil ||
+		completedRecord.Application == nil ||
+		completedRecord.Application.State != enrollment.ApplicationStateSelected ||
+		completedRecord.MySQLPersisted {
+		t.Fatalf("QuerySelectionByRequest(result) = %#v, %v", completedRecord, err)
 	}
 	if length := integrationRedisClient.XLen(
 		context.Background(),
@@ -206,6 +225,35 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 	}
 	if persistedQuota.SelectedCourseCount != 1 {
 		t.Fatalf("selected course count = %d, want 1", persistedQuota.SelectedCourseCount)
+	}
+
+	// 删除 Redis 的短期结果和 pending，验证幂等查询会回退 MySQL 唯一申请记录。
+	if err := integrationRedisClient.Del(
+		context.Background(),
+		fmt.Sprintf(
+			"courseforge:selection:result:%d:%d:%s",
+			roundID,
+			studentID,
+			requestID,
+		),
+		fmt.Sprintf("courseforge:selection:pending:%d:%d", roundID, studentID),
+	).Err(); err != nil {
+		t.Fatalf("delete Redis selection lookup state: %v", err)
+	}
+	persistedRecord, err := repo.QuerySelectionByRequest(
+		context.Background(),
+		roundID,
+		studentID,
+		requestID,
+	)
+	if err != nil ||
+		persistedRecord == nil ||
+		persistedRecord.Application == nil ||
+		persistedRecord.Application.ApplicationID != applicationID ||
+		persistedRecord.Application.State != enrollment.ApplicationStateSelected ||
+		persistedRecord.Publication != nil ||
+		!persistedRecord.MySQLPersisted {
+		t.Fatalf("QuerySelectionByRequest(MySQL) = %#v, %v", persistedRecord, err)
 	}
 }
 

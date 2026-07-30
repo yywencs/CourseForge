@@ -21,7 +21,7 @@ func newTestApplication(t *testing.T) (*SelectionApplication, time.Time) {
 }
 
 // TestSelectionApplicationSelectedFlow 验证成功链路只能按
-// created → reserved → processing → selected 顺序迁移。
+// created → reserved → selected 顺序迁移。
 func TestSelectionApplicationSelectedFlow(t *testing.T) {
 	application, appliedAt := newTestApplication(t)
 	if application.State != ApplicationStateCreated {
@@ -31,26 +31,16 @@ func TestSelectionApplicationSelectedFlow(t *testing.T) {
 	if err := application.Reserve(); err != nil {
 		t.Fatalf("Reserve() error = %v", err)
 	}
-	claimedAt := appliedAt.Add(time.Second)
-	if err := application.Claim("owner-1", claimedAt); err != nil {
-		t.Fatalf("Claim() error = %v", err)
-	}
-	if application.State != ApplicationStateProcessing ||
-		application.Owner != "owner-1" ||
-		application.ProcessingAt == nil ||
-		!application.ProcessingAt.Equal(claimedAt) {
-		t.Fatalf("claimed application = %#v", application)
+	if application.State != ApplicationStateReserved {
+		t.Fatalf("reserved application = %#v", application)
 	}
 
-	completedAt := claimedAt.Add(time.Second)
-	result, err := application.CompleteSelected("owner-1", completedAt)
+	completedAt := appliedAt.Add(time.Second)
+	result, err := application.CompleteSelected(completedAt)
 	if err != nil {
 		t.Fatalf("CompleteSelected() error = %v", err)
 	}
-	if application.State != ApplicationStateSelected ||
-		application.Owner != "" ||
-		application.ProcessingAt != nil ||
-		application.CompletedAt == nil {
+	if application.State != ApplicationStateSelected || application.CompletedAt == nil {
 		t.Fatalf("completed application = %#v", application)
 	}
 	if result.State != ApplicationStateSelected ||
@@ -64,12 +54,12 @@ func TestSelectionApplicationSelectedFlow(t *testing.T) {
 	}
 }
 
-// TestSelectionApplicationRejectsInvalidTransitions 验证跳过预占、重复抢占和旧Owner提交都会被拒绝。
+// TestSelectionApplicationRejectsInvalidTransitions 验证跳过预占和重复完成都会被拒绝。
 func TestSelectionApplicationRejectsInvalidTransitions(t *testing.T) {
 	application, appliedAt := newTestApplication(t)
 
-	if err := application.Claim("owner-1", appliedAt.Add(time.Second)); !errors.Is(err, ErrInvalidApplicationState) {
-		t.Fatalf("claim before reserve error = %v, want %v", err, ErrInvalidApplicationState)
+	if _, err := application.CompleteSelected(appliedAt.Add(time.Second)); !errors.Is(err, ErrInvalidApplicationState) {
+		t.Fatalf("complete before reserve error = %v, want %v", err, ErrInvalidApplicationState)
 	}
 	if err := application.Reserve(); err != nil {
 		t.Fatalf("Reserve() error = %v", err)
@@ -77,58 +67,27 @@ func TestSelectionApplicationRejectsInvalidTransitions(t *testing.T) {
 	if err := application.Reserve(); !errors.Is(err, ErrInvalidApplicationState) {
 		t.Fatalf("second Reserve() error = %v, want %v", err, ErrInvalidApplicationState)
 	}
-	if err := application.Claim("owner-1", appliedAt.Add(time.Second)); err != nil {
-		t.Fatalf("Claim() error = %v", err)
+	if _, err := application.CompleteSelected(appliedAt.Add(time.Second)); err != nil {
+		t.Fatalf("CompleteSelected() error = %v", err)
 	}
-	if err := application.Claim("owner-2", appliedAt.Add(2*time.Second)); !errors.Is(err, ErrApplicationInProgress) {
-		t.Fatalf("second Claim() error = %v, want %v", err, ErrApplicationInProgress)
-	}
-	if _, err := application.CompleteSelected("owner-2", appliedAt.Add(3*time.Second)); !errors.Is(err, ErrClaimOwnerMismatch) {
-		t.Fatalf("stale owner completion error = %v, want %v", err, ErrClaimOwnerMismatch)
+	if _, err := application.CompleteSelected(appliedAt.Add(2 * time.Second)); !errors.Is(err, ErrInvalidApplicationState) {
+		t.Fatalf("second completion error = %v, want %v", err, ErrInvalidApplicationState)
 	}
 }
 
-// TestSelectionApplicationReleaseClaim 验证只有当前Owner可以释放处理权并回到reserved状态。
-func TestSelectionApplicationReleaseClaim(t *testing.T) {
-	application, appliedAt := newTestApplication(t)
-	if err := application.Reserve(); err != nil {
-		t.Fatalf("Reserve() error = %v", err)
-	}
-	if err := application.Claim("owner-1", appliedAt.Add(time.Second)); err != nil {
-		t.Fatalf("Claim() error = %v", err)
-	}
-
-	if err := application.ReleaseClaim("owner-2"); !errors.Is(err, ErrClaimOwnerMismatch) {
-		t.Fatalf("ReleaseClaim(stale owner) error = %v, want %v", err, ErrClaimOwnerMismatch)
-	}
-	if err := application.ReleaseClaim("owner-1"); err != nil {
-		t.Fatalf("ReleaseClaim() error = %v", err)
-	}
-	if application.State != ApplicationStateReserved ||
-		application.Owner != "" ||
-		application.ProcessingAt != nil {
-		t.Fatalf("released application = %#v", application)
-	}
-}
-
-// TestSelectionApplicationRejectedFlow 验证失败完成会保存稳定失败码并清理处理权。
+// TestSelectionApplicationRejectedFlow 验证失败完成会保存稳定失败码。
 func TestSelectionApplicationRejectedFlow(t *testing.T) {
 	application, appliedAt := newTestApplication(t)
 	if err := application.Reserve(); err != nil {
 		t.Fatalf("Reserve() error = %v", err)
 	}
-	if err := application.Claim("owner-1", appliedAt.Add(time.Second)); err != nil {
-		t.Fatalf("Claim() error = %v", err)
-	}
-
 	reason := FailureReason{
 		Code:    FailureCodeScheduleConflict,
 		Message: "与已选课程时间冲突",
 	}
 	result, err := application.CompleteRejected(
-		"owner-1",
 		reason,
-		appliedAt.Add(2*time.Second),
+		appliedAt.Add(time.Second),
 	)
 	if err != nil {
 		t.Fatalf("CompleteRejected() error = %v", err)
@@ -143,34 +102,19 @@ func TestSelectionApplicationRejectedFlow(t *testing.T) {
 	}
 }
 
-// TestSelectionApplicationCancel 验证未处理申请可以取消，处理中申请不能被无Owner直接取消。
+// TestSelectionApplicationCancel 验证预占申请可以取消。
 func TestSelectionApplicationCancel(t *testing.T) {
 	reason := FailureReason{Code: FailureCodeInternal, Message: "管理员取消教学班"}
 
-	t.Run("reserved application", func(t *testing.T) {
-		application, appliedAt := newTestApplication(t)
-		if err := application.Reserve(); err != nil {
-			t.Fatalf("Reserve() error = %v", err)
-		}
-		result, err := application.Cancel(reason, appliedAt.Add(time.Second))
-		if err != nil {
-			t.Fatalf("Cancel() error = %v", err)
-		}
-		if result.State != ApplicationStateCancelled || !result.State.Terminal() {
-			t.Fatalf("cancelled result state = %q", result.State)
-		}
-	})
-
-	t.Run("processing application", func(t *testing.T) {
-		application, appliedAt := newTestApplication(t)
-		if err := application.Reserve(); err != nil {
-			t.Fatalf("Reserve() error = %v", err)
-		}
-		if err := application.Claim("owner-1", appliedAt.Add(time.Second)); err != nil {
-			t.Fatalf("Claim() error = %v", err)
-		}
-		if _, err := application.Cancel(reason, appliedAt.Add(2*time.Second)); !errors.Is(err, ErrApplicationInProgress) {
-			t.Fatalf("Cancel(processing) error = %v, want %v", err, ErrApplicationInProgress)
-		}
-	})
+	application, appliedAt := newTestApplication(t)
+	if err := application.Reserve(); err != nil {
+		t.Fatalf("Reserve() error = %v", err)
+	}
+	result, err := application.Cancel(reason, appliedAt.Add(time.Second))
+	if err != nil {
+		t.Fatalf("Cancel() error = %v", err)
+	}
+	if result.State != ApplicationStateCancelled || !result.State.Terminal() {
+		t.Fatalf("cancelled result state = %q", result.State)
+	}
 }

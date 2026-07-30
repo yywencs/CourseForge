@@ -1,0 +1,42 @@
+groups:
+  - name: courseforge-enrollment
+    rules:
+      - alert: CourseForgeProjectionRepairBacklog
+        expr: courseforge_enrollment_projection_repair_pending > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "选课 Redis 投影修复持续积压"
+          description: "MySQL 中存在超过 2 分钟仍未完成的 Redis 投影修复任务。"
+
+      - alert: CourseForgeProjectionRepairFailures
+        expr: increase(courseforge_enrollment_projection_total{operation="reconcile",result="failed"}[5m]) > 5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "选课 Redis 投影修复连续失败"
+          description: "最近 5 分钟投影修复失败次数超过 5 次。"
+
+      - alert: CourseForgeAsynqRetriesGrowing
+        expr: sum(courseforge_asynq_retry_size) > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "选课异步任务重试队列积压"
+          description: "Asynq 重试队列连续 5 分钟超过 20 条任务。"
+
+      - alert: CourseForgeSelectionErrorRateHigh
+        expr: |
+          sum(rate(courseforge_selection_requests_total{result="error"}[5m]))
+          /
+          clamp_min(sum(rate(courseforge_selection_requests_total[5m])), 0.001)
+          > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "选课内部错误率过高"
+          description: "选课内部错误率连续 5 分钟高于 5%。"

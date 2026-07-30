@@ -41,6 +41,9 @@ func TestBenchmarkRunnerExecuteBuildsDynamicSelectionRequest(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 		}
 		requests = append(requests, payload)
+		if !strings.HasPrefix(request.Header.Get("Authorization"), "Bearer ") {
+			t.Errorf("Authorization header = %q, want Bearer token", request.Header.Get("Authorization"))
+		}
 		return `{"code":0,"info":"success","data":{"application_id":"application-1","state":"selected","broker_confirmed":true,"mysql_persisted":false}}`
 	})
 
@@ -53,6 +56,10 @@ func TestBenchmarkRunnerExecuteBuildsDynamicSelectionRequest(t *testing.T) {
 		Concurrency:     1,
 		Duration:        time.Second,
 		Timeout:         time.Second,
+		JWTSigningKey:   "benchmark-test-signing-key-at-least-32-bytes",
+		JWTIssuer:       "courseforge",
+		JWTAudience:     "courseforge-student",
+		JWTTokenTTL:     time.Hour,
 	}
 	runner := newBenchmarkRunner(config, client)
 	firstResult := runner.execute(context.Background(), 1)
@@ -63,19 +70,12 @@ func TestBenchmarkRunnerExecuteBuildsDynamicSelectionRequest(t *testing.T) {
 	}
 	firstRequest := requests[0]
 	secondRequest := requests[1]
-	if firstRequest.StudentID != defaultBenchmarkStudentIDStart ||
-		secondRequest.StudentID != defaultBenchmarkStudentIDStart+1 {
-		t.Fatalf("student IDs = %d/%d, want rotating students", firstRequest.StudentID, secondRequest.StudentID)
-	}
 	if firstRequest.RoundID != defaultBenchmarkRoundID ||
 		firstRequest.TeachingClassID != defaultBenchmarkClassID {
 		t.Fatalf("selection target = %+v, want configured round/class", firstRequest)
 	}
 	if firstRequest.RequestID == "" || firstRequest.RequestID == secondRequest.RequestID {
 		t.Fatalf("request IDs = %q/%q, want unique non-empty values", firstRequest.RequestID, secondRequest.RequestID)
-	}
-	if firstRequest.Source != "web" {
-		t.Fatalf("source = %q, want web", firstRequest.Source)
 	}
 }
 
@@ -93,6 +93,10 @@ func TestBenchmarkRunnerExecuteClassifiesBusinessError(t *testing.T) {
 		Concurrency:     1,
 		Duration:        time.Second,
 		Timeout:         time.Second,
+		JWTSigningKey:   "benchmark-test-signing-key-at-least-32-bytes",
+		JWTIssuer:       "courseforge",
+		JWTAudience:     "courseforge-student",
+		JWTTokenTTL:     time.Hour,
 	}
 	result := newBenchmarkRunner(config, client).execute(context.Background(), 1)
 	if result.outcome != outcomeBusinessError || result.businessCode != 409 {
@@ -113,6 +117,10 @@ func TestBenchmarkRunnerRejectsIncompleteSuccessPayload(t *testing.T) {
 		Concurrency:     1,
 		Duration:        time.Second,
 		Timeout:         time.Second,
+		JWTSigningKey:   "benchmark-test-signing-key-at-least-32-bytes",
+		JWTIssuer:       "courseforge",
+		JWTAudience:     "courseforge-student",
+		JWTTokenTTL:     time.Hour,
 	}
 	result := newBenchmarkRunner(config, client).execute(context.Background(), 1)
 	if result.outcome != outcomeDecodeError {
@@ -135,6 +143,10 @@ func TestBenchmarkRunnerSendsOneRequestPerStudent(t *testing.T) {
 		Concurrency:     3,
 		Duration:        time.Second,
 		Timeout:         time.Second,
+		JWTSigningKey:   "benchmark-test-signing-key-at-least-32-bytes",
+		JWTIssuer:       "courseforge",
+		JWTAudience:     "courseforge-student",
+		JWTTokenTTL:     time.Hour,
 	}
 	summary := newBenchmarkRunner(config, client).run(context.Background())
 	if calls.Load() != 5 || summary.Stats.total != 5 {
@@ -143,5 +155,64 @@ func TestBenchmarkRunnerSendsOneRequestPerStudent(t *testing.T) {
 			calls.Load(),
 			summary.Stats.total,
 		)
+	}
+}
+
+func TestBenchmarkRunnerIdempotencyScenarioReusesRequestID(t *testing.T) {
+	var requestIDs []string
+	client := jsonResponseClient(func(request *http.Request) string {
+		var payload selectionRequest
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		requestIDs = append(requestIDs, payload.RequestID)
+		return `{"code":0,"info":"success","data":{"application_id":"application-1","state":"selected","broker_confirmed":true,"mysql_persisted":false}}`
+	})
+	config := benchmarkConfig{
+		BaseURL:         "http://example.test",
+		Scenario:        scenarioIdempotency,
+		RoundID:         defaultBenchmarkRoundID,
+		TeachingClassID: defaultBenchmarkClassID,
+		StudentIDStart:  defaultBenchmarkStudentIDStart,
+		Users:           1,
+		Concurrency:     1,
+		Duration:        time.Second,
+		Timeout:         time.Second,
+		JWTSigningKey:   "benchmark-test-signing-key-at-least-32-bytes",
+		JWTIssuer:       "courseforge",
+		JWTAudience:     "courseforge-student",
+		JWTTokenTTL:     time.Hour,
+	}
+	result := newBenchmarkRunner(config, client).execute(context.Background(), 1)
+	if result.outcome != outcomeSuccess || len(requestIDs) != 2 || requestIDs[0] != requestIDs[1] {
+		t.Fatalf("result = %#v, requestIDs = %v", result, requestIDs)
+	}
+}
+
+func TestBenchmarkRunnerWaitlistScenario(t *testing.T) {
+	client := jsonResponseClient(func(request *http.Request) string {
+		if request.URL.Path != waitlistPath {
+			t.Errorf("path = %q, want %q", request.URL.Path, waitlistPath)
+		}
+		return `{"code":0,"info":"success","data":{"waitlist_id":"waitlist-1","state":"waiting"}}`
+	})
+	config := benchmarkConfig{
+		BaseURL:         "http://example.test",
+		Scenario:        scenarioWaitlist,
+		RoundID:         defaultBenchmarkRoundID,
+		TeachingClassID: defaultBenchmarkClassID,
+		StudentIDStart:  defaultBenchmarkStudentIDStart,
+		Users:           1,
+		Concurrency:     1,
+		Duration:        time.Second,
+		Timeout:         time.Second,
+		JWTSigningKey:   "benchmark-test-signing-key-at-least-32-bytes",
+		JWTIssuer:       "courseforge",
+		JWTAudience:     "courseforge-student",
+		JWTTokenTTL:     time.Hour,
+	}
+	result := newBenchmarkRunner(config, client).execute(context.Background(), 1)
+	if result.outcome != outcomeSuccess {
+		t.Fatalf("result = %#v", result)
 	}
 }

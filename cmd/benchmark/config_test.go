@@ -16,6 +16,8 @@ func TestParseConfig(t *testing.T) {
 		"--concurrency", "20",
 		"--duration", "45s",
 		"--timeout", "3s",
+		"--scenario", "idempotency",
+		"--jwt-signing-key", "benchmark-test-signing-key-at-least-32-bytes",
 	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v, want nil", err)
@@ -34,6 +36,9 @@ func TestParseConfig(t *testing.T) {
 	if config.Duration != 45*time.Second || config.Timeout != 3*time.Second {
 		t.Fatalf("parsed durations = %s/%s, want 45s/3s", config.Duration, config.Timeout)
 	}
+	if config.normalizedScenario() != scenarioIdempotency {
+		t.Fatalf("scenario = %q, want %q", config.normalizedScenario(), scenarioIdempotency)
+	}
 }
 
 func TestParseConfigRejectsInvalidValues(t *testing.T) {
@@ -47,11 +52,16 @@ func TestParseConfigRejectsInvalidValues(t *testing.T) {
 		{name: "zero users", args: []string{"--users", "0"}},
 		{name: "zero duration", args: []string{"--duration", "0s"}},
 		{name: "zero round", args: []string{"--round-id", "0"}},
+		{name: "unknown scenario", args: []string{"--scenario", "unknown"}},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if _, err := parseConfig(testCase.args, io.Discard); err == nil {
+			args := append([]string{
+				"--jwt-signing-key",
+				"benchmark-test-signing-key-at-least-32-bytes",
+			}, testCase.args...)
+			if _, err := parseConfig(args, io.Discard); err == nil {
 				t.Fatal("parseConfig() error = nil, want validation error")
 			}
 		})

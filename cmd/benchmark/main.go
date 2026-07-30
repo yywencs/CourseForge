@@ -40,6 +40,7 @@ func main() {
 
 	fmt.Println("CourseForge enrollment benchmark")
 	fmt.Printf("  endpoint:          %s\n", config.endpoint())
+	fmt.Printf("  scenario:          %s\n", config.normalizedScenario())
 	fmt.Printf("  round:             %d\n", config.RoundID)
 	fmt.Printf("  teaching class:    %d\n", config.TeachingClassID)
 	fmt.Printf("  student ID range:  %d-%d\n", config.StudentIDStart, config.StudentIDStart+uint64(config.Users-1))

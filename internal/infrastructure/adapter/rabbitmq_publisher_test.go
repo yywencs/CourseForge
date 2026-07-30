@@ -65,7 +65,7 @@ func TestRabbitMQPublisherUsesPoolSlotsConcurrently(t *testing.T) {
 	results := make(chan error, poolSize)
 	for i := 0; i < poolSize; i++ {
 		go func(value int) {
-			results <- publisher.Publish(ctx, "draw_result", rabbitmq.NewBaseEvent(value))
+			results <- publisher.Publish(ctx, "events", rabbitmq.NewBaseEvent(value))
 		}(i)
 	}
 
@@ -95,50 +95,29 @@ func TestRabbitMQPublisherStopsWaitingForSlotWhenContextEnds(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	err := publisher.Publish(ctx, "draw_result", rabbitmq.NewBaseEvent("payload"))
+	err := publisher.Publish(ctx, "events", rabbitmq.NewBaseEvent("payload"))
 	if err == nil || !strings.Contains(err.Error(), "wait RabbitMQ publisher channel") {
 		t.Fatalf("Publish() error = %v, want publisher channel wait error", err)
 	}
 }
 
-// TestPublisherUsesConfiguredTopics 验证类型化 Publisher 会将每种业务事件
-// 发布到配置指定的 Topic，而不是依赖硬编码 Exchange 名称。
+// TestPublisherUsesConfiguredSelectionTopic 验证选课结果发布到配置指定的 Topic。
 func TestPublisherUsesConfiguredTopics(t *testing.T) {
 	client := &recordingEventPublisher{}
 	publisher := NewPublisher(client, &config.RabbitMQConfig{
 		Topic: config.RabbitMQTopicConfig{
-			ActivitySkuStockZero: "configured-stock-zero",
-			SendAward:            "configured-send-award",
-			SendRebate:           "configured-send-rebate",
-			DrawResult:           "configured-draw-result",
+			SelectionResult: "configured-selection-result",
 		},
 	})
 	event := rabbitmq.NewBaseEvent("payload")
 
-	publishers := []struct {
-		name      string
-		wantTopic string
-		publish   func(context.Context, *rabbitmq.BaseEvent) error
-	}{
-		{name: "stock zero", wantTopic: "configured-stock-zero", publish: publisher.PublishStockZero},
-		{name: "send award", wantTopic: "configured-send-award", publish: publisher.PublishSendAward},
-		{name: "send rebate", wantTopic: "configured-send-rebate", publish: publisher.PublishSendRebate},
-		{name: "draw result", wantTopic: "configured-draw-result", publish: publisher.PublishDrawResult},
+	if err := publisher.PublishSelectionResult(context.Background(), event); err != nil {
+		t.Fatalf("publish error = %v, want nil", err)
 	}
-
-	for _, testCase := range publishers {
-		t.Run(testCase.name, func(t *testing.T) {
-			client.topics = nil
-			client.events = nil
-			if err := testCase.publish(context.Background(), event); err != nil {
-				t.Fatalf("publish error = %v, want nil", err)
-			}
-			if len(client.topics) != 1 || client.topics[0] != testCase.wantTopic {
-				t.Fatalf("published topics = %#v, want [%q]", client.topics, testCase.wantTopic)
-			}
-			if len(client.events) != 1 || client.events[0] != event {
-				t.Fatalf("published events = %#v, want original event", client.events)
-			}
-		})
+	if len(client.topics) != 1 || client.topics[0] != "configured-selection-result" {
+		t.Fatalf("published topics = %#v, want configured selection topic", client.topics)
+	}
+	if len(client.events) != 1 || client.events[0] != event {
+		t.Fatalf("published events = %#v, want original event", client.events)
 	}
 }

@@ -41,18 +41,18 @@ func TestWithMetadataDoesNotMutateSentinel(t *testing.T) {
 	sentinel := New("INVALID_CONFIG", "配置无效")
 
 	first := sentinel.WithMetadata(map[string]string{
-		"user_id":     "user-1",
-		"activity_id": "100301",
+		"student_id": "student-1",
+		"round_id":   "100301",
 	})
-	second := sentinel.WithMetadata(map[string]string{"strategy_id": "100006"})
+	second := sentinel.WithMetadata(map[string]string{"course_id": "100006"})
 
 	if got := sentinel.GetErrMsg(); got != "配置无效" {
 		t.Fatalf("sentinel message = %q, want %q", got, "配置无效")
 	}
-	if got := first.GetErrMsg(); got != "配置无效 [activity_id=100301] [user_id=user-1]" {
+	if got := first.GetErrMsg(); got != "配置无效 [round_id=100301] [student_id=student-1]" {
 		t.Fatalf("first message = %q", got)
 	}
-	if got := second.GetErrMsg(); got != "配置无效 [strategy_id=100006]" {
+	if got := second.GetErrMsg(); got != "配置无效 [course_id=100006]" {
 		t.Fatalf("second message = %q", got)
 	}
 	if !errors.Is(first, sentinel) || !errors.Is(second, sentinel) {

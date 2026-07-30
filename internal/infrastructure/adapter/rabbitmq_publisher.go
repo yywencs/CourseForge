@@ -172,24 +172,8 @@ func NewPublisher(client eventPublisher, cfg *config.RabbitMQConfig) *Publisher 
 	}
 }
 
-func (p *Publisher) PublishStockZero(ctx context.Context, event *rabbitmq.BaseEvent) error {
-	return p.client.Publish(ctx, p.topic.ActivitySkuStockZero, event)
-}
-
-func (p *Publisher) PublishSendRebate(ctx context.Context, event *rabbitmq.BaseEvent) error {
-	return p.client.Publish(ctx, p.topic.SendRebate, event)
-}
-
-func (p *Publisher) PublishSendAward(ctx context.Context, event *rabbitmq.BaseEvent) error {
-	return p.client.Publish(ctx, p.topic.SendAward, event)
-}
-
 func (p *Publisher) PublishTopic(ctx context.Context, topic string, event *rabbitmq.BaseEvent) error {
 	return p.client.Publish(ctx, topic, event)
-}
-
-func (p *Publisher) PublishDrawResult(ctx context.Context, event *rabbitmq.BaseEvent) error {
-	return p.client.Publish(ctx, p.topic.DrawResult, event)
 }
 
 // PublishSelectionResult 发布选课标准结果并等待 RabbitMQ Confirm。

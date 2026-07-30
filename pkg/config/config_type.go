@@ -97,30 +97,12 @@ type RabbitMQSimple struct {
 }
 
 type RabbitMQTopicConfig struct {
-	ActivitySkuStockZero string `mapstructure:"activity_sku_stock_zero"`
-	SendAward            string `mapstructure:"send_award"`
-	SendRebate           string `mapstructure:"send_rebate"`
-	DrawResult           string `mapstructure:"draw_result"`
-	SelectionResult      string `mapstructure:"selection_result"`
+	SelectionResult string `mapstructure:"selection_result"`
 }
 
 func (c RabbitMQTopicConfig) Validate() error {
-	topics := map[string]string{
-		"activity_sku_stock_zero": c.ActivitySkuStockZero,
-		"send_award":              c.SendAward,
-		"send_rebate":             c.SendRebate,
-		"draw_result":             c.DrawResult,
-		"selection_result":        c.SelectionResult,
-	}
-	seen := make(map[string]string, len(topics))
-	for name, topic := range topics {
-		if strings.TrimSpace(topic) == "" {
-			return fmt.Errorf("%s is required", name)
-		}
-		if previous, exists := seen[topic]; exists {
-			return fmt.Errorf("%s and %s must use different topics: %q", previous, name, topic)
-		}
-		seen[topic] = name
+	if strings.TrimSpace(c.SelectionResult) == "" {
+		return fmt.Errorf("selection_result is required")
 	}
 	return nil
 }

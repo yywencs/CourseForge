@@ -2,94 +2,36 @@ package bootstrap
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
 	"prizeforge/internal/application/api"
-	"prizeforge/internal/domain/activity"
-	"prizeforge/internal/domain/award"
-	"prizeforge/internal/domain/rebate"
-	"prizeforge/internal/domain/strategy"
-	"prizeforge/internal/domain/task"
 	"prizeforge/internal/infrastructure/adapter"
-	"prizeforge/internal/infrastructure/repository/activityrepo"
-	"prizeforge/internal/infrastructure/repository/awardrepo"
 	"prizeforge/internal/infrastructure/repository/enrollmentrepo"
 	"prizeforge/internal/infrastructure/repository/outboxrepo"
-	"prizeforge/internal/infrastructure/repository/rebaterepo"
-	"prizeforge/internal/infrastructure/repository/strategyrepo"
-	"prizeforge/internal/infrastructure/repository/taskrepo"
 	"prizeforge/internal/job"
 	"prizeforge/internal/listener"
 	"prizeforge/internal/worker"
-	"prizeforge/pkg/cache"
 	"prizeforge/pkg/config"
 	"prizeforge/pkg/logger"
 	httpserver "prizeforge/server/http"
 	adminhttp "prizeforge/server/http/admin"
 	apihttp "prizeforge/server/http/api"
 	"prizeforge/server/http/common"
-
-	"github.com/hibiken/asynq"
-	"gorm.io/gorm"
 )
 
 // HTTPApp holds the wired application dependencies.
 //
-// 区分两个入口：
-//   - NewAdminApp：只装配 courseforge MySQL 和可扩展 Admin HTTP 骨架。
-//     不建旧抽奖分库、Redis、RabbitMQ、Asynq worker / RabbitMQ consumer。
-//   - NewAPIApp：装配 API HTTP 全链路 + Asynq worker + RabbitMQ consumer。
-//
-// 这样 cmd/admin 在没有 RabbitMQ 的环境也能正常启动；
-// cmd/api 用 NewAPIApp 并通过 AsynqWorker()/RabbitMQConsumer() 取出 worker/consumer 启动。
+// Admin 只连接 CourseForge MySQL；API 额外装配选课所需的 Redis、
+// RabbitMQ、Asynq worker 和 RabbitMQ consumer。
 type HTTPApp struct {
 	Config *config.Config
 
-	// HTTP servers
-	apiServer   httpserver.Server
-	adminServer httpserver.Server
-
-	// Async workers（仅 NewAPIApp 路径填充）
+	apiServer        httpserver.Server
+	adminServer      httpserver.Server
 	asynqWorker      *worker.AsynqWorker
 	rabbitMQConsumer *listener.RabbitMQConsumer
-}
-
-// baseDeps 是 API 旧抽奖链路与选课链路当前共享的依赖。
-// Admin 已从这里解耦，只连接 courseforge MySQL。
-type baseDeps struct {
-	cfg         *config.Config
-	dbRouter    *adapter.DBRouter
-	gormDB      *gorm.DB
-	redis       *cache.Cache
-	asynqClient *asynq.Client
-	strategySvc *strategy.StrategyUsecase
-}
-
-// loadBase 初始化配置、logger、db、redis、asynq client 以及 strategy 链。
-// 不触碰 RabbitMQ；构造 asynq client 不触发 eager 拨号，admin 只读不会入队。
-//
-// 注：此处 db 用的是 adapter 提供的 *gorm.DB / DBRouter，asynq client 用 *asynq.Client，
-// 具体类型随 adapter 包内工厂函数返回值而定。
-func loadBase() (*baseDeps, error) {
-	cfg := loadRuntimeConfig()
-
-	gormDB := adapter.NewDB(&cfg.Data.Database)
-	dbRouter := adapter.NewDBRouter(&cfg.Data.Database)
-	redis := adapter.NewRedisClient(&cfg.Data.Redis)
-	asynqClient := adapter.NewAsynqClient(&cfg.Asynq)
-
-	strategyRepo := strategyrepo.NewStrategyRepository(gormDB, redis, asynqClient, dbRouter)
-	strategySvc := strategy.NewStrategyUsecase(strategyRepo)
-
-	return &baseDeps{
-		cfg:         cfg,
-		dbRouter:    dbRouter,
-		gormDB:      gormDB,
-		redis:       redis,
-		asynqClient: asynqClient,
-		strategySvc: strategySvc,
-	}, nil
 }
 
 func loadRuntimeConfig() *config.Config {
@@ -107,49 +49,31 @@ func loadRuntimeConfig() *config.Config {
 	return cfg
 }
 
-// NewAdminApp 装配 courseforge MySQL + Admin HTTP 骨架。
-// 后续课程、视频等管理模块通过 admin.RouteRegistrar 注入路由。
+// NewAdminApp 装配 CourseForge MySQL 与可扩展的 Admin HTTP 骨架。
 func NewAdminApp() *HTTPApp {
 	cfg := loadRuntimeConfig()
 	courseforgeDB := adapter.NewCourseforgeDB(&cfg.Data.Database)
 	readinessChecks := common.ReadinessChecks{
-		"courseforge_mysql": func(ctx context.Context) error {
-			sqlDB, err := courseforgeDB.DB()
-			if err != nil {
-				return fmt.Errorf("get courseforge database: %w", err)
-			}
-			return sqlDB.PingContext(ctx)
-		},
+		"courseforge_mysql": databaseReadinessCheck(courseforgeDB),
 	}
-	adminServer := adminhttp.NewServer(resolveAdminAddr(cfg), readinessChecks)
 
 	return &HTTPApp{
 		Config:      cfg,
-		adminServer: adminServer,
+		adminServer: adminhttp.NewServer(resolveAdminAddr(cfg), readinessChecks),
 	}
 }
 
-// NewAPIApp 装配 API HTTP 全链路：RabbitMQ 连接 + 全部 repo + 全部 domain service
-// + api usecase + api server + Asynq worker + RabbitMQ consumer。
-// RabbitMQ 不可达时返回 error，交由 cmd/api 决定是否 fatal。
+// NewAPIApp 装配选课 API、异步结果落库与通用 Outbox 分发链路。
 func NewAPIApp() (*HTTPApp, error) {
-	b, err := loadBase()
-	if err != nil {
-		return nil, err
-	}
-	cfg := b.cfg
-	dbRouter := b.dbRouter
-	gormDB := b.gormDB
-	courseforgeDB := adapter.NewCourseforgeDB(&cfg.Data.Database)
-	redis := b.redis
-	asynqClient := b.asynqClient
-	strategySvc := b.strategySvc
-
+	cfg := loadRuntimeConfig()
 	if err := cfg.RabbitMQ.Topic.Validate(); err != nil {
 		return nil, fmt.Errorf("rabbitmq topic config: %w", err)
 	}
 
-	// RabbitMQ 连接 + publisher（API 链路强依赖）
+	courseforgeDB := adapter.NewCourseforgeDB(&cfg.Data.Database)
+	redis := adapter.NewRedisClient(&cfg.Data.Redis)
+	asynqClient := adapter.NewAsynqClient(&cfg.Asynq)
+
 	conn, err := adapter.NewConnection(&cfg.RabbitMQ)
 	if err != nil {
 		return nil, fmt.Errorf("rabbitmq: %w", err)
@@ -159,52 +83,16 @@ func NewAPIApp() (*HTTPApp, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("rabbitmq publisher: %w", err)
 	}
-	typedPublisher := adapter.NewPublisher(rabbitPublisher, &cfg.RabbitMQ)
+	publisher := adapter.NewPublisher(rabbitPublisher, &cfg.RabbitMQ)
 
-	asynqInspector := adapter.NewAsynqInspector(&cfg.Asynq)
-
-	// repo（除 strategy 已在 loadBase 构造）
-	activityRepo := activityrepo.NewRepository(dbRouter, gormDB, redis, typedPublisher, asynqClient, asynqInspector)
-	awardRepo := awardrepo.NewUserAwardRecordRepository(dbRouter, redis, typedPublisher)
-	taskRepo := taskrepo.NewTaskRepository(dbRouter, typedPublisher)
-	rebateRepo := rebaterepo.NewRebateRepository(gormDB, dbRouter, typedPublisher)
 	enrollmentRepo := enrollmentrepo.NewRepository(courseforgeDB, redis)
+	selectionResultPublisher := job.NewSelectionResultPublisher(enrollmentRepo, publisher)
+	selectionResultRecovery := job.NewSelectionResultRecoveryJob(enrollmentRepo, selectionResultPublisher)
+	outboxDispatcher := job.NewOutboxDispatcher(outboxrepo.NewRepository(courseforgeDB), publisher)
 
-	// domain service
-	activityPartakeSvc := activity.NewActivityPartakeUsecase(activityRepo)
-	activityQuotaSvc := activity.NewActivityQuotaUsecase(activityRepo)
-	stockManager := activity.NewStockManager(activityRepo)
-	awardSvc := award.NewAwardUsecase(awardRepo)
-	taskSvc := task.NewTaskUsecase(taskRepo)
-	rebateSvc := rebate.NewBehaviorRebateUsecase(rebateRepo)
-
-	// Asynq jobs
-	skuStockJob := job.NewActivitySkuStockConsumeJob(activityQuotaSvc)
-	dbCount := cfg.Data.Database.DbCount
-	sendAwardMsgJob := job.NewSendAwardMessage(taskSvc, strategySvc, dbCount)
-	strategyAwardStockJob := job.NewStrategyAwardStockConsumeJob(strategySvc)
-	drawResultPublisher := job.NewDrawResultPublisher(activityPartakeSvc, typedPublisher)
-	drawResultRecoveryJob := job.NewDrawResultRecoveryJob(activityPartakeSvc, drawResultPublisher)
-	selectionResultPublisher := job.NewSelectionResultPublisher(enrollmentRepo, typedPublisher)
-	selectionResultRecoveryJob := job.NewSelectionResultRecoveryJob(enrollmentRepo, selectionResultPublisher)
-	outboxRepository := outboxrepo.NewRepository(courseforgeDB)
-	outboxDispatcher := job.NewOutboxDispatcher(outboxRepository, typedPublisher)
-
-	// RabbitMQ listeners
-	stockListener := listener.NewActivityStockListener(activityQuotaSvc)
-	rebateListener := listener.NewRebateListener(activityQuotaSvc)
-	drawResultListener := listener.NewDrawResultListener(activityPartakeSvc)
-	sendAwardListener := listener.NewSendAwardListener(awardSvc)
-	selectionResultListener := listener.NewSelectionResultListener(enrollmentRepo)
-
-	// Asynq worker + RabbitMQ consumer
 	asynqWorker := worker.NewAsynqWorker(
 		&cfg.Asynq,
-		skuStockJob,
-		sendAwardMsgJob,
-		strategyAwardStockJob,
-		drawResultRecoveryJob,
-		selectionResultRecoveryJob,
+		selectionResultRecovery,
 		outboxDispatcher,
 	)
 	rabbitMQConsumer := listener.NewRabbitMQConsumer(
@@ -213,48 +101,48 @@ func NewAPIApp() (*HTTPApp, error) {
 		listener.WithDefaultConcurrency(cfg.RabbitMQ.Listener.Simple.DefaultConcurrency),
 		listener.WithQueueConcurrency(cfg.RabbitMQ.Listener.Simple.Concurrency),
 	)
-	rabbitMQConsumer.RegisterListener(cfg.RabbitMQ.Topic.ActivitySkuStockZero, stockListener)
-	rabbitMQConsumer.RegisterListener(cfg.RabbitMQ.Topic.SendRebate, rebateListener)
-	rabbitMQConsumer.RegisterListener(cfg.RabbitMQ.Topic.DrawResult, drawResultListener)
-	rabbitMQConsumer.RegisterListener(cfg.RabbitMQ.Topic.SendAward, sendAwardListener)
-	rabbitMQConsumer.RegisterListener(cfg.RabbitMQ.Topic.SelectionResult, selectionResultListener)
+	rabbitMQConsumer.RegisterListener(
+		cfg.RabbitMQ.Topic.SelectionResult,
+		listener.NewSelectionResultListener(enrollmentRepo),
+	)
 
-	// application usecases
-	apiStrategyUsecase := api.NewStrategyUsecase(strategySvc)
-	apiActivityUsecase := api.NewActivityUsecase(activityPartakeSvc, activityQuotaSvc, stockManager, strategySvc, drawResultPublisher, rebateSvc)
-	apiEnrollmentUsecase := api.NewEnrollmentUsecase(enrollmentRepo, enrollmentRepo, selectionResultPublisher)
+	enrollmentUsecase := api.NewEnrollmentUsecase(
+		enrollmentRepo,
+		enrollmentRepo,
+		selectionResultPublisher,
+	)
+	readinessChecks := common.ReadinessChecks{
+		"courseforge_mysql": databaseReadinessCheck(courseforgeDB),
+		"redis":             redis.Ping,
+		"asynq_redis": func(context.Context) error {
+			return asynqClient.Ping()
+		},
+		"rabbitmq": func(context.Context) error {
+			if conn.IsClosed() {
+				return errors.New("rabbitmq connection is closed")
+			}
+			return nil
+		},
+	}
 
-	readinessChecks := baseReadinessChecks(b)
-	readinessChecks["asynq_redis"] = func(context.Context) error {
-		return asynqClient.Ping()
-	}
-	readinessChecks["rabbitmq"] = func(context.Context) error {
-		if conn.IsClosed() {
-			return errors.New("rabbitmq connection is closed")
-		}
-		return nil
-	}
-	readinessChecks["courseforge_mysql"] = func(ctx context.Context) error {
-		sqlDB, err := courseforgeDB.DB()
+	return &HTTPApp{
+		Config:           cfg,
+		apiServer:        apihttp.NewServer(resolveAPIAddr(cfg), enrollmentUsecase, readinessChecks),
+		asynqWorker:      asynqWorker,
+		rabbitMQConsumer: rabbitMQConsumer,
+	}, nil
+}
+
+func databaseReadinessCheck(db interface {
+	DB() (*sql.DB, error)
+}) common.ReadinessCheck {
+	return func(ctx context.Context) error {
+		sqlDB, err := db.DB()
 		if err != nil {
 			return fmt.Errorf("get courseforge database: %w", err)
 		}
 		return sqlDB.PingContext(ctx)
 	}
-	apiServer := apihttp.NewServer(
-		resolveAPIAddr(cfg),
-		apiStrategyUsecase,
-		apiActivityUsecase,
-		apiEnrollmentUsecase,
-		readinessChecks,
-	)
-
-	return &HTTPApp{
-		Config:           cfg,
-		apiServer:        apiServer,
-		asynqWorker:      asynqWorker,
-		rabbitMQConsumer: rabbitMQConsumer,
-	}, nil
 }
 
 // APIServer returns the API HTTP server.
@@ -263,27 +151,11 @@ func (a *HTTPApp) APIServer() httpserver.Server { return a.apiServer }
 // AdminServer returns the Admin HTTP server.
 func (a *HTTPApp) AdminServer() httpserver.Server { return a.adminServer }
 
-// AsynqWorker returns the Asynq worker（仅 NewAPIApp 路径非 nil）。
+// AsynqWorker returns the API worker.
 func (a *HTTPApp) AsynqWorker() *worker.AsynqWorker { return a.asynqWorker }
 
-// RabbitMQConsumer returns the RabbitMQ consumer（仅 NewAPIApp 路径非 nil）。
+// RabbitMQConsumer returns the API consumer.
 func (a *HTTPApp) RabbitMQConsumer() *listener.RabbitMQConsumer { return a.rabbitMQConsumer }
-
-func baseReadinessChecks(b *baseDeps) common.ReadinessChecks {
-	return common.ReadinessChecks{
-		"mysql": func(ctx context.Context) error {
-			sqlDB, err := b.gormDB.DB()
-			if err != nil {
-				return fmt.Errorf("get default database: %w", err)
-			}
-			if err := sqlDB.PingContext(ctx); err != nil {
-				return fmt.Errorf("ping default database: %w", err)
-			}
-			return b.dbRouter.Ping(ctx)
-		},
-		"redis": b.redis.Ping,
-	}
-}
 
 func resolveAPIAddr(cfg *config.Config) string {
 	if cfg != nil && cfg.Server.API.Addr != "" {

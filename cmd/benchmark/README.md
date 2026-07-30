@@ -29,7 +29,7 @@ docker build \
 - 必须显式传入 `--confirm-reset`。
 - 轮次、教学班和学生 ID 必须不小于 `9000000000000`。
 - 如果学生 ID 范围内存在学号不是 `BENCH-` 前缀的数据，工具会拒绝执行。
-- MySQL DSN 必须直接连接 `courseforge`，不再使用旧抽奖分库模板。
+- MySQL DSN 必须直接连接 `courseforge`。
 
 ```bash
 export COURSEFORGE_BENCHMARK_MYSQL_DSN='root:密码@tcp(mysql:3306)/courseforge?charset=utf8mb4&parseTime=true&loc=Local&timeout=10s'

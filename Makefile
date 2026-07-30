@@ -61,16 +61,10 @@ integration-up: ## 启动并等待临时 MySQL、Redis、RabbitMQ 集成测试�
 	$(INTEGRATION_COMPOSE) up -d --wait mysql redis rabbitmq
 
 .PHONY: integration-db-check
-integration-db-check: ## 验证集成测试分库和返利表已经初始化
-	@db_count="$$( $(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name IN ('"'"'prizeforge'"'"', '"'"'prizeforge_01'"'"', '"'"'prizeforge_02'"'"', '"'"'courseforge'"'"')"' )"; \
-	rebate_config_count="$$( $(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '"'"'prizeforge'"'"' AND table_name = '"'"'daily_behavior_rebate'"'"'"' )"; \
-	rebate_order_table_count="$$( $(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema IN ('"'"'prizeforge_01'"'"', '"'"'prizeforge_02'"'"') AND table_name LIKE '"'"'user_behavior_rebate_order_%'"'"'"' )"; \
-	courseforge_table_count="$$( $(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '"'"'courseforge'"'"'"' )"; \
-	test "$$db_count" = "4"; \
-	test "$$rebate_config_count" = "1"; \
-	test "$$rebate_order_table_count" = "8"; \
+integration-db-check: ## 验证 CourseForge 集成测试表已经初始化
+	@courseforge_table_count="$$( $(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '"'"'courseforge'"'"'"' )"; \
 	test "$$courseforge_table_count" = "18"; \
-	printf '%s\n' "integration MySQL schema is ready"
+	printf '%s\n' "CourseForge integration MySQL schema is ready"
 
 .PHONY: integration-redis-check
 integration-redis-check: ## 验证集成测试 Redis 已经就绪
@@ -95,7 +89,7 @@ integration-test: ## 启动临时 MySQL、Redis、RabbitMQ，运行集成测试�
 	$(MAKE) integration-db-check; \
 	$(MAKE) integration-redis-check; \
 	$(MAKE) integration-rabbitmq-check; \
-	PRIZEFORGE_INTEGRATION_MYSQL_DSN='root:$(INTEGRATION_MYSQL_PASSWORD)@tcp(127.0.0.1:$(INTEGRATION_MYSQL_PORT))/prizeforge%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s' \
+	PRIZEFORGE_INTEGRATION_MYSQL_DSN='root:$(INTEGRATION_MYSQL_PASSWORD)@tcp(127.0.0.1:$(INTEGRATION_MYSQL_PORT))/courseforge?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s' \
 	PRIZEFORGE_INTEGRATION_REDIS_ADDR='127.0.0.1:$(INTEGRATION_REDIS_PORT)' \
 	PRIZEFORGE_INTEGRATION_RABBITMQ_ADDR='127.0.0.1:$(INTEGRATION_RABBITMQ_PORT)' \
 	PRIZEFORGE_INTEGRATION_RABBITMQ_USER='$(INTEGRATION_RABBITMQ_USER)' \

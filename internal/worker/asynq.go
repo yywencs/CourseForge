@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"prizeforge/internal/domain/activity"
 	"prizeforge/internal/domain/enrollment"
 	"prizeforge/internal/domain/outbox"
-	"prizeforge/internal/domain/task"
 	"prizeforge/internal/job"
 	"prizeforge/internal/metrics"
 	"prizeforge/pkg/config"
@@ -30,10 +28,6 @@ type AsynqWorker struct {
 // NewAsynqWorker 创建一个 Asynq worker 服务端，并注册所有任务处理器。
 func NewAsynqWorker(
 	cfg *config.AsynqConfig,
-	skuStockJob *job.ActivitySkuStockConsumeJob,
-	stateSyncJob *job.SendAwardMessage,
-	strategyAwardStockJob *job.StrategyAwardStockConsumeJob,
-	drawResultRecoveryJob *job.DrawResultRecoveryJob,
 	selectionResultRecoveryJob *job.SelectionResultRecoveryJob,
 	outboxDispatcher *job.OutboxDispatcher,
 ) *AsynqWorker {
@@ -48,9 +42,8 @@ func NewAsynqWorker(
 		asynq.Config{
 			Concurrency: cfg.Concurrency,
 			Queues: map[string]int{
-				activity.TaskTypeActivitySkuStockConsume: 6,
-				"default":                                3,
-				"low":                                    1,
+				"default": 3,
+				"low":     1,
 			},
 			ErrorHandler: asynq.ErrorHandlerFunc(func(ctx context.Context, task *asynq.Task, err error) {
 				result := asynqTaskResult(err)
@@ -64,16 +57,10 @@ func NewAsynqWorker(
 	scheduler := asynq.NewScheduler(redisOpt, &asynq.SchedulerOpts{})
 	inspector := asynq.NewInspector(redisOpt)
 	queues := []string{
-		activity.TaskTypeActivitySkuStockConsume,
 		"default",
 		"low",
 	}
 
-	// 注册任务处理器
-	mux.HandleFunc(activity.TaskTypeActivitySkuStockConsume, wrapAsynqHandler(activity.TaskTypeActivitySkuStockConsume, skuStockJob.ProcessTask))
-	mux.HandleFunc(activity.TaskTypeActivityStateSync, wrapAsynqHandler(activity.TaskTypeActivityStateSync, stateSyncJob.ProcessTask))
-	mux.HandleFunc(task.TaskTypeStrategyAwardStockConsume, wrapAsynqHandler(task.TaskTypeStrategyAwardStockConsume, strategyAwardStockJob.ProcessTask))
-	mux.HandleFunc(activity.TaskTypeDrawResultPublish, wrapAsynqHandler(activity.TaskTypeDrawResultPublish, drawResultRecoveryJob.ProcessTask))
 	mux.HandleFunc(
 		enrollment.TaskTypeSelectionResultPublish,
 		wrapAsynqHandler(
@@ -86,13 +73,6 @@ func NewAsynqWorker(
 		wrapAsynqHandler(outbox.TaskTypeDispatch, outboxDispatcher.ProcessTask),
 	)
 
-	// 注册定时任务：每 5 秒扫描 task 表并投递消息
-	if _, err := scheduler.Register("@every 5s", asynq.NewTask(activity.TaskTypeActivityStateSync, nil)); err != nil {
-		logger.Error("register scheduler failed", "err", err)
-	}
-	if _, err := scheduler.Register("@every 1s", asynq.NewTask(activity.TaskTypeDrawResultPublish, nil)); err != nil {
-		logger.Error("register draw result publisher scheduler failed", "err", err)
-	}
 	if _, err := scheduler.Register(
 		"@every 1s",
 		asynq.NewTask(enrollment.TaskTypeSelectionResultPublish, nil),

@@ -1,7 +1,7 @@
 apiVersion: 1
 
 providers:
-  - name: PrizeForge
+  - name: CourseForge
     orgId: 1
     folder: CourseForge
     type: file

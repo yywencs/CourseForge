@@ -17,25 +17,23 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// TestRabbitMQPublisherRoutesStockZeroEvent 验证项目发布器会创建 fanout Exchange，拒绝
+// TestRabbitMQPublisherRoutesEvent 验证项目发布器会创建 fanout Exchange，拒绝
 // 没有绑定队列的消息，并在消息持久化路由后等待 RabbitMQ Broker Confirm。
-func TestRabbitMQPublisherRoutesStockZeroEvent(t *testing.T) {
+func TestRabbitMQPublisherRoutesEvent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	exchangeName := "prizeforge.integration.stock-zero." + xrand.RandomNumeric(12)
+	exchangeName := "courseforge.integration.publisher." + xrand.RandomNumeric(12)
 	rabbitPublisher, err := adapter.NewRabbitMQPublisher(integrationRabbitMQConnection, 1)
 	if err != nil {
 		t.Fatalf("NewRabbitMQPublisher() error = %v, want nil", err)
 	}
-	publisherConfig := *integrationRabbitMQConfig
-	publisherConfig.Topic.ActivitySkuStockZero = exchangeName
-	publisher := adapter.NewPublisher(rabbitPublisher, &publisherConfig)
+	publisher := adapter.NewPublisher(rabbitPublisher, integrationRabbitMQConfig)
 
 	// 第一次发布用于验证项目发布器能够自行声明 Exchange；因为此时没有绑定队列，
 	// mandatory return 必须让调用方收到错误，Outbox 才不会误标 completed。
-	if err := publisher.PublishStockZero(ctx, rabbitmq.NewBaseEvent(int64(-1))); err == nil {
-		t.Fatal("PublishStockZero() without bound queue error = nil, want unroutable error")
+	if err := publisher.PublishTopic(ctx, exchangeName, rabbitmq.NewBaseEvent(int64(-1))); err == nil {
+		t.Fatal("PublishTopic() without bound queue error = nil, want unroutable error")
 	}
 
 	channel, err := integrationRabbitMQConnection.Channel()
@@ -64,10 +62,10 @@ func TestRabbitMQPublisherRoutesStockZeroEvent(t *testing.T) {
 		t.Fatalf("consume integration RabbitMQ queue: %v", err)
 	}
 
-	const skuID int64 = 7_000_001
-	wantEvent := rabbitmq.NewBaseEvent(skuID)
-	if err := publisher.PublishStockZero(ctx, wantEvent); err != nil {
-		t.Fatalf("PublishStockZero() error = %v, want nil", err)
+	const eventData int64 = 7_000_001
+	wantEvent := rabbitmq.NewBaseEvent(eventData)
+	if err := publisher.PublishTopic(ctx, exchangeName, wantEvent); err != nil {
+		t.Fatalf("PublishTopic() error = %v, want nil", err)
 	}
 
 	select {
@@ -75,12 +73,12 @@ func TestRabbitMQPublisherRoutesStockZeroEvent(t *testing.T) {
 		if !ok {
 			t.Fatal("RabbitMQ delivery channel closed before receiving message")
 		}
-		assertIntegrationStockZeroDelivery(t, delivery, exchangeName, wantEvent, skuID)
+		assertIntegrationDelivery(t, delivery, exchangeName, wantEvent, eventData)
 		if err := delivery.Ack(false); err != nil {
 			t.Fatalf("ack RabbitMQ delivery: %v", err)
 		}
 	case <-ctx.Done():
-		t.Fatalf("wait for RabbitMQ stock-zero delivery: %v", ctx.Err())
+		t.Fatalf("wait for RabbitMQ delivery: %v", ctx.Err())
 	}
 }
 
@@ -90,7 +88,7 @@ func TestRabbitMQPublisherPoolPublishesThroughIndependentChannels(t *testing.T) 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	topic := "prizeforge.integration.publisher.pool." + xrand.RandomNumeric(12)
+	topic := "courseforge.integration.publisher.pool." + xrand.RandomNumeric(12)
 	trackIntegrationRabbitMQTopology(t, topic)
 	channel, err := integrationRabbitMQConnection.Channel()
 	if err != nil {
@@ -155,7 +153,7 @@ func TestRabbitMQPublisherPoolPublishesThroughIndependentChannels(t *testing.T) 
 	}
 }
 
-func assertIntegrationStockZeroDelivery(t *testing.T, delivery amqp.Delivery, exchangeName string, wantEvent *rabbitmq.BaseEvent, skuID int64) {
+func assertIntegrationDelivery(t *testing.T, delivery amqp.Delivery, exchangeName string, wantEvent *rabbitmq.BaseEvent, eventData int64) {
 	t.Helper()
 	if delivery.Exchange != exchangeName {
 		t.Fatalf("RabbitMQ delivery exchange = %q, want %q", delivery.Exchange, exchangeName)
@@ -175,7 +173,7 @@ func assertIntegrationStockZeroDelivery(t *testing.T, delivery amqp.Delivery, ex
 	if err := json.Unmarshal(delivery.Body, &got); err != nil {
 		t.Fatalf("unmarshal RabbitMQ delivery %s: %v", fmt.Sprintf("%q", delivery.Body), err)
 	}
-	if got.ID != wantEvent.ID || got.Data != skuID || !got.Timestamp.Equal(wantEvent.Timestamp) {
-		t.Fatalf("RabbitMQ event = %#v, want id=%q data=%d timestamp=%s", got, wantEvent.ID, skuID, wantEvent.Timestamp)
+	if got.ID != wantEvent.ID || got.Data != eventData || !got.Timestamp.Equal(wantEvent.Timestamp) {
+		t.Fatalf("RabbitMQ event = %#v, want id=%q data=%d timestamp=%s", got, wantEvent.ID, eventData, wantEvent.Timestamp)
 	}
 }

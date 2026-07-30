@@ -16,24 +16,18 @@ type Server struct {
 	engine            *gin.Engine
 	httpServer        *http.Server
 	addr              string
-	strategyUsecase   *api.StrategyUsecase
-	activityUsecase   *api.ActivityUsecase
 	enrollmentUsecase *api.EnrollmentUsecase
 	readinessChecks   common.ReadinessChecks
 }
 
 func NewServer(
 	addr string,
-	strategyUsecase *api.StrategyUsecase,
-	activityUsecase *api.ActivityUsecase,
 	enrollmentUsecase *api.EnrollmentUsecase,
 	readinessChecks common.ReadinessChecks,
 ) *Server {
 	s := &Server{
 		engine:            gin.New(),
 		addr:              addr,
-		strategyUsecase:   strategyUsecase,
-		activityUsecase:   activityUsecase,
 		enrollmentUsecase: enrollmentUsecase,
 		readinessChecks:   readinessChecks,
 	}

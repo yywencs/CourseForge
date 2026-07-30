@@ -2,6 +2,7 @@ package listener
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -48,6 +49,12 @@ func (contextTimeoutListener) Handle(ctx context.Context, _ []byte) (bool, error
 	return true, ctx.Err()
 }
 
+type permanentErrorListener struct{}
+
+func (permanentErrorListener) Handle(context.Context, []byte) (bool, error) {
+	return false, fmt.Errorf("malformed message")
+}
+
 // TestRabbitMQConsumerUsesQueueConcurrencyMap 验证每个队列可以通过统一映射配置独立并发度，
 // 未配置队列使用默认并发数，并且 prefetch 使用显式配置。
 func TestRabbitMQConsumerUsesQueueConcurrencyMap(t *testing.T) {
@@ -56,21 +63,21 @@ func TestRabbitMQConsumerUsesQueueConcurrencyMap(t *testing.T) {
 		WithPrefetch(2),
 		WithDefaultConcurrency(2),
 		WithQueueConcurrency(map[string]int{
-			"draw_result_queue": 8,
-			"send_award_queue":  4,
+			"selection_result_queue": 8,
+			"outbox_events_queue":    4,
 		}),
 	)
 
 	if got := consumer.prefetchCount(); got != 2 {
 		t.Fatalf("prefetchCount() = %d, want 2", got)
 	}
-	if got := consumer.consumerConcurrency("draw_result"); got != 8 {
-		t.Fatalf("draw_result concurrency = %d, want 8", got)
+	if got := consumer.consumerConcurrency("selection_result"); got != 8 {
+		t.Fatalf("selection_result concurrency = %d, want 8", got)
 	}
-	if got := consumer.consumerConcurrency("send_award"); got != 4 {
-		t.Fatalf("send_award concurrency = %d, want 4", got)
+	if got := consumer.consumerConcurrency("outbox_events"); got != 4 {
+		t.Fatalf("outbox_events concurrency = %d, want 4", got)
 	}
-	if got := consumer.consumerConcurrency("activity_sku_stock_zero_topic"); got != 2 {
+	if got := consumer.consumerConcurrency("unconfigured_topic"); got != 2 {
 		t.Fatalf("unconfigured topic concurrency = %d, want 2", got)
 	}
 }
@@ -83,16 +90,16 @@ func TestRabbitMQConsumerFallsBackFromInvalidOptions(t *testing.T) {
 		WithPrefetch(0),
 		WithDefaultConcurrency(0),
 		WithQueueConcurrency(map[string]int{
-			"draw_result_queue": 0,
-			"":                  8,
+			"selection_result_queue": 0,
+			"":                       8,
 		}),
 	)
 
 	if got := consumer.prefetchCount(); got != 1 {
 		t.Fatalf("prefetchCount() = %d, want 1", got)
 	}
-	if got := consumer.consumerConcurrency("draw_result"); got != 1 {
-		t.Fatalf("draw_result concurrency = %d, want 1", got)
+	if got := consumer.consumerConcurrency("selection_result"); got != 1 {
+		t.Fatalf("selection_result concurrency = %d, want 1", got)
 	}
 }
 
@@ -108,7 +115,7 @@ func TestRabbitMQConsumerRejectsMalformedMessageWithoutRequeue(t *testing.T) {
 	close(messages)
 
 	consumer := &RabbitMQConsumer{}
-	consumer.handle(messages, NewActivityStockListener(nil))
+	consumer.handle(messages, permanentErrorListener{})
 
 	if len(acknowledger.acks) != 0 {
 		t.Fatalf("Ack() calls = %d, want 0", len(acknowledger.acks))

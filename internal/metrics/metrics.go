@@ -68,57 +68,6 @@ var (
 		[]string{"result"},
 	)
 
-	ActivityQuotaTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: metricNamespace,
-			Subsystem: "activity",
-			Name:      "quota_total",
-			Help:      "Total activity quota check results.",
-		},
-		[]string{"activity_id", "result"},
-	)
-
-	RaffleTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: metricNamespace,
-			Subsystem: "raffle",
-			Name:      "total",
-			Help:      "Total raffle attempts.",
-		},
-		[]string{"activity_id", "strategy_id", "result"},
-	)
-
-	RaffleDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: metricNamespace,
-			Subsystem: "raffle",
-			Name:      "duration_seconds",
-			Help:      "Raffle execution latency.",
-			Buckets:   prometheus.DefBuckets,
-		},
-		[]string{"activity_id", "strategy_id"},
-	)
-
-	AwardTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: metricNamespace,
-			Subsystem: "award",
-			Name:      "total",
-			Help:      "Total award dispatch results.",
-		},
-		[]string{"award_id", "result"},
-	)
-
-	StockConsumeTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: metricNamespace,
-			Subsystem: "stock",
-			Name:      "consume_total",
-			Help:      "Stock consume results.",
-		},
-		[]string{"activity_id", "sku_id", "result"},
-	)
-
 	RabbitMQPublishTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metricNamespace,
@@ -301,11 +250,6 @@ func init() {
 		SelectionDuration,
 		SelectionPersistenceTotal,
 		SelectionPersistenceDuration,
-		ActivityQuotaTotal,
-		RaffleTotal,
-		RaffleDuration,
-		AwardTotal,
-		StockConsumeTotal,
 		RabbitMQPublishTotal,
 		OutboxDispatchTotal,
 		OutboxDispatchDuration,

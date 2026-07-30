@@ -18,19 +18,14 @@ rabbitmq:
       prefetch: 1 # 每个消费者同一时间只处理一条未确认消息
       default_concurrency: 1
       concurrency:
-        draw_result_queue: 8
         selection_result_queue: 8
-        send_award_queue: 4
   topic:
-    activity_sku_stock_zero: "activity_sku_stock_zero"
-    send_award: "send_award"
-    send_rebate: "send_rebate"
-    draw_result: "draw_result"
     selection_result: "selection_result"
 
 data:
   mysql:
-    dsn: "root:password@tcp(127.0.0.1:3306)/prizeforge%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=30s"
+    # 通用分库路由预留配置，当前选课主链路不使用。
+    dsn: ""
     courseforge_dsn: "root:password@tcp(127.0.0.1:3306)/courseforge?charset=utf8mb4&parseTime=True&loc=Local&timeout=30s"
     max_open_conns: 25
     # minimum-idle: 15 -> SetMaxIdleConns
@@ -81,7 +76,7 @@ log:
   filename: "./logs/app.log" # 日志文件路径
   max_size: 100              # 单个文件最大 100MB
   max_backups: 3             # 最多保留 3 个旧文件
-  max_age: 30                # 最多保留 30 天 (彩票业务建议久一点)
+  max_age: 30                # 最多保留 30 天
   compress: true             # 开启压缩
 
 dcc:

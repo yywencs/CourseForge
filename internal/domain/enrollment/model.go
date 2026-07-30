@@ -59,11 +59,15 @@ const (
 	ApplicationSourceWeb    ApplicationSource = "web"
 	ApplicationSourceMobile ApplicationSource = "mobile"
 	ApplicationSourceAdmin  ApplicationSource = "admin"
+	ApplicationSourceSystem ApplicationSource = "system"
 )
 
 func (s ApplicationSource) Valid() bool {
 	switch s {
-	case ApplicationSourceWeb, ApplicationSourceMobile, ApplicationSourceAdmin:
+	case ApplicationSourceWeb,
+		ApplicationSourceMobile,
+		ApplicationSourceAdmin,
+		ApplicationSourceSystem:
 		return true
 	default:
 		return false
@@ -212,6 +216,8 @@ const (
 	FailureCodeCreditQuota       FailureCode = "CREDIT_QUOTA_EXCEEDED"
 	FailureCodeCourseQuota       FailureCode = "COURSE_QUOTA_EXCEEDED"
 	FailureCodeTeachingClassFull FailureCode = "TEACHING_CLASS_FULL"
+	FailureCodeCancelled         FailureCode = "CANCELLED"
+	FailureCodeRoundClosed       FailureCode = "ROUND_CLOSED"
 	FailureCodeInternal          FailureCode = "INTERNAL_ERROR"
 )
 

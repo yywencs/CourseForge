@@ -4,7 +4,9 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,7 +19,7 @@ import (
 )
 
 // TestEnrollmentRepositoryMinimalMainChain 使用真实 MySQL 和 Redis 验证：
-// 原子预占 → 抢占处理权 → 完成结果/Stream → RabbitMQ Confirm → MySQL幂等落库。
+// 原子预占 → 完成结果/Stream → RabbitMQ Confirm → MySQL幂等落库。
 func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 	const (
 		departmentID  = uint64(990001)
@@ -255,6 +257,188 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		!persistedRecord.MySQLPersisted {
 		t.Fatalf("QuerySelectionByRequest(MySQL) = %#v, %v", persistedRecord, err)
 	}
+}
+
+// TestEnrollmentRepositoryConcurrentReservationDoesNotOversell 验证100个学生
+// 并发抢10个名额时，Redis原子预占严格限制成功数且不会出现负库存。
+func TestEnrollmentRepositoryConcurrentReservationDoesNotOversell(t *testing.T) {
+	const (
+		studentCount = 100
+		capacity     = 10
+
+		departmentID = uint64(991001)
+		majorID      = uint64(991001)
+		studentID    = uint64(991100)
+		teacherID    = uint64(991001)
+		termID       = uint64(991001)
+		courseID     = uint64(991001)
+		classID      = uint64(991001)
+		roundID      = uint64(991001)
+	)
+
+	now := time.Now().Truncate(time.Millisecond)
+	seedEnrollmentIntegrationData(
+		t,
+		now,
+		departmentID,
+		majorID,
+		studentID,
+		teacherID,
+		termID,
+		courseID,
+		classID,
+		roundID,
+	)
+	if err := integrationCourseforgeDB.Table("teaching_class").
+		Where("id = ?", classID).
+		Update("capacity", capacity).Error; err != nil {
+		t.Fatalf("set concurrent test class capacity: %v", err)
+	}
+
+	t.Cleanup(func() {
+		integrationCourseforgeDB.Exec(
+			"DELETE FROM student_selection_quota WHERE student_id > ? AND student_id < ?",
+			studentID,
+			studentID+studentCount,
+		)
+		integrationCourseforgeDB.Exec(
+			"DELETE FROM student WHERE id > ? AND id < ?",
+			studentID,
+			studentID+studentCount,
+		)
+	})
+	for index := 1; index < studentCount; index++ {
+		currentStudentID := studentID + uint64(index)
+		if err := integrationCourseforgeDB.Table("student").Create(map[string]interface{}{
+			"id":           currentStudentID,
+			"student_no":   fmt.Sprintf("IT-CS-%03d", index),
+			"student_name": fmt.Sprintf("并发测试学生%03d", index),
+			"major_id":     majorID,
+			"grade_year":   2026,
+		}).Error; err != nil {
+			t.Fatalf("seed concurrent student %d: %v", currentStudentID, err)
+		}
+		if err := integrationCourseforgeDB.Table("student_selection_quota").Create(
+			map[string]interface{}{
+				"round_id":              roundID,
+				"term_id":               termID,
+				"student_id":            currentStudentID,
+				"credit_limit":          "20.0",
+				"selected_credits":      "0.0",
+				"course_limit":          6,
+				"selected_course_count": 0,
+			},
+		).Error; err != nil {
+			t.Fatalf("seed concurrent student quota %d: %v", currentStudentID, err)
+		}
+	}
+
+	requestIDs := make([]string, studentCount)
+	redisKeys := []string{
+		fmt.Sprintf("courseforge:selection:class:seat:%d", classID),
+		"courseforge:selection:result:stream",
+	}
+	for index := 0; index < studentCount; index++ {
+		currentStudentID := studentID + uint64(index)
+		requestIDs[index] = fmt.Sprintf("integration-concurrent-request-%03d", index)
+		redisKeys = append(
+			redisKeys,
+			fmt.Sprintf("courseforge:selection:quota:credit:%d:%d", roundID, currentStudentID),
+			fmt.Sprintf("courseforge:selection:quota:course:%d:%d", roundID, currentStudentID),
+			fmt.Sprintf("courseforge:selection:pending:%d:%d", roundID, currentStudentID),
+			fmt.Sprintf(
+				"courseforge:selection:result:%d:%d:%s",
+				roundID,
+				currentStudentID,
+				requestIDs[index],
+			),
+			fmt.Sprintf(
+				"courseforge:selection:course:%d:%d:%d",
+				termID,
+				currentStudentID,
+				courseID,
+			),
+		)
+	}
+	if err := integrationRedisClient.Del(context.Background(), redisKeys...).Err(); err != nil {
+		t.Fatalf("cleanup concurrent selection Redis before test: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = integrationRedisClient.Del(context.Background(), redisKeys...).Err()
+	})
+
+	type reservationResult struct {
+		reservation *enrollment.SelectionReservation
+		err         error
+	}
+	repo := enrollmentrepo.NewRepository(integrationCourseforgeDB, integrationRedis)
+	start := make(chan struct{})
+	results := make(chan reservationResult, studentCount)
+	var workers sync.WaitGroup
+	workers.Add(studentCount)
+	for index := 0; index < studentCount; index++ {
+		index := index
+		go func() {
+			defer workers.Done()
+			<-start
+
+			application, err := enrollment.NewSelectionApplication(
+				fmt.Sprintf("concurrent-app-%03d", index),
+				&enrollment.SelectionRequest{
+					RequestID:       requestIDs[index],
+					RoundID:         roundID,
+					TermID:          termID,
+					StudentID:       studentID + uint64(index),
+					CourseID:        courseID,
+					TeachingClassID: classID,
+					Credits:         enrollment.Credit(35),
+					Source:          enrollment.ApplicationSourceWeb,
+				},
+				now,
+			)
+			if err != nil {
+				results <- reservationResult{err: err}
+				return
+			}
+			reservation, err := repo.ReserveSelection(context.Background(), application)
+			results <- reservationResult{reservation: reservation, err: err}
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+
+	var acquired, full int
+	for result := range results {
+		switch {
+		case result.err == nil:
+			if result.reservation == nil ||
+				result.reservation.Status != enrollment.ReservationStatusAcquired ||
+				result.reservation.Application == nil ||
+				result.reservation.Application.State != enrollment.ApplicationStateReserved {
+				t.Fatalf("unexpected successful reservation: %#v", result.reservation)
+			}
+			acquired++
+		case errors.Is(result.err, enrollment.ErrTeachingClassFull):
+			full++
+		default:
+			t.Fatalf("unexpected concurrent reservation error: %v", result.err)
+		}
+	}
+	if acquired != capacity || full != studentCount-capacity {
+		t.Fatalf(
+			"concurrent reservation results = acquired:%d full:%d, want %d/%d",
+			acquired,
+			full,
+			capacity,
+			studentCount-capacity,
+		)
+	}
+	assertRedisInt(
+		t,
+		fmt.Sprintf("courseforge:selection:class:seat:%d", classID),
+		0,
+	)
 }
 
 func waitForSelectionResultPersisted(

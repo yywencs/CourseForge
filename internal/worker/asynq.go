@@ -8,6 +8,7 @@ import (
 
 	"prizeforge/internal/domain/activity"
 	"prizeforge/internal/domain/enrollment"
+	"prizeforge/internal/domain/outbox"
 	"prizeforge/internal/domain/task"
 	"prizeforge/internal/job"
 	"prizeforge/internal/metrics"
@@ -34,6 +35,7 @@ func NewAsynqWorker(
 	strategyAwardStockJob *job.StrategyAwardStockConsumeJob,
 	drawResultRecoveryJob *job.DrawResultRecoveryJob,
 	selectionResultRecoveryJob *job.SelectionResultRecoveryJob,
+	outboxDispatcher *job.OutboxDispatcher,
 ) *AsynqWorker {
 	redisOpt := asynq.RedisClientOpt{
 		Addr:     fmt.Sprintf("%s:%d", cfg.Redis.Host, cfg.Redis.Port),
@@ -79,6 +81,10 @@ func NewAsynqWorker(
 			selectionResultRecoveryJob.ProcessTask,
 		),
 	)
+	mux.HandleFunc(
+		outbox.TaskTypeDispatch,
+		wrapAsynqHandler(outbox.TaskTypeDispatch, outboxDispatcher.ProcessTask),
+	)
 
 	// 注册定时任务：每 5 秒扫描 task 表并投递消息
 	if _, err := scheduler.Register("@every 5s", asynq.NewTask(activity.TaskTypeActivityStateSync, nil)); err != nil {
@@ -92,6 +98,12 @@ func NewAsynqWorker(
 		asynq.NewTask(enrollment.TaskTypeSelectionResultPublish, nil),
 	); err != nil {
 		logger.Error("register selection result publisher scheduler failed", "err", err)
+	}
+	if _, err := scheduler.Register(
+		"@every 5s",
+		asynq.NewTask(outbox.TaskTypeDispatch, nil),
+	); err != nil {
+		logger.Error("register outbox dispatcher scheduler failed", "err", err)
 	}
 
 	return &AsynqWorker{

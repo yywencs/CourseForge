@@ -19,10 +19,10 @@ docker() {
 }
 
 curl() {
-	if [[ "$*" == *"query_raffle_award_list"* ]]; then
+	if [[ "$*" == *"/admin/v1/status"* ]]; then
 		case "${TEST_SMOKE_RESULT}" in
 			success)
-				printf '%s\n' '{"code":0,"info":"success","data":[{"award_id":101}]}'
+				printf '%s\n' '{"code":0,"info":"success","data":{"service":"courseforge-admin","status":"ok"}}'
 				return 0
 				;;
 			invalid-response)

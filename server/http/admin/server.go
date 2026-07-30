@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"prizeforge/internal/application/admin"
 	"prizeforge/internal/middleware"
 	"prizeforge/server/http/common"
 
@@ -16,16 +15,26 @@ type Server struct {
 	engine          *gin.Engine
 	httpServer      *http.Server
 	addr            string
-	strategyUsecase *admin.StrategyUsecase
 	readinessChecks common.ReadinessChecks
+	registrars      []RouteRegistrar
 }
 
-func NewServer(addr string, strategyUsecase *admin.StrategyUsecase, readinessChecks common.ReadinessChecks) *Server {
+// RouteRegistrar allows future course, video and operations modules to attach
+// their own Admin routes without coupling the server skeleton to a domain.
+type RouteRegistrar interface {
+	RegisterAdminRoutes(*gin.RouterGroup)
+}
+
+func NewServer(
+	addr string,
+	readinessChecks common.ReadinessChecks,
+	registrars ...RouteRegistrar,
+) *Server {
 	s := &Server{
 		engine:          gin.New(),
 		addr:            addr,
-		strategyUsecase: strategyUsecase,
 		readinessChecks: readinessChecks,
+		registrars:      registrars,
 	}
 
 	s.engine.Use(gin.Recovery())

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # 构建上下文必须是仓库根目录：
-# docker build -f cmd/benchmark/Dockerfile -t prizeforge-benchmark:local .
+# docker build -f cmd/benchmark/Dockerfile -t courseforge-benchmark:local .
 FROM golang:1.25-bookworm AS builder
 
 WORKDIR /src
@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w" \
-    -o /out/prizeforge-benchmark ./cmd/benchmark
+    -o /out/courseforge-benchmark ./cmd/benchmark
 
 FROM debian:bookworm-slim AS runtime
 
@@ -37,10 +37,10 @@ WORKDIR /app
 ENV TZ=Asia/Shanghai
 
 COPY --from=builder --chown=prizeforge:prizeforge \
-    /out/prizeforge-benchmark /usr/local/bin/prizeforge-benchmark
+    /out/courseforge-benchmark /usr/local/bin/courseforge-benchmark
 
 USER prizeforge
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["prizeforge-benchmark"]
+ENTRYPOINT ["courseforge-benchmark"]
 CMD ["--help"]

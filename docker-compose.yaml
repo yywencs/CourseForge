@@ -168,6 +168,8 @@ services:
       CDC_MYSQL_USER: canal
       CDC_MYSQL_PASSWORD: ${CANAL_MYSQL_PASSWORD}
       CDC_ES_ADDR: http://elasticsearch:9200
+      CDC_INCLUDE_TABLE_REGEX: 'courseforge\..*'
+      CDC_ES_INDEX_PREFIX: courseforge
     networks:
       - my-network
 

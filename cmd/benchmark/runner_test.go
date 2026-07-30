@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -29,29 +30,29 @@ func jsonResponseClient(handler func(*http.Request) string) *http.Client {
 	}
 }
 
-// TestBenchmarkRunnerExecuteBuildsDynamicDrawRequest 验证压测请求包含轮转用户、活动 ID 和唯一 request_id，并识别业务成功。
-func TestBenchmarkRunnerExecuteBuildsDynamicDrawRequest(t *testing.T) {
-	requests := make([]drawRequest, 0, 2)
+func TestBenchmarkRunnerExecuteBuildsDynamicSelectionRequest(t *testing.T) {
+	requests := make([]selectionRequest, 0, 2)
 	client := jsonResponseClient(func(request *http.Request) string {
-		if request.Method != http.MethodPost || request.URL.Path != drawPath {
-			t.Errorf("request = %s %s, want POST %s", request.Method, request.URL.Path, drawPath)
+		if request.Method != http.MethodPost || request.URL.Path != selectionPath {
+			t.Errorf("request = %s %s, want POST %s", request.Method, request.URL.Path, selectionPath)
 		}
-		var payload drawRequest
+		var payload selectionRequest
 		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
 		requests = append(requests, payload)
-		return `{"code":0,"info":"success","data":{"award_id":101}}`
+		return `{"code":0,"info":"success","data":{"application_id":"application-1","state":"selected","broker_confirmed":true,"mysql_persisted":false}}`
 	})
 
 	config := benchmarkConfig{
-		BaseURL:     "http://example.test",
-		ActivityID:  100301,
-		Users:       2,
-		Concurrency: 1,
-		Duration:    time.Second,
-		Timeout:     time.Second,
-		UserPrefix:  "load-user",
+		BaseURL:         "http://example.test",
+		RoundID:         defaultBenchmarkRoundID,
+		TeachingClassID: defaultBenchmarkClassID,
+		StudentIDStart:  defaultBenchmarkStudentIDStart,
+		Users:           2,
+		Concurrency:     1,
+		Duration:        time.Second,
+		Timeout:         time.Second,
 	}
 	runner := newBenchmarkRunner(config, client)
 	firstResult := runner.execute(context.Background(), 1)
@@ -62,34 +63,85 @@ func TestBenchmarkRunnerExecuteBuildsDynamicDrawRequest(t *testing.T) {
 	}
 	firstRequest := requests[0]
 	secondRequest := requests[1]
-	if firstRequest.UserID != "load-user-000001" || secondRequest.UserID != "load-user-000002" {
-		t.Fatalf("user IDs = %q/%q, want rotating users", firstRequest.UserID, secondRequest.UserID)
+	if firstRequest.StudentID != defaultBenchmarkStudentIDStart ||
+		secondRequest.StudentID != defaultBenchmarkStudentIDStart+1 {
+		t.Fatalf("student IDs = %d/%d, want rotating students", firstRequest.StudentID, secondRequest.StudentID)
 	}
-	if firstRequest.ActivityID != 100301 || secondRequest.ActivityID != 100301 {
-		t.Fatalf("activity IDs = %d/%d, want 100301", firstRequest.ActivityID, secondRequest.ActivityID)
+	if firstRequest.RoundID != defaultBenchmarkRoundID ||
+		firstRequest.TeachingClassID != defaultBenchmarkClassID {
+		t.Fatalf("selection target = %+v, want configured round/class", firstRequest)
 	}
 	if firstRequest.RequestID == "" || firstRequest.RequestID == secondRequest.RequestID {
 		t.Fatalf("request IDs = %q/%q, want unique non-empty values", firstRequest.RequestID, secondRequest.RequestID)
 	}
+	if firstRequest.Source != "web" {
+		t.Fatalf("source = %q, want web", firstRequest.Source)
+	}
 }
 
-// TestBenchmarkRunnerExecuteClassifiesBusinessError 验证 HTTP 200 中的非零业务码不会被误计为成功。
 func TestBenchmarkRunnerExecuteClassifiesBusinessError(t *testing.T) {
 	client := jsonResponseClient(func(*http.Request) string {
-		return `{"code":409,"info":"draw in progress","data":null}`
+		return `{"code":409,"info":"teaching class is full","data":null}`
 	})
 
 	config := benchmarkConfig{
-		BaseURL:     "http://example.test",
-		ActivityID:  100301,
-		Users:       1,
-		Concurrency: 1,
-		Duration:    time.Second,
-		Timeout:     time.Second,
-		UserPrefix:  "load-user",
+		BaseURL:         "http://example.test",
+		RoundID:         defaultBenchmarkRoundID,
+		TeachingClassID: defaultBenchmarkClassID,
+		StudentIDStart:  defaultBenchmarkStudentIDStart,
+		Users:           1,
+		Concurrency:     1,
+		Duration:        time.Second,
+		Timeout:         time.Second,
 	}
 	result := newBenchmarkRunner(config, client).execute(context.Background(), 1)
 	if result.outcome != outcomeBusinessError || result.businessCode != 409 {
 		t.Fatalf("result = %+v, want business error code 409", result)
+	}
+}
+
+func TestBenchmarkRunnerRejectsIncompleteSuccessPayload(t *testing.T) {
+	client := jsonResponseClient(func(*http.Request) string {
+		return `{"code":0,"info":"success","data":{"state":"selected","broker_confirmed":false}}`
+	})
+	config := benchmarkConfig{
+		BaseURL:         "http://example.test",
+		RoundID:         defaultBenchmarkRoundID,
+		TeachingClassID: defaultBenchmarkClassID,
+		StudentIDStart:  defaultBenchmarkStudentIDStart,
+		Users:           1,
+		Concurrency:     1,
+		Duration:        time.Second,
+		Timeout:         time.Second,
+	}
+	result := newBenchmarkRunner(config, client).execute(context.Background(), 1)
+	if result.outcome != outcomeDecodeError {
+		t.Fatalf("result = %+v, want decode error for incomplete success payload", result)
+	}
+}
+
+func TestBenchmarkRunnerSendsOneRequestPerStudent(t *testing.T) {
+	var calls atomic.Int64
+	client := jsonResponseClient(func(*http.Request) string {
+		calls.Add(1)
+		return `{"code":0,"info":"success","data":{"application_id":"application-1","state":"selected","broker_confirmed":true,"mysql_persisted":false}}`
+	})
+	config := benchmarkConfig{
+		BaseURL:         "http://example.test",
+		RoundID:         defaultBenchmarkRoundID,
+		TeachingClassID: defaultBenchmarkClassID,
+		StudentIDStart:  defaultBenchmarkStudentIDStart,
+		Users:           5,
+		Concurrency:     3,
+		Duration:        time.Second,
+		Timeout:         time.Second,
+	}
+	summary := newBenchmarkRunner(config, client).run(context.Background())
+	if calls.Load() != 5 || summary.Stats.total != 5 {
+		t.Fatalf(
+			"requests = %d, stats total = %d, want one request for each of 5 students",
+			calls.Load(),
+			summary.Stats.total,
+		)
 	}
 }

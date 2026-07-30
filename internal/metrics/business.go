@@ -6,6 +6,25 @@ import (
 	"time"
 )
 
+func ObserveSelection(result string, duration time.Duration) {
+	result = normalizeLabel(result)
+	SelectionTotal.WithLabelValues(result).Inc()
+	SelectionDuration.WithLabelValues(result).Observe(duration.Seconds())
+}
+
+func ObserveSelectionPersistence(result string, duration time.Duration) {
+	result = normalizeLabel(result)
+	SelectionPersistenceTotal.WithLabelValues(result).Inc()
+	SelectionPersistenceDuration.WithLabelValues(result).Observe(duration.Seconds())
+}
+
+func ObserveOutboxDispatch(topic, result string, duration time.Duration) {
+	topic = normalizeLabel(topic)
+	result = normalizeLabel(result)
+	OutboxDispatchTotal.WithLabelValues(topic, result).Inc()
+	OutboxDispatchDuration.WithLabelValues(topic, result).Observe(duration.Seconds())
+}
+
 func IncActivityQuota(activityID int64, result string) {
 	ActivityQuotaTotal.WithLabelValues(int64Label(activityID), normalizeLabel(result)).Inc()
 }

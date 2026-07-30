@@ -125,16 +125,30 @@ CI 会在 `main` 分支推送和 Pull Request 时自动运行检查与集成测�
 
 ## 压测
 
-项目提供针对抽奖接口 `POST /api/v1/raffle/activity/draw` 的专用压测程序，支持准备测试数据和执行并发压测：
+项目提供针对选课接口 `POST /api/v1/enrollments` 的专用压测程序，支持安全准备
+高位 ID 测试数据、预热 Redis 额度/名额和执行并发压测：
 
 ```bash
-go build -o ./bin/prizeforge-benchmark ./cmd/benchmark
+make build-benchmark
 
-./bin/prizeforge-benchmark prepare --help
-./bin/prizeforge-benchmark run --help
+./bin/courseforge-benchmark prepare --help
+./bin/courseforge-benchmark run --help
 ```
 
 完整用法见 [压测工具说明](cmd/benchmark/README.md)。
+
+## 可观测性与数据同步
+
+- Prometheus 指标使用 `courseforge` namespace，覆盖 HTTP、选课决策、选课结果落库、
+  Redis、RabbitMQ、Asynq、通用 Outbox 和 MySQL 连接池。
+- Grafana 自动加载 `CourseForge Overview` Dashboard。
+- CDC 默认订阅 `courseforge\..*`，写入 `courseforge_<table>` Elasticsearch 索引；
+  可通过 `CDC_INCLUDE_TABLE_REGEX` 和 `CDC_ES_INDEX_PREFIX` 覆盖。
+- Admin 目前提供 `/healthz`、`/readyz` 和 `/admin/v1/status` 稳定骨架，
+  后续课程、视频管理模块通过 `RouteRegistrar` 扩展路由。
+- 通用 Outbox 使用 `outbox_event`：业务事务内通过
+  `outboxrepo.NewRepository(tx).Append(...)` 写入事件，Asynq 定时任务负责抢占、
+  RabbitMQ Confirm、失败退避和过期 publishing 租约恢复。
 
 ## 部署
 

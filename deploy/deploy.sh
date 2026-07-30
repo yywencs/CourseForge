@@ -155,9 +155,9 @@ wait_until_ready() {
 	return 1
 }
 
-# 调用只读的 Admin 业务接口，确认 HTTP、应用层、Repository 和 MySQL 查询链路均可用。
+# 调用 Admin 稳定状态接口。MySQL 连通性已由 /readyz 的 courseforge_mysql 检查覆盖。
 run_business_smoke_test() {
-	local endpoint="http://127.0.0.1:8081/admin/v1/strategy/query_raffle_award_list?strategy_id=100001"
+	local endpoint="http://127.0.0.1:8081/admin/v1/status"
 	local response
 
 	if ! response="$(curl \
@@ -165,15 +165,15 @@ run_business_smoke_test() {
 		--silent \
 		--show-error \
 		--max-time 5 \
-		--request POST \
+		--request GET \
 		"${endpoint}")"; then
 		echo "business smoke test request failed: ${endpoint}" >&2
 		return 1
 	fi
 
-	# HTTP 接口始终返回 200，因此还必须检查业务码和预置奖品，避免把业务错误误判为成功。
+	# HTTP 接口始终返回 200，因此同时检查统一业务码与 Admin 服务标识。
 	if [[ "${response}" != *'"code":0'* ]] ||
-		[[ "${response}" != *'"award_id":101'* ]]; then
+		[[ "${response}" != *'"service":"courseforge-admin"'* ]]; then
 		echo "business smoke test returned unexpected response: ${response}" >&2
 		return 1
 	fi

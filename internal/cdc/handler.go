@@ -23,10 +23,15 @@ type EventHandler struct {
 	canal.DummyEventHandler
 
 	cfg    *Config
-	writer *ESWriter
+	writer documentWriter
 }
 
-func NewEventHandler(cfg *Config, writer *ESWriter) *EventHandler {
+type documentWriter interface {
+	Upsert(context.Context, string, string, any) error
+	Delete(context.Context, string, string) error
+}
+
+func NewEventHandler(cfg *Config, writer documentWriter) *EventHandler {
 	return &EventHandler{
 		cfg:    cfg,
 		writer: writer,
@@ -89,7 +94,7 @@ func (h *EventHandler) OnPosSynced(_ *replication.EventHeader, pos mysql.Positio
 }
 
 func (h *EventHandler) String() string {
-	return "prizeforge-cdc-handler"
+	return "courseforge-cdc-handler"
 }
 
 func (h *EventHandler) rowToDocument(table *schema.Table, row []any) map[string]any {

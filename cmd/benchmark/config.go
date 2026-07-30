@@ -4,21 +4,23 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"strings"
 	"time"
 )
 
-const drawPath = "/api/v1/raffle/activity/draw"
+const selectionPath = "/api/v1/enrollments"
 
 type benchmarkConfig struct {
-	BaseURL     string
-	ActivityID  int64
-	Users       int
-	Concurrency int
-	Duration    time.Duration
-	Timeout     time.Duration
-	UserPrefix  string
+	BaseURL         string
+	RoundID         uint64
+	TeachingClassID uint64
+	StudentIDStart  uint64
+	Users           int
+	Concurrency     int
+	Duration        time.Duration
+	Timeout         time.Duration
 }
 
 func parseConfig(args []string, output io.Writer) (benchmarkConfig, error) {
@@ -27,12 +29,13 @@ func parseConfig(args []string, output io.Writer) (benchmarkConfig, error) {
 	flags.SetOutput(output)
 
 	flags.StringVar(&cfg.BaseURL, "url", "http://127.0.0.1:8080", "API 服务根地址")
-	flags.Int64Var(&cfg.ActivityID, "activity-id", 100301, "抽奖活动 ID")
-	flags.IntVar(&cfg.Users, "users", 1000, "压测用户池大小")
+	flags.Uint64Var(&cfg.RoundID, "round-id", defaultBenchmarkRoundID, "选课轮次 ID")
+	flags.Uint64Var(&cfg.TeachingClassID, "teaching-class-id", defaultBenchmarkClassID, "教学班 ID")
+	flags.Uint64Var(&cfg.StudentIDStart, "student-id-start", defaultBenchmarkStudentIDStart, "压测学生起始 ID")
+	flags.IntVar(&cfg.Users, "users", 1000, "压测学生池大小")
 	flags.IntVar(&cfg.Concurrency, "concurrency", 10, "并发工作协程数")
-	flags.DurationVar(&cfg.Duration, "duration", 30*time.Second, "持续压测时间")
+	flags.DurationVar(&cfg.Duration, "duration", 30*time.Second, "整轮压测最大时长")
 	flags.DurationVar(&cfg.Timeout, "timeout", 5*time.Second, "单个 HTTP 请求超时")
-	flags.StringVar(&cfg.UserPrefix, "user-prefix", "benchmark-user", "压测用户 ID 前缀")
 
 	if err := flags.Parse(args); err != nil {
 		return benchmarkConfig{}, err
@@ -60,11 +63,14 @@ func (c benchmarkConfig) validate() error {
 	if parsedURL.Path != "" && parsedURL.Path != "/" {
 		return fmt.Errorf("url 应为服务根地址，不能包含路径: %q", c.BaseURL)
 	}
-	if c.ActivityID <= 0 {
-		return fmt.Errorf("activity-id 必须大于 0")
+	if c.RoundID == 0 || c.TeachingClassID == 0 || c.StudentIDStart == 0 {
+		return fmt.Errorf("round-id、teaching-class-id 和 student-id-start 必须大于 0")
 	}
 	if c.Users <= 0 {
 		return fmt.Errorf("users 必须大于 0")
+	}
+	if uint64(c.Users-1) > math.MaxUint64-c.StudentIDStart {
+		return fmt.Errorf("student-id-start 与 users 组合发生溢出")
 	}
 	if c.Concurrency <= 0 {
 		return fmt.Errorf("concurrency 必须大于 0")
@@ -75,15 +81,13 @@ func (c benchmarkConfig) validate() error {
 	if c.Timeout <= 0 {
 		return fmt.Errorf("timeout 必须大于 0")
 	}
-	if strings.TrimSpace(c.UserPrefix) == "" {
-		return fmt.Errorf("user-prefix 不能为空")
-	}
-	if userID := benchmarkUserID(c.UserPrefix, c.Users); len(userID) > 32 {
-		return fmt.Errorf("生成的 user_id %q 超过数据库 varchar(32)", userID)
-	}
 	return nil
 }
 
 func (c benchmarkConfig) endpoint() string {
-	return strings.TrimRight(c.BaseURL, "/") + drawPath
+	return strings.TrimRight(c.BaseURL, "/") + selectionPath
+}
+
+func (c benchmarkConfig) studentID(sequence uint64) uint64 {
+	return c.StudentIDStart + (sequence-1)%uint64(c.Users)
 }

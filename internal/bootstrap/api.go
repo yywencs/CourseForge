@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"prizeforge/internal/application/admin"
 	"prizeforge/internal/application/api"
 	"prizeforge/internal/domain/activity"
 	"prizeforge/internal/domain/award"
@@ -16,6 +15,7 @@ import (
 	"prizeforge/internal/infrastructure/repository/activityrepo"
 	"prizeforge/internal/infrastructure/repository/awardrepo"
 	"prizeforge/internal/infrastructure/repository/enrollmentrepo"
+	"prizeforge/internal/infrastructure/repository/outboxrepo"
 	"prizeforge/internal/infrastructure/repository/rebaterepo"
 	"prizeforge/internal/infrastructure/repository/strategyrepo"
 	"prizeforge/internal/infrastructure/repository/taskrepo"
@@ -37,8 +37,8 @@ import (
 // HTTPApp holds the wired application dependencies.
 //
 // 区分两个入口：
-//   - NewAdminApp：只装配 admin HTTP 所需的最小依赖（strategy 链 + admin server）。
-//     不建 RabbitMQ 连接、不建 Asynq worker / RabbitMQ consumer，asynqWorker/rabbitMQConsumer 为 nil。
+//   - NewAdminApp：只装配 courseforge MySQL 和可扩展 Admin HTTP 骨架。
+//     不建旧抽奖分库、Redis、RabbitMQ、Asynq worker / RabbitMQ consumer。
 //   - NewAPIApp：装配 API HTTP 全链路 + Asynq worker + RabbitMQ consumer。
 //
 // 这样 cmd/admin 在没有 RabbitMQ 的环境也能正常启动；
@@ -55,8 +55,8 @@ type HTTPApp struct {
 	rabbitMQConsumer *listener.RabbitMQConsumer
 }
 
-// baseDeps 是 NewAdminApp 与 NewAPIApp 共享的基础设施：config、logger、db、redis、asynq client。
-// strategy 链（strategy repo + domain service）也为两端共用，因为 admin 依赖它。
+// baseDeps 是 API 旧抽奖链路与选课链路当前共享的依赖。
+// Admin 已从这里解耦，只连接 courseforge MySQL。
 type baseDeps struct {
 	cfg         *config.Config
 	dbRouter    *adapter.DBRouter
@@ -72,17 +72,7 @@ type baseDeps struct {
 // 注：此处 db 用的是 adapter 提供的 *gorm.DB / DBRouter，asynq client 用 *asynq.Client，
 // 具体类型随 adapter 包内工厂函数返回值而定。
 func loadBase() (*baseDeps, error) {
-	config.InitViperConfig()
-	cfg := config.Conf
-
-	logger.Init(logger.Config{
-		Level:      cfg.Log.Level,
-		Filename:   cfg.Log.Filename,
-		MaxSize:    cfg.Log.MaxSize,
-		MaxBackups: cfg.Log.MaxBackups,
-		MaxAge:     cfg.Log.MaxAge,
-		Compress:   cfg.Log.Compress,
-	})
+	cfg := loadRuntimeConfig()
 
 	gormDB := adapter.NewDB(&cfg.Data.Database)
 	dbRouter := adapter.NewDBRouter(&cfg.Data.Database)
@@ -102,18 +92,36 @@ func loadBase() (*baseDeps, error) {
 	}, nil
 }
 
-// NewAdminApp 装配仅运营后台所需依赖：strategy 链 + admin HTTP server。
-// 不建 RabbitMQ 连接、不建 Asynq worker / RabbitMQ consumer，
-// 因此 admin 进程可在无 RabbitMQ / 无 Asynq worker 的环境启动。
-func NewAdminApp() *HTTPApp {
-	b, err := loadBase()
-	if err != nil {
-		panic(err)
-	}
-	cfg := b.cfg
+func loadRuntimeConfig() *config.Config {
+	config.InitViperConfig()
+	cfg := config.Conf
 
-	adminStrategyUsecase := admin.NewStrategyUsecase(b.strategySvc)
-	adminServer := adminhttp.NewServer(resolveAdminAddr(cfg), adminStrategyUsecase, baseReadinessChecks(b))
+	logger.Init(logger.Config{
+		Level:      cfg.Log.Level,
+		Filename:   cfg.Log.Filename,
+		MaxSize:    cfg.Log.MaxSize,
+		MaxBackups: cfg.Log.MaxBackups,
+		MaxAge:     cfg.Log.MaxAge,
+		Compress:   cfg.Log.Compress,
+	})
+	return cfg
+}
+
+// NewAdminApp 装配 courseforge MySQL + Admin HTTP 骨架。
+// 后续课程、视频等管理模块通过 admin.RouteRegistrar 注入路由。
+func NewAdminApp() *HTTPApp {
+	cfg := loadRuntimeConfig()
+	courseforgeDB := adapter.NewCourseforgeDB(&cfg.Data.Database)
+	readinessChecks := common.ReadinessChecks{
+		"courseforge_mysql": func(ctx context.Context) error {
+			sqlDB, err := courseforgeDB.DB()
+			if err != nil {
+				return fmt.Errorf("get courseforge database: %w", err)
+			}
+			return sqlDB.PingContext(ctx)
+		},
+	}
+	adminServer := adminhttp.NewServer(resolveAdminAddr(cfg), readinessChecks)
 
 	return &HTTPApp{
 		Config:      cfg,
@@ -179,6 +187,8 @@ func NewAPIApp() (*HTTPApp, error) {
 	drawResultRecoveryJob := job.NewDrawResultRecoveryJob(activityPartakeSvc, drawResultPublisher)
 	selectionResultPublisher := job.NewSelectionResultPublisher(enrollmentRepo, typedPublisher)
 	selectionResultRecoveryJob := job.NewSelectionResultRecoveryJob(enrollmentRepo, selectionResultPublisher)
+	outboxRepository := outboxrepo.NewRepository(courseforgeDB)
+	outboxDispatcher := job.NewOutboxDispatcher(outboxRepository, typedPublisher)
 
 	// RabbitMQ listeners
 	stockListener := listener.NewActivityStockListener(activityQuotaSvc)
@@ -195,6 +205,7 @@ func NewAPIApp() (*HTTPApp, error) {
 		strategyAwardStockJob,
 		drawResultRecoveryJob,
 		selectionResultRecoveryJob,
+		outboxDispatcher,
 	)
 	rabbitMQConsumer := listener.NewRabbitMQConsumer(
 		conn,

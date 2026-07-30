@@ -1,17 +1,29 @@
 package admin
 
-// registerRoutes registers all Admin routes.
-//
-// Route mapping (from Kratos proto definitions):
-//
-//	POST /admin/v1/strategy/armory                         → StrategyArmory
-//	POST /admin/v1/strategy/query_raffle_award_list         → QueryRaffleAwardList
-//	POST /admin/v1/strategy/query_raffle_strategy_rule_weight → QueryRaffleStrategyRuleWeight
+import (
+	"prizeforge/server/http/common"
+
+	"github.com/gin-gonic/gin"
+)
+
+type statusResponse struct {
+	Service string `json:"service"`
+	Status  string `json:"status"`
+}
+
+// registerRoutes installs only the stable Admin shell. Domain modules register
+// their routes through RouteRegistrar as they are introduced.
 func (s *Server) registerRoutes() {
-	g := s.engine.Group("/admin/v1/strategy")
-	{
-		g.POST("/armory", s.StrategyArmory)
-		g.POST("/query_raffle_award_list", s.QueryRaffleAwardList)
-		g.POST("/query_raffle_strategy_rule_weight", s.QueryRaffleStrategyRuleWeight)
+	group := s.engine.Group("/admin/v1")
+	group.GET("/status", func(ctx *gin.Context) {
+		common.Success(ctx, statusResponse{
+			Service: "courseforge-admin",
+			Status:  "ok",
+		})
+	})
+	for _, registrar := range s.registrars {
+		if registrar != nil {
+			registrar.RegisterAdminRoutes(group)
+		}
 	}
 }

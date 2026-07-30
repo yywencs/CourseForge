@@ -127,6 +127,11 @@ build-cdc: ## 构建 CDC Sync 服务
 	@mkdir -p $(BIN_DIR)
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/prizeforge-cdc-sync ./cmd/cdc-sync
 
+.PHONY: build-benchmark
+build-benchmark: ## 构建 CourseForge 选课压测工具
+	@mkdir -p $(BIN_DIR)
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/courseforge-benchmark ./cmd/benchmark
+
 .PHONY: run-api
 run-api: ## 本地启动 API 服务
 	$(GO) run ./cmd/api
@@ -153,6 +158,10 @@ docker-build-admin: ## 构建 Admin Docker 镜像
 .PHONY: docker-build-cdc
 docker-build-cdc: ## 构建 CDC Sync Docker 镜像
 	$(DOCKER) build --target cdc-sync -t $(IMAGE_PREFIX)-cdc-sync:$(VERSION) .
+
+.PHONY: docker-build-benchmark
+docker-build-benchmark: ## 构建 CourseForge 选课压测镜像
+	$(DOCKER) build -f cmd/benchmark/Dockerfile -t courseforge-benchmark:$(VERSION) .
 
 .PHONY: compose-config
 compose-config: ## 校验并渲染 Compose 配置

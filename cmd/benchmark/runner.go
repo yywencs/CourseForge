@@ -15,19 +15,22 @@ import (
 
 const maxResponseBytes = 1 << 20
 
-type drawRequest struct {
-	UserID     string `json:"user_id"`
-	ActivityID int64  `json:"activity_id"`
-	RequestID  string `json:"request_id"`
+type selectionRequest struct {
+	RequestID       string `json:"request_id"`
+	RoundID         uint64 `json:"round_id"`
+	StudentID       uint64 `json:"student_id"`
+	TeachingClassID uint64 `json:"teaching_class_id"`
+	Source          string `json:"source"`
 }
 
-type drawResponse struct {
+type selectionResponse struct {
 	Code int    `json:"code"`
 	Info string `json:"info"`
 	Data struct {
-		AwardID    int64  `json:"award_id"`
-		AwardTitle string `json:"award_title"`
-		AwardIndex int    `json:"award_index"`
+		ApplicationID   string `json:"application_id"`
+		State           string `json:"state"`
+		BrokerConfirmed bool   `json:"broker_confirmed"`
+		MySQLPersisted  bool   `json:"mysql_persisted"`
 	} `json:"data"`
 }
 
@@ -78,6 +81,9 @@ func (r *benchmarkRunner) run(ctx context.Context) benchmarkSummary {
 					break
 				}
 				sequence := r.sequence.Add(1)
+				if sequence > uint64(r.config.Users) {
+					break
+				}
 				stats.record(r.execute(ctx, sequence))
 			}
 			workerStats <- stats
@@ -97,11 +103,16 @@ func (r *benchmarkRunner) run(ctx context.Context) benchmarkSummary {
 
 func (r *benchmarkRunner) execute(ctx context.Context, sequence uint64) requestResult {
 	startedAt := time.Now()
-	userIndex := (sequence - 1) % uint64(r.config.Users)
-	payload := drawRequest{
-		UserID:     benchmarkUserID(r.config.UserPrefix, int(userIndex+1)),
-		ActivityID: r.config.ActivityID,
-		RequestID:  fmt.Sprintf("benchmark-%s-%s", r.runID, strconv.FormatUint(sequence, 36)),
+	payload := selectionRequest{
+		RequestID: fmt.Sprintf(
+			"benchmark-%s-%s",
+			r.runID,
+			strconv.FormatUint(sequence, 36),
+		),
+		RoundID:         r.config.RoundID,
+		StudentID:       r.config.studentID(sequence),
+		TeachingClassID: r.config.TeachingClassID,
+		Source:          "web",
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -130,7 +141,7 @@ func (r *benchmarkRunner) execute(ctx context.Context, sequence uint64) requestR
 		return requestResult{latency: latency, outcome: outcomeHTTPError}
 	}
 
-	var result drawResponse
+	var result selectionResponse
 	if err := json.Unmarshal(responseBody, &result); err != nil {
 		return requestResult{latency: latency, outcome: outcomeDecodeError}
 	}
@@ -140,6 +151,11 @@ func (r *benchmarkRunner) execute(ctx context.Context, sequence uint64) requestR
 			outcome:      outcomeBusinessError,
 			businessCode: result.Code,
 		}
+	}
+	if result.Data.ApplicationID == "" ||
+		result.Data.State != "selected" ||
+		!result.Data.BrokerConfirmed {
+		return requestResult{latency: latency, outcome: outcomeDecodeError}
 	}
 	return requestResult{latency: latency, outcome: outcomeSuccess}
 }

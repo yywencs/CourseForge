@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"prizeforge/internal/domain/enrollment"
+	"prizeforge/internal/metrics"
 	"prizeforge/pkg/rabbitmq"
 )
 
@@ -52,8 +54,11 @@ func (l *SelectionResultListener) Handle(
 	if event.ID != expectedEventID {
 		return false, errors.New("选课结果消息ID与载荷不一致")
 	}
+	startedAt := time.Now()
 	if err := l.service.SaveSelectionResult(ctx, &result); err != nil {
+		metrics.ObserveSelectionPersistence("error", time.Since(startedAt))
 		return true, err
 	}
+	metrics.ObserveSelectionPersistence("success", time.Since(startedAt))
 	return false, nil
 }

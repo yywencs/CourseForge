@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"prizeforge/internal/domain/enrollment"
+	"prizeforge/internal/metrics"
 	"prizeforge/pkg/idgen"
 )
 
@@ -70,7 +71,12 @@ func NewEnrollmentUsecase(
 func (u *EnrollmentUsecase) SelectCourse(
 	ctx context.Context,
 	command *SelectCourseCommand,
-) (*SelectionReceipt, error) {
+) (receipt *SelectionReceipt, err error) {
+	startedAt := time.Now()
+	defer func() {
+		metrics.ObserveSelection(selectionMetricResult(err), time.Since(startedAt))
+	}()
+
 	if err := validateSelectCourseCommand(command); err != nil {
 		return nil, err
 	}
@@ -188,6 +194,39 @@ func (u *EnrollmentUsecase) SelectCourse(
 		return u.publishCompleted(ctx, reservation.Publication)
 	}
 	return u.processReservedSelection(ctx, application)
+}
+
+func selectionMetricResult(err error) string {
+	switch {
+	case err == nil:
+		return "selected"
+	case errors.Is(err, enrollment.ErrInvalidParams):
+		return "invalid_params"
+	case errors.Is(err, enrollment.ErrRecordNotFound):
+		return "not_found"
+	case errors.Is(err, enrollment.ErrRoundNotOpen):
+		return "round_not_open"
+	case errors.Is(err, enrollment.ErrStudentInactive):
+		return "student_inactive"
+	case errors.Is(err, enrollment.ErrTeachingClassNotOpen):
+		return "class_not_open"
+	case errors.Is(err, enrollment.ErrCreditQuotaExceeded):
+		return "credit_quota_exceeded"
+	case errors.Is(err, enrollment.ErrCourseQuotaExceeded):
+		return "course_quota_exceeded"
+	case errors.Is(err, enrollment.ErrTeachingClassFull):
+		return "class_full"
+	case errors.Is(err, enrollment.ErrDuplicateSelection):
+		return "duplicate"
+	case errors.Is(err, enrollment.ErrIdempotencyConflict):
+		return "idempotency_conflict"
+	case errors.Is(err, enrollment.ErrApplicationInProgress):
+		return "in_progress"
+	case errors.Is(err, enrollment.ErrApplicationCancelled):
+		return "cancelled"
+	default:
+		return "error"
+	}
 }
 
 func (u *EnrollmentUsecase) processReservedSelection(

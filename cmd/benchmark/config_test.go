@@ -6,36 +6,36 @@ import (
 	"time"
 )
 
-// TestParseConfig 验证命令行参数能够生成完整且正确的压测配置。
 func TestParseConfig(t *testing.T) {
 	config, err := parseConfig([]string{
 		"--url", "http://example.test:8080/",
-		"--activity-id", "200001",
+		"--round-id", "9000000000101",
+		"--teaching-class-id", "9000000000301",
+		"--student-id-start", "9100000000000",
 		"--users", "200",
 		"--concurrency", "20",
 		"--duration", "45s",
 		"--timeout", "3s",
-		"--user-prefix", "load-user",
 	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v, want nil", err)
 	}
 
-	if got, want := config.endpoint(), "http://example.test:8080"+drawPath; got != want {
+	if got, want := config.endpoint(), "http://example.test:8080"+selectionPath; got != want {
 		t.Fatalf("endpoint() = %q, want %q", got, want)
 	}
-	if config.ActivityID != 200001 || config.Users != 200 || config.Concurrency != 20 {
+	if config.RoundID != 9_000_000_000_101 ||
+		config.TeachingClassID != 9_000_000_000_301 ||
+		config.StudentIDStart != 9_100_000_000_000 ||
+		config.Users != 200 ||
+		config.Concurrency != 20 {
 		t.Fatalf("parsed numeric config = %+v, want provided values", config)
 	}
 	if config.Duration != 45*time.Second || config.Timeout != 3*time.Second {
 		t.Fatalf("parsed durations = %s/%s, want 45s/3s", config.Duration, config.Timeout)
 	}
-	if config.UserPrefix != "load-user" {
-		t.Fatalf("UserPrefix = %q, want load-user", config.UserPrefix)
-	}
 }
 
-// TestParseConfigRejectsInvalidValues 验证无效地址和非正并发数会在发起请求前被拒绝。
 func TestParseConfigRejectsInvalidValues(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -46,6 +46,7 @@ func TestParseConfigRejectsInvalidValues(t *testing.T) {
 		{name: "zero concurrency", args: []string{"--concurrency", "0"}},
 		{name: "zero users", args: []string{"--users", "0"}},
 		{name: "zero duration", args: []string{"--duration", "0s"}},
+		{name: "zero round", args: []string{"--round-id", "0"}},
 	}
 
 	for _, testCase := range testCases {

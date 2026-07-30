@@ -2,10 +2,12 @@ package metrics
 
 import "github.com/prometheus/client_golang/prometheus"
 
+const metricNamespace = "courseforge"
+
 var (
 	HTTPRequestsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "http",
 			Name:      "requests_total",
 			Help:      "Total number of HTTP requests.",
@@ -15,7 +17,7 @@ var (
 
 	HTTPRequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "http",
 			Name:      "request_duration_seconds",
 			Help:      "HTTP request latency.",
@@ -24,9 +26,51 @@ var (
 		[]string{"method", "path"},
 	)
 
+	SelectionTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricNamespace,
+			Subsystem: "selection",
+			Name:      "requests_total",
+			Help:      "Total number of course selection decisions.",
+		},
+		[]string{"result"},
+	)
+
+	SelectionDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: metricNamespace,
+			Subsystem: "selection",
+			Name:      "duration_seconds",
+			Help:      "Course selection decision latency.",
+			Buckets:   prometheus.DefBuckets,
+		},
+		[]string{"result"},
+	)
+
+	SelectionPersistenceTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricNamespace,
+			Subsystem: "selection",
+			Name:      "persistence_total",
+			Help:      "Total number of selection result persistence attempts.",
+		},
+		[]string{"result"},
+	)
+
+	SelectionPersistenceDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: metricNamespace,
+			Subsystem: "selection",
+			Name:      "persistence_duration_seconds",
+			Help:      "Selection result MySQL persistence latency.",
+			Buckets:   prometheus.DefBuckets,
+		},
+		[]string{"result"},
+	)
+
 	ActivityQuotaTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "activity",
 			Name:      "quota_total",
 			Help:      "Total activity quota check results.",
@@ -36,7 +80,7 @@ var (
 
 	RaffleTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "raffle",
 			Name:      "total",
 			Help:      "Total raffle attempts.",
@@ -46,7 +90,7 @@ var (
 
 	RaffleDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "raffle",
 			Name:      "duration_seconds",
 			Help:      "Raffle execution latency.",
@@ -57,7 +101,7 @@ var (
 
 	AwardTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "award",
 			Name:      "total",
 			Help:      "Total award dispatch results.",
@@ -67,7 +111,7 @@ var (
 
 	StockConsumeTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "stock",
 			Name:      "consume_total",
 			Help:      "Stock consume results.",
@@ -77,7 +121,7 @@ var (
 
 	RabbitMQPublishTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "rabbitmq",
 			Name:      "publish_total",
 			Help:      "Total RabbitMQ publish results.",
@@ -85,9 +129,30 @@ var (
 		[]string{"topic", "result"},
 	)
 
+	OutboxDispatchTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricNamespace,
+			Subsystem: "outbox",
+			Name:      "dispatch_total",
+			Help:      "Total number of generic outbox dispatch attempts.",
+		},
+		[]string{"topic", "result"},
+	)
+
+	OutboxDispatchDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: metricNamespace,
+			Subsystem: "outbox",
+			Name:      "dispatch_duration_seconds",
+			Help:      "Generic outbox dispatch latency.",
+			Buckets:   prometheus.DefBuckets,
+		},
+		[]string{"topic", "result"},
+	)
+
 	RedisOpsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "redis",
 			Name:      "ops_total",
 			Help:      "Total Redis operations.",
@@ -97,7 +162,7 @@ var (
 
 	RedisOpDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "redis",
 			Name:      "op_duration_seconds",
 			Help:      "Redis operation latency.",
@@ -108,7 +173,7 @@ var (
 
 	AsynqTaskTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "asynq",
 			Name:      "task_total",
 			Help:      "Total Asynq task execution results.",
@@ -118,7 +183,7 @@ var (
 
 	AsynqTaskDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "asynq",
 			Name:      "task_duration_seconds",
 			Help:      "Asynq task execution latency.",
@@ -129,7 +194,7 @@ var (
 
 	AsynqQueueSize = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "asynq",
 			Name:      "queue_size",
 			Help:      "Current total Asynq queue size.",
@@ -139,7 +204,7 @@ var (
 
 	AsynqRetrySize = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "asynq",
 			Name:      "retry_size",
 			Help:      "Current Asynq retry queue size.",
@@ -149,7 +214,7 @@ var (
 
 	AsynqScheduledSize = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "asynq",
 			Name:      "scheduled_size",
 			Help:      "Current Asynq scheduled queue size.",
@@ -159,7 +224,7 @@ var (
 
 	MySQLOpenConnections = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "mysql",
 			Name:      "open_connections",
 			Help:      "Current number of open MySQL connections.",
@@ -169,7 +234,7 @@ var (
 
 	MySQLInUse = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "mysql",
 			Name:      "in_use",
 			Help:      "Current number of in-use MySQL connections.",
@@ -179,7 +244,7 @@ var (
 
 	MySQLIdle = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "mysql",
 			Name:      "idle",
 			Help:      "Current number of idle MySQL connections.",
@@ -189,7 +254,7 @@ var (
 
 	MySQLWaitCount = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "mysql",
 			Name:      "wait_count",
 			Help:      "Current sampled MySQL wait count.",
@@ -199,7 +264,7 @@ var (
 
 	MySQLWaitDurationSeconds = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "mysql",
 			Name:      "wait_duration_seconds",
 			Help:      "Current sampled MySQL wait duration in seconds.",
@@ -209,7 +274,7 @@ var (
 
 	MySQLMaxIdleClosedTotal = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "mysql",
 			Name:      "max_idle_closed_total",
 			Help:      "Current sampled MySQL max idle closed total.",
@@ -219,7 +284,7 @@ var (
 
 	MySQLMaxLifetimeClosedTotal = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "prizeforge",
+			Namespace: metricNamespace,
 			Subsystem: "mysql",
 			Name:      "max_lifetime_closed_total",
 			Help:      "Current sampled MySQL max lifetime closed total.",
@@ -232,12 +297,18 @@ func init() {
 	prometheus.MustRegister(
 		HTTPRequestsTotal,
 		HTTPRequestDuration,
+		SelectionTotal,
+		SelectionDuration,
+		SelectionPersistenceTotal,
+		SelectionPersistenceDuration,
 		ActivityQuotaTotal,
 		RaffleTotal,
 		RaffleDuration,
 		AwardTotal,
 		StockConsumeTotal,
 		RabbitMQPublishTotal,
+		OutboxDispatchTotal,
+		OutboxDispatchDuration,
 		RedisOpsTotal,
 		RedisOpDuration,
 		AsynqTaskTotal,

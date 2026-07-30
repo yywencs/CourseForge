@@ -10,9 +10,9 @@ import (
 )
 
 func TestServerRegistersHealthRoutes(t *testing.T) {
-	server := NewServer(":0", nil, common.ReadinessChecks{
+	server := NewServer(":0", nil, nil, nil, common.ReadinessChecks{
 		"dependency": func(context.Context) error { return nil },
-	})
+	}, nil)
 
 	for _, path := range []string{"/healthz", "/readyz"} {
 		response := httptest.NewRecorder()

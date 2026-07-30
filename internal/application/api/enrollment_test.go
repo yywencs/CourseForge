@@ -10,14 +10,38 @@ import (
 )
 
 type fakeEnrollmentRepository struct {
-	lookup    *enrollment.SelectionRequestRecord
-	round     *enrollment.SelectionRound
-	class     *enrollment.TeachingClass
-	quota     *enrollment.StudentSelectionQuota
-	active    bool
-	existing  bool
-	reserved  *enrollment.SelectionApplication
-	completed *enrollment.SelectionResult
+	lookup            *enrollment.SelectionRequestRecord
+	round             *enrollment.SelectionRound
+	class             *enrollment.TeachingClass
+	quota             *enrollment.StudentSelectionQuota
+	active            bool
+	eligibility       *enrollment.EligibilitySnapshot
+	existing          bool
+	reserved          *enrollment.SelectionApplication
+	completed         *enrollment.SelectionResult
+	applicationRecord *enrollment.SelectionApplicationRecord
+	enrollmentPage    *enrollment.EnrollmentPage
+}
+
+func (f *fakeEnrollmentRepository) QuerySelectionApplication(
+	context.Context,
+	string,
+	uint64,
+) (*enrollment.SelectionApplicationRecord, error) {
+	return f.applicationRecord, nil
+}
+
+func (f *fakeEnrollmentRepository) ListStudentEnrollments(
+	context.Context,
+	uint64,
+	uint64,
+	int,
+	int,
+) (*enrollment.EnrollmentPage, error) {
+	if f.enrollmentPage == nil {
+		return &enrollment.EnrollmentPage{}, nil
+	}
+	return f.enrollmentPage, nil
 }
 
 func (f *fakeEnrollmentRepository) QuerySelectionByRequest(
@@ -54,6 +78,16 @@ func (f *fakeEnrollmentRepository) QueryStudentSelectionQuota(
 
 func (f *fakeEnrollmentRepository) IsStudentActive(context.Context, uint64) (bool, error) {
 	return f.active, nil
+}
+
+func (f *fakeEnrollmentRepository) QueryEligibilitySnapshot(
+	context.Context,
+	uint64,
+	uint64,
+	uint64,
+	uint64,
+) (*enrollment.EligibilitySnapshot, error) {
+	return f.eligibility, nil
 }
 
 func (f *fakeEnrollmentRepository) HasExistingEnrollment(
@@ -149,9 +183,17 @@ func newSuccessfulEnrollmentUsecase(
 			CourseLimit: 6,
 		},
 		active: true,
+		eligibility: &enrollment.EligibilitySnapshot{
+			Student: &enrollment.StudentProfile{
+				ID:        10001,
+				MajorID:   1,
+				GradeYear: 2025,
+				State:     enrollment.StudentStateActive,
+			},
+		},
 	}
 	publisher := &fakeSelectionPublisher{}
-	usecase := NewEnrollmentUsecase(repo, repo, publisher)
+	usecase := NewEnrollmentUsecase(repo, repo, repo, publisher)
 	usecase.now = func() time.Time { return now }
 	usecase.newID = func() (string, error) { return "application-001", nil }
 	return usecase, repo, publisher, now

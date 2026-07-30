@@ -17,6 +17,23 @@ func ObserveSelectionPersistence(result string, duration time.Duration) {
 	SelectionPersistenceDuration.WithLabelValues(result).Observe(duration.Seconds())
 }
 
+func IncEnrollmentProjection(operation, result string) {
+	EnrollmentProjectionTotal.WithLabelValues(
+		normalizeLabel(operation),
+		normalizeLabel(result),
+	).Inc()
+}
+
+// IncWaitlistPromotion 记录候补晋级结果。
+func IncWaitlistPromotion(result string) {
+	WaitlistPromotionTotal.WithLabelValues(normalizeLabel(result)).Inc()
+}
+
+// SetProjectionRepairPending 设置等待执行的投影修复任务数。
+func SetProjectionRepairPending(count int64) {
+	ProjectionRepairPending.Set(float64(count))
+}
+
 func ObserveOutboxDispatch(topic, result string, duration time.Duration) {
 	topic = normalizeLabel(topic)
 	result = normalizeLabel(result)

@@ -29,6 +29,8 @@ type AsynqWorker struct {
 func NewAsynqWorker(
 	cfg *config.AsynqConfig,
 	selectionResultRecoveryJob *job.SelectionResultRecoveryJob,
+	waitlistPromotionJob *job.WaitlistPromotionJob,
+	projectionReconciliationJob *job.ProjectionReconciliationJob,
 	outboxDispatcher *job.OutboxDispatcher,
 ) *AsynqWorker {
 	redisOpt := asynq.RedisClientOpt{
@@ -72,6 +74,14 @@ func NewAsynqWorker(
 		outbox.TaskTypeDispatch,
 		wrapAsynqHandler(outbox.TaskTypeDispatch, outboxDispatcher.ProcessTask),
 	)
+	mux.HandleFunc(
+		enrollment.TaskTypeWaitlistPromotion,
+		wrapAsynqHandler(enrollment.TaskTypeWaitlistPromotion, waitlistPromotionJob.ProcessTask),
+	)
+	mux.HandleFunc(
+		enrollment.TaskTypeProjectionRepair,
+		wrapAsynqHandler(enrollment.TaskTypeProjectionRepair, projectionReconciliationJob.ProcessTask),
+	)
 
 	if _, err := scheduler.Register(
 		"@every 1s",
@@ -81,9 +91,21 @@ func NewAsynqWorker(
 	}
 	if _, err := scheduler.Register(
 		"@every 5s",
+		asynq.NewTask(enrollment.TaskTypeProjectionRepair, nil),
+	); err != nil {
+		logger.Error("register projection repair scheduler failed", "err", err)
+	}
+	if _, err := scheduler.Register(
+		"@every 5s",
 		asynq.NewTask(outbox.TaskTypeDispatch, nil),
 	); err != nil {
 		logger.Error("register outbox dispatcher scheduler failed", "err", err)
+	}
+	if _, err := scheduler.Register(
+		"@every 1s",
+		asynq.NewTask(enrollment.TaskTypeWaitlistPromotion, nil),
+	); err != nil {
+		logger.Error("register waitlist promotion scheduler failed", "err", err)
 	}
 
 	return &AsynqWorker{

@@ -17,19 +17,28 @@ type Server struct {
 	httpServer        *http.Server
 	addr              string
 	enrollmentUsecase *api.EnrollmentUsecase
+	dropUsecase       *api.DropEnrollmentUsecase
+	waitlistUsecase   *api.WaitlistUsecase
 	readinessChecks   common.ReadinessChecks
+	authMiddleware    gin.HandlerFunc
 }
 
 func NewServer(
 	addr string,
 	enrollmentUsecase *api.EnrollmentUsecase,
+	dropUsecase *api.DropEnrollmentUsecase,
+	waitlistUsecase *api.WaitlistUsecase,
 	readinessChecks common.ReadinessChecks,
+	authMiddleware gin.HandlerFunc,
 ) *Server {
 	s := &Server{
 		engine:            gin.New(),
 		addr:              addr,
 		enrollmentUsecase: enrollmentUsecase,
+		dropUsecase:       dropUsecase,
+		waitlistUsecase:   waitlistUsecase,
 		readinessChecks:   readinessChecks,
+		authMiddleware:    authMiddleware,
 	}
 
 	s.engine.Use(gin.Recovery())

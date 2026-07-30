@@ -2,9 +2,12 @@ package api
 
 import (
 	"errors"
+	"strconv"
+	"time"
 
 	applicationapi "prizeforge/internal/application/api"
 	"prizeforge/internal/domain/enrollment"
+	"prizeforge/internal/middleware"
 	"prizeforge/pkg/logger"
 	"prizeforge/server/http/common"
 
@@ -14,9 +17,7 @@ import (
 type selectCourseRequest struct {
 	RequestID       string `json:"request_id"`
 	RoundID         uint64 `json:"round_id"`
-	StudentID       uint64 `json:"student_id"`
 	TeachingClassID uint64 `json:"teaching_class_id"`
-	Source          string `json:"source"`
 }
 
 type selectCourseResponse struct {
@@ -38,22 +39,22 @@ func (s *Server) SelectCourse(c *gin.Context) {
 		common.Error(c, 400, "invalid request body: "+err.Error())
 		return
 	}
-	source := enrollment.ApplicationSource(req.Source)
-	if source == "" {
-		source = enrollment.ApplicationSourceWeb
+	studentID, ok := authenticatedStudentID(c)
+	if !ok {
+		return
 	}
 	receipt, err := s.enrollmentUsecase.SelectCourse(
 		c.Request.Context(),
 		&applicationapi.SelectCourseCommand{
 			RequestID:       req.RequestID,
 			RoundID:         req.RoundID,
-			StudentID:       req.StudentID,
+			StudentID:       studentID,
 			TeachingClassID: req.TeachingClassID,
-			Source:          source,
+			Source:          enrollment.ApplicationSourceWeb,
 		},
 	)
 	if err != nil {
-		handleSelectionError(c, req, err)
+		handleSelectionError(c, studentID, req.RoundID, req.TeachingClassID, err)
 		return
 	}
 	common.Success(c, selectCourseResponse{
@@ -64,11 +65,176 @@ func (s *Server) SelectCourse(c *gin.Context) {
 	})
 }
 
-func handleSelectionError(c *gin.Context, req selectCourseRequest, err error) {
+type applicationResponse struct {
+	ApplicationID   string                      `json:"application_id"`
+	RequestID       string                      `json:"request_id"`
+	RoundID         uint64                      `json:"round_id"`
+	TermID          uint64                      `json:"term_id"`
+	CourseID        uint64                      `json:"course_id"`
+	TeachingClassID uint64                      `json:"teaching_class_id"`
+	Credits         string                      `json:"credits"`
+	State           enrollment.ApplicationState `json:"state"`
+	Failure         *enrollment.FailureReason   `json:"failure,omitempty"`
+	AppliedAt       time.Time                   `json:"applied_at"`
+	CompletedAt     *time.Time                  `json:"completed_at,omitempty"`
+	BrokerConfirmed bool                        `json:"broker_confirmed"`
+	MySQLPersisted  bool                        `json:"mysql_persisted"`
+}
+
+func (s *Server) QueryApplication(c *gin.Context) {
+	studentID, ok := authenticatedStudentID(c)
+	if !ok {
+		return
+	}
+	record, err := s.enrollmentUsecase.QueryApplication(
+		c.Request.Context(),
+		studentID,
+		c.Param("application_id"),
+	)
+	if err != nil {
+		handleSelectionError(c, studentID, 0, 0, err)
+		return
+	}
+	application := record.Application
+	common.Success(c, applicationResponse{
+		ApplicationID:   application.ApplicationID,
+		RequestID:       application.RequestID,
+		RoundID:         application.RoundID,
+		TermID:          application.TermID,
+		CourseID:        application.CourseID,
+		TeachingClassID: application.TeachingClassID,
+		Credits:         application.Credits.String(),
+		State:           application.State,
+		Failure:         application.Failure,
+		AppliedAt:       application.AppliedAt,
+		CompletedAt:     application.CompletedAt,
+		BrokerConfirmed: record.BrokerConfirmed,
+		MySQLPersisted:  record.MySQLPersisted,
+	})
+}
+
+type enrollmentResponse struct {
+	EnrollmentID    string                     `json:"enrollment_id"`
+	ApplicationID   string                     `json:"application_id"`
+	RoundID         uint64                     `json:"round_id"`
+	TermID          uint64                     `json:"term_id"`
+	CourseID        uint64                     `json:"course_id"`
+	TeachingClassID uint64                     `json:"teaching_class_id"`
+	Credits         string                     `json:"credits"`
+	State           enrollment.EnrollmentState `json:"state"`
+	EnrolledAt      time.Time                  `json:"enrolled_at"`
+	DroppedAt       *time.Time                 `json:"dropped_at,omitempty"`
+}
+
+func (s *Server) ListMyEnrollments(c *gin.Context) {
+	studentID, ok := authenticatedStudentID(c)
+	if !ok {
+		return
+	}
+	termID, err := strconv.ParseUint(c.Query("term_id"), 10, 64)
+	if err != nil || termID == 0 {
+		common.Error(c, 400, "invalid term_id")
+		return
+	}
+	limit := queryIntOrDefault(c, "limit", 20)
+	offset := queryIntOrDefault(c, "offset", 0)
+	page, err := s.enrollmentUsecase.ListEnrollments(
+		c.Request.Context(),
+		studentID,
+		termID,
+		limit,
+		offset,
+	)
+	if err != nil {
+		handleSelectionError(c, studentID, 0, 0, err)
+		return
+	}
+	items := make([]enrollmentResponse, 0, len(page.Items))
+	for _, item := range page.Items {
+		items = append(items, enrollmentResponse{
+			EnrollmentID:    item.EnrollmentID,
+			ApplicationID:   item.ApplicationID,
+			RoundID:         item.RoundID,
+			TermID:          item.TermID,
+			CourseID:        item.CourseID,
+			TeachingClassID: item.TeachingClassID,
+			Credits:         item.Credits.String(),
+			State:           item.State,
+			EnrolledAt:      item.EnrolledAt,
+			DroppedAt:       item.DroppedAt,
+		})
+	}
+	common.Success(c, gin.H{
+		"items":  items,
+		"limit":  page.Limit,
+		"offset": page.Offset,
+		"total":  page.Total,
+	})
+}
+
+func (s *Server) DropEnrollment(c *gin.Context) {
+	if s.dropUsecase == nil {
+		common.Error(c, 503, "drop enrollment service is not configured")
+		return
+	}
+	studentID, ok := authenticatedStudentID(c)
+	if !ok {
+		return
+	}
+	receipt, err := s.dropUsecase.Drop(
+		c.Request.Context(),
+		studentID,
+		c.Param("enrollment_id"),
+	)
+	if err != nil {
+		handleSelectionError(c, studentID, 0, 0, err)
+		return
+	}
+	common.Success(c, gin.H{
+		"enrollment_id":   receipt.EnrollmentID,
+		"state":           receipt.State,
+		"mysql_persisted": receipt.MySQLPersisted,
+		"redis_released":  receipt.RedisReleased,
+	})
+}
+
+func authenticatedStudentID(c *gin.Context) (uint64, bool) {
+	info := middleware.GetAuthInfo(c)
+	if info == nil {
+		common.Error(c, 401, "authentication required")
+		return 0, false
+	}
+	studentID, err := strconv.ParseUint(info.UserID, 10, 64)
+	if err != nil || studentID == 0 {
+		common.Error(c, 401, "invalid authenticated student identity")
+		return 0, false
+	}
+	return studentID, true
+}
+
+func queryIntOrDefault(c *gin.Context, name string, fallback int) int {
+	raw := c.Query(name)
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return -1
+	}
+	return value
+}
+
+func handleSelectionError(
+	c *gin.Context,
+	studentID uint64,
+	roundID uint64,
+	teachingClassID uint64,
+	err error,
+) {
 	fields := []interface{}{
-		"studentID", req.StudentID,
-		"roundID", req.RoundID,
-		"teachingClassID", req.TeachingClassID,
+		"studentID", studentID,
+		"roundID", roundID,
+		"teachingClassID", teachingClassID,
 		"err", err,
 	}
 	switch {
@@ -85,9 +251,18 @@ func handleSelectionError(c *gin.Context, req selectCourseRequest, err error) {
 		errors.Is(err, enrollment.ErrCourseQuotaExceeded),
 		errors.Is(err, enrollment.ErrTeachingClassFull),
 		errors.Is(err, enrollment.ErrDuplicateSelection),
+		errors.Is(err, enrollment.ErrPrerequisiteNotMet),
+		errors.Is(err, enrollment.ErrMajorNotAllowed),
+		errors.Is(err, enrollment.ErrGradeNotAllowed),
+		errors.Is(err, enrollment.ErrScheduleConflict),
+		errors.Is(err, enrollment.ErrWaitlistAlreadyExists),
+		errors.Is(err, enrollment.ErrWaitlistNotRequired),
 		errors.Is(err, enrollment.ErrIdempotencyConflict),
 		errors.Is(err, enrollment.ErrApplicationInProgress),
 		errors.Is(err, enrollment.ErrApplicationCancelled):
+		logger.Debug("selection rejected", fields...)
+		common.Error(c, 409, err.Error())
+	case errors.Is(err, enrollment.ErrInvalidEnrollmentState):
 		logger.Debug("selection rejected", fields...)
 		common.Error(c, 409, err.Error())
 	default:

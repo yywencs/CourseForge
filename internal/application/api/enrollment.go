@@ -44,25 +44,64 @@ type selectionResultPublisher interface {
 
 // EnrollmentUsecase 编排 Redis-first 最小选课主链路。
 type EnrollmentUsecase struct {
-	queryRepo selectionQueryRepository
-	appRepo   selectionApplicationRepository
-	publisher selectionResultPublisher
-	now       func() time.Time
-	newID     func() (string, error)
+	queryRepo         selectionQueryRepository
+	eligibilityRepo   enrollment.EligibilityRepository
+	appRepo           selectionApplicationRepository
+	publisher         selectionResultPublisher
+	eligibilityPolicy enrollment.EligibilityPolicy
+	now               func() time.Time
+	newID             func() (string, error)
 }
 
 func NewEnrollmentUsecase(
 	queryRepo selectionQueryRepository,
+	eligibilityRepo enrollment.EligibilityRepository,
 	appRepo selectionApplicationRepository,
 	publisher selectionResultPublisher,
 ) *EnrollmentUsecase {
 	return &EnrollmentUsecase{
-		queryRepo: queryRepo,
-		appRepo:   appRepo,
-		publisher: publisher,
-		now:       time.Now,
-		newID:     idgen.NewOrderID,
+		queryRepo:         queryRepo,
+		eligibilityRepo:   eligibilityRepo,
+		appRepo:           appRepo,
+		publisher:         publisher,
+		eligibilityPolicy: enrollment.EligibilityPolicy{},
+		now:               time.Now,
+		newID:             idgen.NewOrderID,
 	}
+}
+
+func (u *EnrollmentUsecase) QueryApplication(
+	ctx context.Context,
+	studentID uint64,
+	applicationID string,
+) (*enrollment.SelectionApplicationRecord, error) {
+	if u == nil || u.queryRepo == nil || studentID == 0 || applicationID == "" {
+		return nil, enrollment.ErrInvalidParams
+	}
+	record, err := u.queryRepo.QuerySelectionApplication(ctx, applicationID, studentID)
+	if err != nil {
+		return nil, err
+	}
+	if record == nil || record.Application == nil {
+		return nil, enrollment.ErrRecordNotFound
+	}
+	return record, nil
+}
+
+func (u *EnrollmentUsecase) ListEnrollments(
+	ctx context.Context,
+	studentID uint64,
+	termID uint64,
+	limit int,
+	offset int,
+) (*enrollment.EnrollmentPage, error) {
+	if u == nil || u.queryRepo == nil || studentID == 0 || termID == 0 {
+		return nil, enrollment.ErrInvalidParams
+	}
+	if limit == 0 {
+		limit = 20
+	}
+	return u.queryRepo.ListStudentEnrollments(ctx, studentID, termID, limit, offset)
 }
 
 // SelectCourse 执行最小选课链路：
@@ -115,14 +154,6 @@ func (u *EnrollmentUsecase) SelectCourse(
 		return nil, enrollment.ErrRoundNotOpen
 	}
 
-	active, err := u.queryRepo.IsStudentActive(ctx, command.StudentID)
-	if err != nil {
-		return nil, err
-	}
-	if !active {
-		return nil, enrollment.ErrStudentInactive
-	}
-
 	class, err := u.queryRepo.QueryTeachingClass(ctx, round.ID, command.TeachingClassID)
 	if err != nil {
 		return nil, err
@@ -145,6 +176,22 @@ func (u *EnrollmentUsecase) SelectCourse(
 		return nil, err
 	}
 	if err := class.ValidateForSelection(request); err != nil {
+		return nil, err
+	}
+	if u.eligibilityRepo == nil {
+		return nil, errors.New("selection eligibility repository is not configured")
+	}
+	eligibility, err := u.eligibilityRepo.QueryEligibilitySnapshot(
+		ctx,
+		request.StudentID,
+		request.TermID,
+		request.CourseID,
+		request.TeachingClassID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := u.eligibilityPolicy.Evaluate(eligibility); err != nil {
 		return nil, err
 	}
 
@@ -218,6 +265,14 @@ func selectionMetricResult(err error) string {
 		return "class_full"
 	case errors.Is(err, enrollment.ErrDuplicateSelection):
 		return "duplicate"
+	case errors.Is(err, enrollment.ErrPrerequisiteNotMet):
+		return "prerequisite_not_met"
+	case errors.Is(err, enrollment.ErrMajorNotAllowed):
+		return "major_not_allowed"
+	case errors.Is(err, enrollment.ErrGradeNotAllowed):
+		return "grade_not_allowed"
+	case errors.Is(err, enrollment.ErrScheduleConflict):
+		return "schedule_conflict"
 	case errors.Is(err, enrollment.ErrIdempotencyConflict):
 		return "idempotency_conflict"
 	case errors.Is(err, enrollment.ErrApplicationInProgress):

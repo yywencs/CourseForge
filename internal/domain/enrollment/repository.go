@@ -13,6 +13,22 @@ type QueryRepository interface {
 		studentID uint64,
 		requestID string,
 	) (*SelectionRequestRecord, error)
+	// QuerySelectionApplication 按申请ID查询申请状态。
+	// 实现必须校验 studentID 所有权；优先返回 MySQL 持久状态，
+	// 未落库时再回退 Redis 中的处理中状态。
+	QuerySelectionApplication(
+		ctx context.Context,
+		applicationID string,
+		studentID uint64,
+	) (*SelectionApplicationRecord, error)
+	// ListStudentEnrollments 查询学生正式选课记录。
+	ListStudentEnrollments(
+		ctx context.Context,
+		studentID uint64,
+		termID uint64,
+		limit int,
+		offset int,
+	) (*EnrollmentPage, error)
 	QuerySelectionRound(ctx context.Context, roundID uint64) (*SelectionRound, error)
 	QueryTeachingClass(
 		ctx context.Context,
@@ -24,7 +40,6 @@ type QueryRepository interface {
 		roundID uint64,
 		studentID uint64,
 	) (*StudentSelectionQuota, error)
-	IsStudentActive(ctx context.Context, studentID uint64) (bool, error)
 	HasExistingEnrollment(
 		ctx context.Context,
 		termID uint64,

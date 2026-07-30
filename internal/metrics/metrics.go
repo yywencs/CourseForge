@@ -68,6 +68,35 @@ var (
 		[]string{"result"},
 	)
 
+	EnrollmentProjectionTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricNamespace,
+			Subsystem: "enrollment",
+			Name:      "projection_total",
+			Help:      "Total enrollment Redis projection updates.",
+		},
+		[]string{"operation", "result"},
+	)
+
+	WaitlistPromotionTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricNamespace,
+			Subsystem: "waitlist",
+			Name:      "promotion_total",
+			Help:      "Total number of waitlist promotion results.",
+		},
+		[]string{"result"},
+	)
+
+	ProjectionRepairPending = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: metricNamespace,
+			Subsystem: "enrollment",
+			Name:      "projection_repair_pending",
+			Help:      "Current pending MySQL to Redis projection repairs.",
+		},
+	)
+
 	RabbitMQPublishTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metricNamespace,
@@ -250,6 +279,9 @@ func init() {
 		SelectionDuration,
 		SelectionPersistenceTotal,
 		SelectionPersistenceDuration,
+		EnrollmentProjectionTotal,
+		WaitlistPromotionTotal,
+		ProjectionRepairPending,
 		RabbitMQPublishTotal,
 		OutboxDispatchTotal,
 		OutboxDispatchDuration,

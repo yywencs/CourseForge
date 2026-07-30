@@ -12,6 +12,7 @@ import (
 	"prizeforge/internal/infrastructure/repository/outboxrepo"
 	"prizeforge/internal/job"
 	"prizeforge/internal/listener"
+	"prizeforge/internal/middleware"
 	"prizeforge/internal/worker"
 	"prizeforge/pkg/config"
 	"prizeforge/pkg/logger"
@@ -66,6 +67,9 @@ func NewAdminApp() *HTTPApp {
 // NewAPIApp 装配选课 API、异步结果落库与通用 Outbox 分发链路。
 func NewAPIApp() (*HTTPApp, error) {
 	cfg := loadRuntimeConfig()
+	if err := cfg.Auth.JWT.Validate(); err != nil {
+		return nil, fmt.Errorf("auth config: %w", err)
+	}
 	if err := cfg.RabbitMQ.Topic.Validate(); err != nil {
 		return nil, fmt.Errorf("rabbitmq topic config: %w", err)
 	}
@@ -90,11 +94,6 @@ func NewAPIApp() (*HTTPApp, error) {
 	selectionResultRecovery := job.NewSelectionResultRecoveryJob(enrollmentRepo, selectionResultPublisher)
 	outboxDispatcher := job.NewOutboxDispatcher(outboxrepo.NewRepository(courseforgeDB), publisher)
 
-	asynqWorker := worker.NewAsynqWorker(
-		&cfg.Asynq,
-		selectionResultRecovery,
-		outboxDispatcher,
-	)
 	rabbitMQConsumer := listener.NewRabbitMQConsumer(
 		conn,
 		listener.WithPrefetch(cfg.RabbitMQ.Listener.Simple.Prefetch),
@@ -109,8 +108,46 @@ func NewAPIApp() (*HTTPApp, error) {
 	enrollmentUsecase := api.NewEnrollmentUsecase(
 		enrollmentRepo,
 		enrollmentRepo,
+		enrollmentRepo,
 		selectionResultPublisher,
 	)
+	dropEnrollmentUsecase := api.NewDropEnrollmentUsecase(
+		enrollmentRepo,
+		enrollmentRepo,
+		enrollmentRepo,
+	)
+	waitlistUsecase := api.NewWaitlistUsecase(
+		enrollmentRepo,
+		enrollmentRepo,
+		enrollmentRepo,
+		enrollmentUsecase,
+	)
+	waitlistPromotionJob := job.NewWaitlistPromotionJob(waitlistUsecase, 100)
+	projectionReconciliationUsecase := api.NewProjectionReconciliationUsecase(
+		enrollmentRepo,
+		enrollmentRepo,
+	)
+	projectionReconciliationJob := job.NewProjectionReconciliationJob(
+		projectionReconciliationUsecase,
+		100,
+	)
+	asynqWorker := worker.NewAsynqWorker(
+		&cfg.Asynq,
+		selectionResultRecovery,
+		waitlistPromotionJob,
+		projectionReconciliationJob,
+		outboxDispatcher,
+	)
+	studentAuth, err := middleware.NewStudentJWTAuth(
+		cfg.Auth.JWT.SigningKey,
+		cfg.Auth.JWT.Issuer,
+		cfg.Auth.JWT.Audience,
+		cfg.Auth.JWT.ClockSkew,
+		cfg.Auth.JWT.SigningMethods,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("student auth: %w", err)
+	}
 	readinessChecks := common.ReadinessChecks{
 		"courseforge_mysql": databaseReadinessCheck(courseforgeDB),
 		"redis":             redis.Ping,
@@ -126,8 +163,15 @@ func NewAPIApp() (*HTTPApp, error) {
 	}
 
 	return &HTTPApp{
-		Config:           cfg,
-		apiServer:        apihttp.NewServer(resolveAPIAddr(cfg), enrollmentUsecase, readinessChecks),
+		Config: cfg,
+		apiServer: apihttp.NewServer(
+			resolveAPIAddr(cfg),
+			enrollmentUsecase,
+			dropEnrollmentUsecase,
+			waitlistUsecase,
+			readinessChecks,
+			studentAuth,
+		),
 		asynqWorker:      asynqWorker,
 		rabbitMQConsumer: rabbitMQConsumer,
 	}, nil

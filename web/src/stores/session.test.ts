@@ -15,7 +15,7 @@ function testToken(studentId: string, expiresInSeconds = 3600): string {
   return [
     encode({ alg: 'HS256', typ: 'JWT' }),
     encode({
-      student_id: studentId,
+      sub: studentId,
       exp: Math.floor(Date.now() / 1000) + expiresInSeconds,
     }),
     'test-signature',
@@ -31,12 +31,16 @@ describe('session store', () => {
     const store = useSessionStore()
     const token = testToken('10001')
 
-    store.connect({
-      accessToken: token,
-      studentName: '林知夏',
-      studentNo: '2026001001',
-      termId: 1,
-      roundId: 2,
+    store.establish({
+      access_token: token,
+      token_type: 'Bearer',
+      expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+      student: {
+        id: 10001,
+        student_name: '林知夏',
+        student_no: '2026001001',
+      },
+      selection_context: { term_id: 1, round_id: 2 },
     })
 
     expect(store.isAuthenticated).toBe(true)
@@ -49,12 +53,16 @@ describe('session store', () => {
     const store = useSessionStore()
 
     expect(() =>
-      store.connect({
-        accessToken: testToken('10001', -10),
-        studentName: '',
-        studentNo: '',
-        termId: 1,
-        roundId: 1,
+      store.establish({
+        access_token: testToken('10001', -10),
+        token_type: 'Bearer',
+        expires_at: new Date(Date.now() - 10_000).toISOString(),
+        student: {
+          id: 10001,
+          student_name: '林知夏',
+          student_no: '2026001001',
+        },
+        selection_context: { term_id: 1, round_id: 1 },
       }),
     ).toThrow('JWT 已过期')
   })

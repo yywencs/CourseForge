@@ -2,6 +2,12 @@ package api
 
 // registerRoutes registers CourseForge API routes.
 func (s *Server) registerRoutes() {
+	authGroup := s.engine.Group("/api/v1/auth")
+	authGroup.POST("/login", s.Login)
+	if s.authMiddleware != nil {
+		authGroup.GET("/me", s.authMiddleware, s.CurrentSession)
+	}
+
 	selectionGroup := s.engine.Group("/api/v1/enrollments")
 	if s.authMiddleware != nil {
 		selectionGroup.Use(s.authMiddleware)

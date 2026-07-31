@@ -23,12 +23,11 @@ type AuthConfig struct {
 }
 
 type JWTAuthConfig struct {
-	SigningKey     string        `mapstructure:"signing_key"`
-	Issuer         string        `mapstructure:"issuer"`
-	Audience       string        `mapstructure:"audience"`
-	ClockSkew      time.Duration `mapstructure:"clock_skew"`
-	TokenTTL       time.Duration `mapstructure:"token_ttl"`
-	SigningMethods []string      `mapstructure:"signing_methods"`
+	SigningKey string        `mapstructure:"signing_key"`
+	Issuer     string        `mapstructure:"issuer"`
+	Audience   string        `mapstructure:"audience"`
+	ClockSkew  time.Duration `mapstructure:"clock_skew"`
+	TokenTTL   time.Duration `mapstructure:"token_ttl"`
 }
 
 func (c JWTAuthConfig) Validate() error {
@@ -40,6 +39,12 @@ func (c JWTAuthConfig) Validate() error {
 	}
 	if strings.TrimSpace(c.Audience) == "" {
 		return fmt.Errorf("auth.jwt.audience is required")
+	}
+	if c.TokenTTL <= 0 {
+		return fmt.Errorf("auth.jwt.token_ttl must be positive")
+	}
+	if c.ClockSkew < 0 {
+		return fmt.Errorf("auth.jwt.clock_skew must not be negative")
 	}
 	return nil
 }

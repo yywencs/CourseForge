@@ -12,10 +12,10 @@ const router = createRouter({
       redirect: '/student/courses',
     },
     {
-      path: '/connect',
-      name: 'connect',
-      component: () => import('@/pages/auth/ConnectPage.vue'),
-      meta: { title: '连接学生身份', public: true },
+      path: '/login',
+      name: 'login',
+      component: () => import('@/pages/auth/LoginPage.vue'),
+      meta: { title: '学生登录', public: true },
     },
     {
       path: '/student',
@@ -85,9 +85,9 @@ const router = createRouter({
 router.beforeEach((to) => {
   const session = useSessionStore()
   if (to.matched.some((record) => record.meta.requiresStudent) && !session.isAuthenticated) {
-    return { name: 'connect', query: { redirect: to.fullPath } }
+    return { name: 'login', query: { redirect: to.fullPath } }
   }
-  if (to.name === 'connect' && session.isAuthenticated) {
+  if (to.name === 'login' && session.isAuthenticated) {
     return { name: 'student-courses' }
   }
   return true

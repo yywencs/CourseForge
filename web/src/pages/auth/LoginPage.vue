@@ -1,19 +1,24 @@
 <script setup lang="ts">
 import { ArrowRight, CheckCircle2 } from '@lucide/vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
-import AuthConnectForm from '@/features/auth/AuthConnectForm.vue'
+import StudentLoginForm from '@/features/auth/StudentLoginForm.vue'
 
 const router = useRouter()
+const route = useRoute()
 
-function handleConnected(): void {
-  void router.replace('/student/courses')
+function handleAuthenticated(): void {
+  const redirect =
+    typeof route.query.redirect === 'string'
+      ? route.query.redirect
+      : '/student/courses'
+  void router.replace(redirect)
 }
 </script>
 
 <template>
-  <main class="connect-page">
-    <section class="connect-story">
+  <main class="login-page">
+    <section class="login-story">
       <span>COURSEFORGE / STUDENT</span>
       <h2>每个选择，都有一条可以追踪的处理链。</h2>
       <ul>
@@ -26,12 +31,12 @@ function handleConnected(): void {
         <ArrowRight :size="16" />
       </RouterLink>
     </section>
-    <AuthConnectForm @connected="handleConnected" />
+    <StudentLoginForm @authenticated="handleAuthenticated" />
   </main>
 </template>
 
 <style scoped>
-.connect-page {
+.login-page {
   position: relative;
   display: grid;
   min-height: 100vh;
@@ -50,11 +55,11 @@ function handleConnected(): void {
     );
 }
 
-.connect-story {
+.login-story {
   max-width: 470px;
 }
 
-.connect-story > span {
+.login-story > span {
   color: var(--brand);
   font-family: var(--font-mono);
   font-size: 10px;
@@ -62,7 +67,7 @@ function handleConnected(): void {
   letter-spacing: 0.16em;
 }
 
-.connect-story h2 {
+.login-story h2 {
   margin: 18px 0 28px;
   font-family: var(--font-display);
   font-size: clamp(38px, 5vw, 62px);
@@ -70,7 +75,7 @@ function handleConnected(): void {
   line-height: 1.08;
 }
 
-.connect-story ul {
+.login-story ul {
   display: grid;
   gap: 12px;
   margin: 0 0 30px;
@@ -79,30 +84,30 @@ function handleConnected(): void {
   list-style: none;
 }
 
-.connect-story li,
-.connect-story a {
+.login-story li,
+.login-story a {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 13px;
 }
 
-.connect-story li svg {
+.login-story li svg {
   color: var(--brand-bright);
 }
 
-.connect-story a {
+.login-story a {
   width: fit-content;
   color: var(--brand);
   font-weight: 750;
 }
 
 @media (max-width: 900px) {
-  .connect-page {
+  .login-page {
     grid-template-columns: 1fr;
   }
 
-  .connect-story {
+  .login-story {
     display: none;
   }
 }

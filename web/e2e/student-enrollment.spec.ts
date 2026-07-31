@@ -4,10 +4,49 @@ function sessionToken(): string {
   const encode = (value: object) =>
     Buffer.from(JSON.stringify(value)).toString('base64url')
   return `${encode({ alg: 'HS256' })}.${encode({
-    student_id: '10001',
+    sub: '10001',
     exp: Math.floor(Date.now() / 1000) + 3600,
   })}.signature`
 }
+
+test('student signs in with a student number and password', async ({ page }) => {
+  await page.route('**/api/v1/auth/login', async (route) => {
+    await route.fulfill({
+      json: {
+        code: 0,
+        info: 'success',
+        data: {
+          access_token: sessionToken(),
+          token_type: 'Bearer',
+          expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+          student: {
+            id: 10001,
+            student_no: '2026001001',
+            student_name: '林知夏',
+          },
+          selection_context: { term_id: 1, round_id: 1 },
+        },
+      },
+    })
+  })
+  await page.route('**/api/v1/enrollments**', async (route) => {
+    await route.fulfill({
+      json: {
+        code: 0,
+        info: 'success',
+        data: { items: [], limit: 100, offset: 0, total: 0 },
+      },
+    })
+  })
+
+  await page.goto('/login')
+  await page.getByLabel('学号').fill('2026001001')
+  await page.getByLabel('密码').fill('correct-password')
+  await page.getByRole('button', { name: '登录并进入选课系统' }).click()
+
+  await expect(page).toHaveURL(/\/student\/courses$/)
+  await expect(page.getByText('林知夏')).toBeVisible()
+})
 
 test('student submits a selection and keeps tracking its application', async ({
   page,

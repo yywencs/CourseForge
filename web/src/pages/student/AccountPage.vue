@@ -12,8 +12,6 @@ const router = useRouter()
 const saved = shallowRef(false)
 const errorMessage = shallowRef('')
 const form = reactive({
-  studentName: session.studentName,
-  studentNo: session.studentNo,
   termId: String(session.context.termId),
   roundId: String(session.context.roundId),
 })
@@ -23,8 +21,6 @@ function save(): void {
   errorMessage.value = ''
   try {
     session.updateContext({
-      studentName: form.studentName,
-      studentNo: form.studentNo,
       termId: Number(form.termId),
       roundId: Number(form.roundId),
     })
@@ -38,7 +34,7 @@ function save(): void {
 function disconnect(): void {
   session.disconnect()
   tracker.clear()
-  void router.replace('/connect')
+  void router.replace('/login')
 }
 </script>
 
@@ -54,20 +50,12 @@ function disconnect(): void {
     </header>
 
     <div class="identity-strip">
-      <span>JWT 学生 ID</span>
-      <strong>{{ session.studentId }}</strong>
+      <span>{{ session.studentName }} · {{ session.studentNo }}</span>
+      <strong>学生 ID {{ session.studentId }}</strong>
       <i>后端验签</i>
     </div>
 
     <form @submit.prevent="save">
-      <label>
-        <span>学生姓名</span>
-        <input v-model="form.studentName" />
-      </label>
-      <label>
-        <span>学号</span>
-        <input v-model="form.studentNo" />
-      </label>
       <label>
         <span>当前学期 ID</span>
         <input v-model="form.termId" inputmode="numeric" />

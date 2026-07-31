@@ -25,6 +25,9 @@ USE `courseforge`;
 
 CREATE TABLE `student` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '内部学生ID',
+  `student_no` varchar(32) DEFAULT NULL COMMENT '登录学号；未开通登录时为NULL',
+  `student_name` varchar(64) NOT NULL DEFAULT '' COMMENT '学生姓名',
+  `password_hash` varchar(255) DEFAULT NULL COMMENT 'bcrypt密码哈希',
   `major_id` bigint unsigned NOT NULL COMMENT '专业标识',
   `grade_year` smallint unsigned NOT NULL COMMENT '入学年份',
   `state` varchar(16) NOT NULL DEFAULT 'active'
@@ -33,6 +36,7 @@ CREATE TABLE `student` (
   `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_student_no` (`student_no`),
   KEY `idx_student_major_grade_state` (`major_id`, `grade_year`, `state`),
   CONSTRAINT `chk_student_state`
     CHECK (`state` IN ('active', 'suspended', 'graduated', 'withdrawn'))

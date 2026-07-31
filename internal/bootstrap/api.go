@@ -8,6 +8,7 @@ import (
 
 	"prizeforge/internal/application/api"
 	"prizeforge/internal/infrastructure/adapter"
+	authinfra "prizeforge/internal/infrastructure/auth"
 	"prizeforge/internal/infrastructure/repository/enrollmentrepo"
 	"prizeforge/internal/infrastructure/repository/outboxrepo"
 	"prizeforge/internal/job"
@@ -138,16 +139,21 @@ func NewAPIApp() (*HTTPApp, error) {
 		projectionReconciliationJob,
 		outboxDispatcher,
 	)
-	studentAuth, err := middleware.NewStudentJWTAuth(
+	tokenManager, err := authinfra.NewStudentTokenManager(
 		cfg.Auth.JWT.SigningKey,
 		cfg.Auth.JWT.Issuer,
 		cfg.Auth.JWT.Audience,
+		cfg.Auth.JWT.TokenTTL,
 		cfg.Auth.JWT.ClockSkew,
-		cfg.Auth.JWT.SigningMethods,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("student auth: %w", err)
 	}
+	studentAuth := middleware.NewStudentJWTAuth(tokenManager)
+	authenticationUsecase := api.NewAuthenticationUsecase(
+		authinfra.NewRepository(courseforgeDB),
+		tokenManager,
+	)
 	readinessChecks := common.ReadinessChecks{
 		"courseforge_mysql": databaseReadinessCheck(courseforgeDB),
 		"redis":             redis.Ping,
@@ -166,6 +172,7 @@ func NewAPIApp() (*HTTPApp, error) {
 		Config: cfg,
 		apiServer: apihttp.NewServer(
 			resolveAPIAddr(cfg),
+			authenticationUsecase,
 			enrollmentUsecase,
 			dropEnrollmentUsecase,
 			waitlistUsecase,

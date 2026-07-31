@@ -199,14 +199,9 @@ func (s *Server) DropEnrollment(c *gin.Context) {
 }
 
 func authenticatedStudentID(c *gin.Context) (uint64, bool) {
-	info := middleware.GetAuthInfo(c)
-	if info == nil {
+	studentID, ok := middleware.AuthenticatedStudentID(c)
+	if !ok {
 		common.Error(c, 401, "authentication required")
-		return 0, false
-	}
-	studentID, err := strconv.ParseUint(info.UserID, 10, 64)
-	if err != nil || studentID == 0 {
-		common.Error(c, 401, "invalid authenticated student identity")
 		return 0, false
 	}
 	return studentID, true

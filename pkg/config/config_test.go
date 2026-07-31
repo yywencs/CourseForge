@@ -10,6 +10,13 @@ import (
 func TestInitViperConfigEnvironmentOverrides(t *testing.T) {
 	tempDir := t.TempDir()
 	configBody := []byte(`
+auth:
+  jwt:
+    signing_key: file-signing-key
+    issuer: courseforge
+    audience: courseforge-student
+    clock_skew: 30s
+    token_ttl: 2h
 data:
   mysql:
     dsn: file-dsn
@@ -50,6 +57,10 @@ rabbitmq:
 	})
 
 	t.Setenv("PRIZEFORGE_DATA_MYSQL_DSN", "env-dsn")
+	t.Setenv(
+		"PRIZEFORGE_AUTH_JWT_SIGNING_KEY",
+		"environment-signing-key-with-at-least-32-bytes",
+	)
 	t.Setenv("PRIZEFORGE_DATA_MYSQL_COURSEFORGE_DSN", "env-courseforge-dsn")
 	t.Setenv("PRIZEFORGE_DATA_REDIS_PASSWORD", "env-redis-password")
 	t.Setenv("PRIZEFORGE_ASYNQ_REDIS_PASSWORD", "env-asynq-password")
@@ -62,6 +73,12 @@ rabbitmq:
 
 	InitViperConfig()
 
+	if Conf.Auth.JWT.SigningKey != "environment-signing-key-with-at-least-32-bytes" {
+		t.Fatalf("JWT signing key was not overridden by environment")
+	}
+	if err := Conf.Auth.JWT.Validate(); err != nil {
+		t.Fatalf("JWT config validation failed: %v", err)
+	}
 	if Conf.Data.Database.Dsn != "env-dsn" {
 		t.Fatalf("mysql dsn = %q, want environment override", Conf.Data.Database.Dsn)
 	}

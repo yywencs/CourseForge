@@ -13,7 +13,6 @@ auth:
     audience: courseforge-student
     clock_skew: 30s
     token_ttl: 2h
-    signing_methods: ["HS256"]
 
 rabbitmq:
   addresses: rabbitmq

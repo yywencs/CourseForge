@@ -16,6 +16,7 @@ type Server struct {
 	engine            *gin.Engine
 	httpServer        *http.Server
 	addr              string
+	authUsecase       *api.AuthenticationUsecase
 	enrollmentUsecase *api.EnrollmentUsecase
 	dropUsecase       *api.DropEnrollmentUsecase
 	waitlistUsecase   *api.WaitlistUsecase
@@ -25,6 +26,7 @@ type Server struct {
 
 func NewServer(
 	addr string,
+	authUsecase *api.AuthenticationUsecase,
 	enrollmentUsecase *api.EnrollmentUsecase,
 	dropUsecase *api.DropEnrollmentUsecase,
 	waitlistUsecase *api.WaitlistUsecase,
@@ -34,6 +36,7 @@ func NewServer(
 	s := &Server{
 		engine:            gin.New(),
 		addr:              addr,
+		authUsecase:       authUsecase,
 		enrollmentUsecase: enrollmentUsecase,
 		dropUsecase:       dropUsecase,
 		waitlistUsecase:   waitlistUsecase,

@@ -1,6 +1,7 @@
 package outbox
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -115,4 +116,28 @@ func validateContent(
 		return errors.New("outbox event payload is invalid JSON")
 	}
 	return nil
+}
+
+type Repository interface {
+	ClaimPending(
+		ctx context.Context,
+		limit int,
+		now time.Time,
+		lease time.Duration,
+	) ([]*Event, error)
+	MarkPublished(
+		ctx context.Context,
+		eventID uint64,
+		publishedAt time.Time,
+	) error
+	MarkFailed(
+		ctx context.Context,
+		eventID uint64,
+		nextRetryAt time.Time,
+		lastError string,
+	) error
+}
+
+type Writer interface {
+	Append(context.Context, *NewEvent) error
 }

@@ -64,7 +64,7 @@ func TestWaitlistUsecaseJoinsFullClass(t *testing.T) {
 	selector, queryRepo, _, now := newSuccessfulEnrollmentUsecase(t)
 	queryRepo.class.SelectedCount = queryRepo.class.Capacity
 	waitlistRepo := &fakeWaitlistRepository{}
-	usecase := NewWaitlistUsecase(queryRepo, queryRepo, waitlistRepo, selector)
+	usecase := NewWaitlistUsecase(waitlistRepo, selector, selector.admission)
 	usecase.now = func() time.Time { return now }
 	usecase.newID = func() (string, error) { return "waitlist-1", nil }
 

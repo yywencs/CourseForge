@@ -193,7 +193,8 @@ func newSuccessfulEnrollmentUsecase(
 		},
 	}
 	publisher := &fakeSelectionPublisher{}
-	usecase := NewEnrollmentUsecase(repo, repo, repo, publisher)
+	admission := enrollment.NewSelectionAdmissionService(repo, repo)
+	usecase := NewEnrollmentUsecase(repo, repo, publisher, admission)
 	usecase.now = func() time.Time { return now }
 	usecase.newID = func() (string, error) { return "application-001", nil }
 	return usecase, repo, publisher, now

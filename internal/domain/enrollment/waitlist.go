@@ -2,6 +2,7 @@ package enrollment
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 )
@@ -103,6 +104,67 @@ func (e *WaitlistEntry) MarkPromoted(promotedAt time.Time) error {
 // PromotionRequestID 返回自动晋级复用选课主链路时使用的稳定幂等键。
 func (e *WaitlistEntry) PromotionRequestID() string {
 	return "waitlist-" + e.WaitlistID
+}
+
+type PromotionFailureAction string
+
+const (
+	PromotionFailureActionRetry  PromotionFailureAction = "retry"
+	PromotionFailureActionCancel PromotionFailureAction = "cancel"
+)
+
+type PromotionFailureDecision struct {
+	Action PromotionFailureAction
+	Reason FailureReason
+}
+
+func DecidePromotionFailure(err error) PromotionFailureDecision {
+	if errors.Is(err, ErrTeachingClassFull) ||
+		errors.Is(err, ErrApplicationInProgress) {
+		return PromotionFailureDecision{Action: PromotionFailureActionRetry}
+	}
+
+	message := "候补晋级失败"
+	if err != nil {
+		message = err.Error()
+	}
+	reason := FailureReason{Code: FailureCodeInternal, Message: message}
+	switch {
+	case errors.Is(err, ErrStudentInactive):
+		reason.Code = FailureCodeStudentInactive
+	case errors.Is(err, ErrPrerequisiteNotMet):
+		reason.Code = FailureCodePrerequisite
+	case errors.Is(err, ErrMajorNotAllowed):
+		reason.Code = FailureCodeMajorNotAllowed
+	case errors.Is(err, ErrGradeNotAllowed):
+		reason.Code = FailureCodeGradeNotAllowed
+	case errors.Is(err, ErrScheduleConflict):
+		reason.Code = FailureCodeScheduleConflict
+	case errors.Is(err, ErrDuplicateSelection):
+		reason.Code = FailureCodeDuplicateCourse
+	case errors.Is(err, ErrCreditQuotaExceeded):
+		reason.Code = FailureCodeCreditQuota
+	case errors.Is(err, ErrCourseQuotaExceeded):
+		reason.Code = FailureCodeCourseQuota
+	}
+	return PromotionFailureDecision{
+		Action: PromotionFailureActionCancel,
+		Reason: reason,
+	}
+}
+
+func StudentCancelledWaitlistReason() FailureReason {
+	return FailureReason{
+		Code:    FailureCodeCancelled,
+		Message: "学生主动取消候补",
+	}
+}
+
+func SelectionRoundClosedWaitlistReason() FailureReason {
+	return FailureReason{
+		Code:    FailureCodeRoundClosed,
+		Message: "选课轮次已结束",
+	}
 }
 
 // WaitlistPage 是本人候补列表的分页结果。

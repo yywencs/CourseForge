@@ -74,6 +74,68 @@ func (s ApplicationSource) Valid() bool {
 	}
 }
 
+// SelectionIntent 是学生发起正式选课或候补申请时的不可变业务意图。
+// 课程、学分和学期信息必须由领域服务根据教学班补全，不能信任客户端。
+type SelectionIntent struct {
+	requestID       string
+	roundID         uint64
+	studentID       uint64
+	teachingClassID uint64
+	source          ApplicationSource
+}
+
+func NewSelectionIntent(
+	requestID string,
+	roundID uint64,
+	studentID uint64,
+	teachingClassID uint64,
+	source ApplicationSource,
+) (SelectionIntent, error) {
+	if strings.TrimSpace(requestID) == "" ||
+		len(requestID) > maxRequestIDLength ||
+		roundID == 0 ||
+		studentID == 0 ||
+		teachingClassID == 0 ||
+		!source.Valid() {
+		return SelectionIntent{}, ErrInvalidParams
+	}
+	return SelectionIntent{
+		requestID:       requestID,
+		roundID:         roundID,
+		studentID:       studentID,
+		teachingClassID: teachingClassID,
+		source:          source,
+	}, nil
+}
+
+func (i SelectionIntent) RequestID() string {
+	return i.requestID
+}
+
+func (i SelectionIntent) RoundID() uint64 {
+	return i.roundID
+}
+
+func (i SelectionIntent) StudentID() uint64 {
+	return i.studentID
+}
+
+func (i SelectionIntent) TeachingClassID() uint64 {
+	return i.teachingClassID
+}
+
+func (i SelectionIntent) Source() ApplicationSource {
+	return i.source
+}
+
+func (i SelectionIntent) valid() bool {
+	return i.requestID != "" &&
+		i.roundID != 0 &&
+		i.studentID != 0 &&
+		i.teachingClassID != 0 &&
+		i.source.Valid()
+}
+
 // SelectionRequest 是客户端一次选课操作的标准请求。
 // 同一次点击产生的所有重试必须复用同一个 RequestID。
 type SelectionRequest struct {
@@ -131,6 +193,13 @@ func (r *SelectionRound) AcceptingAt(now time.Time) bool {
 	return !now.Before(r.StartTime) && now.Before(r.EndTime)
 }
 
+func (r *SelectionRound) EnsureAcceptingAt(now time.Time) error {
+	if !r.AcceptingAt(now) {
+		return ErrRoundNotOpen
+	}
+	return nil
+}
+
 // TeachingClassState 表示教学班状态。
 type TeachingClassState string
 
@@ -155,6 +224,33 @@ type TeachingClass struct {
 // ValidateForSelection 校验教学班与请求是否匹配并且仍有名额。
 // Redis Lua 会再次执行等价校验，这里的判断用于提前失败和保护领域调用。
 func (c *TeachingClass) ValidateForSelection(request *SelectionRequest) error {
+	if err := c.validateRequest(request); err != nil {
+		return err
+	}
+	if c.State != TeachingClassStateOpen {
+		return ErrTeachingClassNotOpen
+	}
+	if c.Capacity == 0 || c.SelectedCount >= c.Capacity {
+		return ErrTeachingClassFull
+	}
+	return nil
+}
+
+// ValidateForWaitlist 校验教学班与请求匹配、已经开放并且当前必须通过候补进入。
+func (c *TeachingClass) ValidateForWaitlist(request *SelectionRequest) error {
+	if err := c.validateRequest(request); err != nil {
+		return err
+	}
+	if c.State != TeachingClassStateOpen {
+		return ErrTeachingClassNotOpen
+	}
+	if c.SelectedCount < c.Capacity {
+		return ErrWaitlistNotRequired
+	}
+	return nil
+}
+
+func (c *TeachingClass) validateRequest(request *SelectionRequest) error {
 	if c == nil || request == nil {
 		return ErrInvalidParams
 	}
@@ -163,12 +259,6 @@ func (c *TeachingClass) ValidateForSelection(request *SelectionRequest) error {
 		c.CourseID != request.CourseID ||
 		c.Credits != request.Credits {
 		return ErrInvalidParams
-	}
-	if c.State != TeachingClassStateOpen {
-		return ErrTeachingClassNotOpen
-	}
-	if c.Capacity == 0 || c.SelectedCount >= c.Capacity {
-		return ErrTeachingClassFull
 	}
 	return nil
 }

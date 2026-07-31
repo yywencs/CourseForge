@@ -5,6 +5,7 @@ import "context"
 // QueryRepository 提供选课资格预检所需的只读数据。
 // 这些检查用于快速失败，最终额度和名额仍以 Redis Lua 原子校验结果为准。
 type QueryRepository interface {
+	SelectionAdmissionRepository
 	// QuerySelectionByRequest 按业务幂等键查询已有申请。
 	// 实现必须优先查询 Redis result/pending；Redis 未命中时再回退 MySQL。
 	QuerySelectionByRequest(
@@ -29,23 +30,6 @@ type QueryRepository interface {
 		limit int,
 		offset int,
 	) (*EnrollmentPage, error)
-	QuerySelectionRound(ctx context.Context, roundID uint64) (*SelectionRound, error)
-	QueryTeachingClass(
-		ctx context.Context,
-		roundID uint64,
-		teachingClassID uint64,
-	) (*TeachingClass, error)
-	QueryStudentSelectionQuota(
-		ctx context.Context,
-		roundID uint64,
-		studentID uint64,
-	) (*StudentSelectionQuota, error)
-	HasExistingEnrollment(
-		ctx context.Context,
-		termID uint64,
-		studentID uint64,
-		courseID uint64,
-	) (bool, error)
 }
 
 // SelectionRequestRecord 是按幂等键找到的已有选课申请。

@@ -44,29 +44,27 @@ type selectionResultPublisher interface {
 
 // EnrollmentUsecase 编排 Redis-first 最小选课主链路。
 type EnrollmentUsecase struct {
-	queryRepo         selectionQueryRepository
-	eligibilityRepo   enrollment.EligibilityRepository
-	appRepo           selectionApplicationRepository
-	publisher         selectionResultPublisher
-	eligibilityPolicy enrollment.EligibilityPolicy
-	now               func() time.Time
-	newID             func() (string, error)
+	queryRepo selectionQueryRepository
+	appRepo   selectionApplicationRepository
+	publisher selectionResultPublisher
+	admission *enrollment.SelectionAdmissionService
+	now       func() time.Time
+	newID     func() (string, error)
 }
 
 func NewEnrollmentUsecase(
 	queryRepo selectionQueryRepository,
-	eligibilityRepo enrollment.EligibilityRepository,
 	appRepo selectionApplicationRepository,
 	publisher selectionResultPublisher,
+	admission *enrollment.SelectionAdmissionService,
 ) *EnrollmentUsecase {
 	return &EnrollmentUsecase{
-		queryRepo:         queryRepo,
-		eligibilityRepo:   eligibilityRepo,
-		appRepo:           appRepo,
-		publisher:         publisher,
-		eligibilityPolicy: enrollment.EligibilityPolicy{},
-		now:               time.Now,
-		newID:             idgen.NewOrderID,
+		queryRepo: queryRepo,
+		appRepo:   appRepo,
+		publisher: publisher,
+		admission: admission,
+		now:       time.Now,
+		newID:     idgen.NewOrderID,
 	}
 }
 
@@ -116,21 +114,32 @@ func (u *EnrollmentUsecase) SelectCourse(
 		metrics.ObserveSelection(selectionMetricResult(err), time.Since(startedAt))
 	}()
 
-	if err := validateSelectCourseCommand(command); err != nil {
+	if u == nil || u.queryRepo == nil || u.appRepo == nil || u.admission == nil ||
+		command == nil {
+		return nil, enrollment.ErrInvalidParams
+	}
+	intent, err := enrollment.NewSelectionIntent(
+		command.RequestID,
+		command.RoundID,
+		command.StudentID,
+		command.TeachingClassID,
+		command.Source,
+	)
+	if err != nil {
 		return nil, err
 	}
 
 	existing, err := u.queryRepo.QuerySelectionByRequest(
 		ctx,
-		command.RoundID,
-		command.StudentID,
-		command.RequestID,
+		intent.RoundID(),
+		intent.StudentID(),
+		intent.RequestID(),
 	)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
-		if err := validateSelectionRequestFingerprint(command, existing.Application); err != nil {
+		if err := existing.Application.EnsureMatches(intent); err != nil {
 			return nil, err
 		}
 		if existing.MySQLPersisted {
@@ -143,79 +152,8 @@ func (u *EnrollmentUsecase) SelectCourse(
 	}
 
 	now := u.now()
-	round, err := u.queryRepo.QuerySelectionRound(ctx, command.RoundID)
+	request, err := u.admission.AdmitSelection(ctx, intent, now)
 	if err != nil {
-		return nil, err
-	}
-	if round == nil {
-		return nil, enrollment.ErrRecordNotFound
-	}
-	if !round.AcceptingAt(now) {
-		return nil, enrollment.ErrRoundNotOpen
-	}
-
-	class, err := u.queryRepo.QueryTeachingClass(ctx, round.ID, command.TeachingClassID)
-	if err != nil {
-		return nil, err
-	}
-	if class == nil {
-		return nil, enrollment.ErrRecordNotFound
-	}
-
-	request := &enrollment.SelectionRequest{
-		RequestID:       command.RequestID,
-		RoundID:         round.ID,
-		TermID:          round.TermID,
-		StudentID:       command.StudentID,
-		CourseID:        class.CourseID,
-		TeachingClassID: class.ID,
-		Credits:         class.Credits,
-		Source:          command.Source,
-	}
-	if err := request.Validate(); err != nil {
-		return nil, err
-	}
-	if err := class.ValidateForSelection(request); err != nil {
-		return nil, err
-	}
-	if u.eligibilityRepo == nil {
-		return nil, errors.New("selection eligibility repository is not configured")
-	}
-	eligibility, err := u.eligibilityRepo.QueryEligibilitySnapshot(
-		ctx,
-		request.StudentID,
-		request.TermID,
-		request.CourseID,
-		request.TeachingClassID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if err := u.eligibilityPolicy.Evaluate(eligibility); err != nil {
-		return nil, err
-	}
-
-	exists, err := u.queryRepo.HasExistingEnrollment(
-		ctx,
-		request.TermID,
-		request.StudentID,
-		request.CourseID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if exists {
-		return nil, enrollment.ErrDuplicateSelection
-	}
-
-	quota, err := u.queryRepo.QueryStudentSelectionQuota(ctx, round.ID, command.StudentID)
-	if err != nil {
-		return nil, err
-	}
-	if quota == nil {
-		return nil, enrollment.ErrRecordNotFound
-	}
-	if err := quota.ValidateReservation(request); err != nil {
 		return nil, err
 	}
 
@@ -303,23 +241,6 @@ func (u *EnrollmentUsecase) processReservedSelection(
 	return u.publishCompleted(ctx, publication)
 }
 
-func validateSelectionRequestFingerprint(
-	command *SelectCourseCommand,
-	application *enrollment.SelectionApplication,
-) error {
-	if command == nil || application == nil {
-		return enrollment.ErrInvalidParams
-	}
-	if application.RequestID != command.RequestID ||
-		application.RoundID != command.RoundID ||
-		application.StudentID != command.StudentID ||
-		application.TeachingClassID != command.TeachingClassID ||
-		application.Source != command.Source {
-		return enrollment.ErrIdempotencyConflict
-	}
-	return nil
-}
-
 func selectionReceiptFromPersisted(
 	application *enrollment.SelectionApplication,
 ) *SelectionReceipt {
@@ -352,17 +273,4 @@ func (u *EnrollmentUsecase) publishCompleted(
 		BrokerConfirmed: true,
 		MySQLPersisted:  false,
 	}, nil
-}
-
-func validateSelectCourseCommand(command *SelectCourseCommand) error {
-	if command == nil ||
-		command.RequestID == "" ||
-		len(command.RequestID) > 64 ||
-		command.RoundID == 0 ||
-		command.StudentID == 0 ||
-		command.TeachingClassID == 0 ||
-		!command.Source.Valid() {
-		return enrollment.ErrInvalidParams
-	}
-	return nil
 }

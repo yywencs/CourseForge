@@ -8,6 +8,7 @@ import (
 	"time"
 
 	authinfra "prizeforge/internal/infrastructure/auth"
+	infraquery "prizeforge/internal/infrastructure/query"
 )
 
 func TestAuthenticationRepositoryLoadsStudentAndCurrentRound(t *testing.T) {
@@ -61,8 +62,8 @@ func TestAuthenticationRepositoryLoadsStudentAndCurrentRound(t *testing.T) {
 		_ = database.Exec("DELETE FROM student WHERE id = ?", studentID).Error
 	})
 
-	repository := authinfra.NewRepository(database)
-	account, err := repository.FindStudentByNumber(context.Background(), studentNo)
+	accountRepository := authinfra.NewAccountRepository(database)
+	account, err := accountRepository.FindStudentByNumber(context.Background(), studentNo)
 	if err != nil {
 		t.Fatalf("FindStudentByNumber() error = %v", err)
 	}
@@ -71,7 +72,8 @@ func TestAuthenticationRepositoryLoadsStudentAndCurrentRound(t *testing.T) {
 		account.PasswordHash != password {
 		t.Fatalf("account = %#v", account)
 	}
-	selectionContext, err := repository.FindCurrentSelectionContext(context.Background())
+	selectionContext, err := infraquery.NewSelectionContextQuery(database).
+		FindCurrentSelectionContext(context.Background())
 	if err != nil {
 		t.Fatalf("FindCurrentSelectionContext() error = %v", err)
 	}

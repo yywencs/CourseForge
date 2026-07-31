@@ -5,22 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	authdomain "prizeforge/internal/domain/auth"
 
 	"gorm.io/gorm"
 )
 
-type Repository struct {
-	db  *gorm.DB
-	now func() time.Time
+type AccountRepository struct {
+	db *gorm.DB
 }
 
-var _ authdomain.Repository = (*Repository)(nil)
+var _ authdomain.AccountRepository = (*AccountRepository)(nil)
 
-func NewRepository(db *gorm.DB) *Repository {
-	return &Repository{db: db, now: time.Now}
+func NewAccountRepository(db *gorm.DB) *AccountRepository {
+	return &AccountRepository{db: db}
 }
 
 type studentAccountRow struct {
@@ -31,7 +29,7 @@ type studentAccountRow struct {
 	State        string `gorm:"column:state"`
 }
 
-func (r *Repository) FindStudentByNumber(
+func (r *AccountRepository) FindStudentByNumber(
 	ctx context.Context,
 	studentNo string,
 ) (*authdomain.StudentAccount, error) {
@@ -47,7 +45,7 @@ func (r *Repository) FindStudentByNumber(
 	return row.toEntity(), nil
 }
 
-func (r *Repository) FindStudentByID(
+func (r *AccountRepository) FindStudentByID(
 	ctx context.Context,
 	studentID uint64,
 ) (*authdomain.StudentAccount, error) {
@@ -63,36 +61,6 @@ func (r *Repository) FindStudentByID(
 	return row.toEntity(), nil
 }
 
-func (r *Repository) FindCurrentSelectionContext(
-	ctx context.Context,
-) (*authdomain.SelectionContext, error) {
-	var row struct {
-		ID        uint64    `gorm:"column:id"`
-		TermID    uint64    `gorm:"column:term_id"`
-		StartTime time.Time `gorm:"column:start_time"`
-		EndTime   time.Time `gorm:"column:end_time"`
-	}
-	now := r.now()
-	err := r.db.WithContext(ctx).
-		Table("selection_round").
-		Select("id", "term_id", "start_time", "end_time").
-		Where("state = ? AND start_time <= ? AND end_time > ?", "open", now, now).
-		Order("start_time DESC, id DESC").
-		Take(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("query current selection round: %w", err)
-	}
-	return &authdomain.SelectionContext{
-		TermID:    row.TermID,
-		RoundID:   row.ID,
-		StartTime: row.StartTime,
-		EndTime:   row.EndTime,
-	}, nil
-}
-
 func mapAccountQueryError(err error) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return authdomain.ErrAccountNotFound
@@ -106,6 +74,6 @@ func (r studentAccountRow) toEntity() *authdomain.StudentAccount {
 		StudentNo:    r.StudentNo,
 		StudentName:  r.StudentName,
 		PasswordHash: r.PasswordHash,
-		State:        r.State,
+		State:        authdomain.AccountState(r.State),
 	}
 }

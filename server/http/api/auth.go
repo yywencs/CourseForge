@@ -101,7 +101,7 @@ func profileResponse(account *authdomain.StudentAccount) studentProfileResponse 
 	}
 }
 
-func contextResponse(selectionContext *authdomain.SelectionContext) *selectionContextResponse {
+func contextResponse(selectionContext *applicationapi.SelectionContext) *selectionContextResponse {
 	if selectionContext == nil {
 		return nil
 	}

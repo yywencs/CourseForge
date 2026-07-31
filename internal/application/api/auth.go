@@ -2,17 +2,11 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	authdomain "prizeforge/internal/domain/auth"
-
-	"golang.org/x/crypto/bcrypt"
 )
-
-const dummyPasswordHash = "$2a$10$0Cfn6AvbZhWjmDwjqyPnpuMlW.1X7RVnKB.TtRNDsfFd7NJ0xWO3e"
 
 type StudentTokenIssuer interface {
 	Issue(studentID uint64) (value string, expiresAt time.Time, err error)
@@ -23,25 +17,40 @@ type LoginCommand struct {
 	Password  string
 }
 
+// SelectionContext 是登录和当前会话接口需要展示的开放选课轮次读模型。
+type SelectionContext struct {
+	TermID    uint64
+	RoundID   uint64
+	StartTime time.Time
+	EndTime   time.Time
+}
+
+type SelectionContextQuery interface {
+	FindCurrentSelectionContext(ctx context.Context) (*SelectionContext, error)
+}
+
 type StudentSession struct {
 	AccessToken string
 	ExpiresAt   time.Time
 	Student     *authdomain.StudentAccount
-	Context     *authdomain.SelectionContext
+	Context     *SelectionContext
 }
 
 type AuthenticationUsecase struct {
-	repository  authdomain.Repository
-	tokenIssuer StudentTokenIssuer
+	authenticator     *authdomain.Authenticator
+	selectionContexts SelectionContextQuery
+	tokenIssuer       StudentTokenIssuer
 }
 
 func NewAuthenticationUsecase(
-	repository authdomain.Repository,
+	authenticator *authdomain.Authenticator,
+	selectionContexts SelectionContextQuery,
 	tokenIssuer StudentTokenIssuer,
 ) *AuthenticationUsecase {
 	return &AuthenticationUsecase{
-		repository:  repository,
-		tokenIssuer: tokenIssuer,
+		authenticator:     authenticator,
+		selectionContexts: selectionContexts,
+		tokenIssuer:       tokenIssuer,
 	}
 }
 
@@ -49,28 +58,15 @@ func (u *AuthenticationUsecase) Login(
 	ctx context.Context,
 	command LoginCommand,
 ) (*StudentSession, error) {
-	studentNo := strings.TrimSpace(command.StudentNo)
-	if studentNo == "" || len(studentNo) > 32 ||
-		command.Password == "" || len(command.Password) > 72 {
-		return nil, authdomain.ErrInvalidLoginInput
-	}
-	if u == nil || u.repository == nil || u.tokenIssuer == nil {
+	if u == nil || u.authenticator == nil || u.selectionContexts == nil || u.tokenIssuer == nil {
 		return nil, fmt.Errorf("authentication service is not configured")
 	}
-
-	account, err := u.repository.FindStudentByNumber(ctx, studentNo)
+	credentials, err := authdomain.NewLoginCredentials(command.StudentNo, command.Password)
 	if err != nil {
-		if errors.Is(err, authdomain.ErrAccountNotFound) {
-			// 未找到账号时仍执行一次 bcrypt，降低通过响应耗时枚举学号的风险。
-			_ = verifyPassword(dummyPasswordHash, command.Password)
-			return nil, authdomain.ErrInvalidCredentials
-		}
-		return nil, fmt.Errorf("query student account: %w", err)
+		return nil, err
 	}
-	if account == nil || !verifyPassword(account.PasswordHash, command.Password) {
-		return nil, authdomain.ErrInvalidCredentials
-	}
-	if err := account.ValidateForLogin(); err != nil {
+	account, err := u.authenticator.Authenticate(ctx, credentials)
+	if err != nil {
 		return nil, err
 	}
 
@@ -78,7 +74,7 @@ func (u *AuthenticationUsecase) Login(
 	if err != nil {
 		return nil, fmt.Errorf("issue student token: %w", err)
 	}
-	selectionContext, err := u.repository.FindCurrentSelectionContext(ctx)
+	selectionContext, err := u.selectionContexts.FindCurrentSelectionContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query current selection context: %w", err)
 	}
@@ -94,26 +90,16 @@ func (u *AuthenticationUsecase) CurrentSession(
 	ctx context.Context,
 	studentID uint64,
 ) (*StudentSession, error) {
-	if u == nil || u.repository == nil || studentID == 0 {
-		return nil, authdomain.ErrAccountNotFound
+	if u == nil || u.authenticator == nil || u.selectionContexts == nil {
+		return nil, fmt.Errorf("authentication service is not configured")
 	}
-	account, err := u.repository.FindStudentByID(ctx, studentID)
+	account, err := u.authenticator.ResolveActiveAccount(ctx, studentID)
 	if err != nil {
 		return nil, err
 	}
-	if err := account.ValidateForLogin(); err != nil {
-		return nil, err
-	}
-	selectionContext, err := u.repository.FindCurrentSelectionContext(ctx)
+	selectionContext, err := u.selectionContexts.FindCurrentSelectionContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query current selection context: %w", err)
 	}
 	return &StudentSession{Student: account, Context: selectionContext}, nil
-}
-
-func verifyPassword(passwordHash, password string) bool {
-	return bcrypt.CompareHashAndPassword(
-		[]byte(passwordHash),
-		[]byte(password),
-	) == nil
 }

@@ -118,3 +118,34 @@ func TestSelectionApplicationCancel(t *testing.T) {
 		t.Fatalf("cancelled result state = %q", result.State)
 	}
 }
+
+func TestSelectionApplicationEnsureMatchesIntent(t *testing.T) {
+	application, _ := newTestApplication(t)
+	intent, err := NewSelectionIntent(
+		application.RequestID,
+		application.RoundID,
+		application.StudentID,
+		application.TeachingClassID,
+		application.Source,
+	)
+	if err != nil {
+		t.Fatalf("NewSelectionIntent() error = %v", err)
+	}
+	if err := application.EnsureMatches(intent); err != nil {
+		t.Fatalf("EnsureMatches() error = %v", err)
+	}
+
+	conflicting, err := NewSelectionIntent(
+		application.RequestID,
+		application.RoundID,
+		application.StudentID,
+		application.TeachingClassID+1,
+		application.Source,
+	)
+	if err != nil {
+		t.Fatalf("NewSelectionIntent() conflict error = %v", err)
+	}
+	if err := application.EnsureMatches(conflicting); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("EnsureMatches() conflict error = %v, want %v", err, ErrIdempotencyConflict)
+	}
+}

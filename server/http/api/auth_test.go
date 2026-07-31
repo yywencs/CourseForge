@@ -11,6 +11,7 @@ import (
 
 	applicationapi "prizeforge/internal/application/api"
 	authdomain "prizeforge/internal/domain/auth"
+	authinfra "prizeforge/internal/infrastructure/auth"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -39,10 +40,12 @@ func (handlerAuthRepository) FindStudentByID(
 	return nil, authdomain.ErrAccountNotFound
 }
 
-func (handlerAuthRepository) FindCurrentSelectionContext(
+type handlerSelectionContextQuery struct{}
+
+func (handlerSelectionContextQuery) FindCurrentSelectionContext(
 	context.Context,
-) (*authdomain.SelectionContext, error) {
-	return &authdomain.SelectionContext{TermID: 1, RoundID: 2}, nil
+) (*applicationapi.SelectionContext, error) {
+	return &applicationapi.SelectionContext{TermID: 1, RoundID: 2}, nil
 }
 
 type handlerTokenIssuer struct{}
@@ -60,7 +63,11 @@ func TestLoginReturnsStudentSessionWithoutPasswordHash(t *testing.T) {
 		t.Fatalf("GenerateFromPassword() error = %v", err)
 	}
 	usecase := applicationapi.NewAuthenticationUsecase(
-		handlerAuthRepository{passwordHash: string(passwordHash)},
+		authdomain.NewAuthenticator(
+			handlerAuthRepository{passwordHash: string(passwordHash)},
+			authinfra.BcryptPasswordVerifier{},
+		),
+		handlerSelectionContextQuery{},
 		handlerTokenIssuer{},
 	)
 	server := NewServer(":0", usecase, nil, nil, nil, nil, nil)

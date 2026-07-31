@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -22,29 +21,24 @@ type JoinWaitlistCommand struct {
 // WaitlistUsecase 编排候补加入、查询、取消和自动晋级。
 // 领域判断由 enrollment 包完成，仓储细节由 infra 层实现。
 type WaitlistUsecase struct {
-	queryRepo       selectionQueryRepository
-	eligibilityRepo enrollment.EligibilityRepository
-	repository      enrollment.WaitlistRepository
-	selector        *EnrollmentUsecase
-	policy          enrollment.EligibilityPolicy
-	now             func() time.Time
-	newID           func() (string, error)
+	repository enrollment.WaitlistRepository
+	selector   *EnrollmentUsecase
+	admission  *enrollment.SelectionAdmissionService
+	now        func() time.Time
+	newID      func() (string, error)
 }
 
 func NewWaitlistUsecase(
-	queryRepo selectionQueryRepository,
-	eligibilityRepo enrollment.EligibilityRepository,
 	repository enrollment.WaitlistRepository,
 	selector *EnrollmentUsecase,
+	admission *enrollment.SelectionAdmissionService,
 ) *WaitlistUsecase {
 	return &WaitlistUsecase{
-		queryRepo:       queryRepo,
-		eligibilityRepo: eligibilityRepo,
-		repository:      repository,
-		selector:        selector,
-		policy:          enrollment.EligibilityPolicy{},
-		now:             time.Now,
-		newID:           idgen.NewOrderID,
+		repository: repository,
+		selector:   selector,
+		admission:  admission,
+		now:        time.Now,
+		newID:      idgen.NewOrderID,
 	}
 }
 
@@ -53,74 +47,22 @@ func (u *WaitlistUsecase) Join(
 	ctx context.Context,
 	command *JoinWaitlistCommand,
 ) (*enrollment.WaitlistEntry, error) {
-	if u == nil || u.queryRepo == nil || u.eligibilityRepo == nil || u.repository == nil ||
-		command == nil || command.RequestID == "" || command.RoundID == 0 ||
-		command.StudentID == 0 || command.TeachingClassID == 0 {
+	if u == nil || u.repository == nil || u.admission == nil || command == nil {
 		return nil, enrollment.ErrInvalidParams
 	}
 	now := u.now()
-	round, err := u.queryRepo.QuerySelectionRound(ctx, command.RoundID)
-	if err != nil {
-		return nil, err
-	}
-	if round == nil {
-		return nil, enrollment.ErrRecordNotFound
-	}
-	if !round.AcceptingAt(now) {
-		return nil, enrollment.ErrRoundNotOpen
-	}
-	class, err := u.queryRepo.QueryTeachingClass(ctx, round.ID, command.TeachingClassID)
-	if err != nil {
-		return nil, err
-	}
-	if class == nil {
-		return nil, enrollment.ErrRecordNotFound
-	}
-	if class.State != enrollment.TeachingClassStateOpen {
-		return nil, enrollment.ErrTeachingClassNotOpen
-	}
-	if class.SelectedCount < class.Capacity {
-		return nil, enrollment.ErrWaitlistNotRequired
-	}
-	request := &enrollment.SelectionRequest{
-		RequestID:       command.RequestID,
-		RoundID:         round.ID,
-		TermID:          round.TermID,
-		StudentID:       command.StudentID,
-		CourseID:        class.CourseID,
-		TeachingClassID: class.ID,
-		Credits:         class.Credits,
-		Source:          enrollment.ApplicationSourceWeb,
-	}
-	if err := request.Validate(); err != nil {
-		return nil, err
-	}
-	snapshot, err := u.eligibilityRepo.QueryEligibilitySnapshot(
-		ctx, request.StudentID, request.TermID, request.CourseID, request.TeachingClassID,
+	intent, err := enrollment.NewSelectionIntent(
+		command.RequestID,
+		command.RoundID,
+		command.StudentID,
+		command.TeachingClassID,
+		enrollment.ApplicationSourceWeb,
 	)
 	if err != nil {
 		return nil, err
 	}
-	if err := u.policy.Evaluate(snapshot); err != nil {
-		return nil, err
-	}
-	exists, err := u.queryRepo.HasExistingEnrollment(
-		ctx, request.TermID, request.StudentID, request.CourseID,
-	)
+	request, err := u.admission.AdmitWaitlist(ctx, intent, now)
 	if err != nil {
-		return nil, err
-	}
-	if exists {
-		return nil, enrollment.ErrDuplicateSelection
-	}
-	quota, err := u.queryRepo.QueryStudentSelectionQuota(ctx, round.ID, command.StudentID)
-	if err != nil {
-		return nil, err
-	}
-	if quota == nil {
-		return nil, enrollment.ErrRecordNotFound
-	}
-	if err := quota.ValidateReservation(request); err != nil {
 		return nil, err
 	}
 	waitlistID, err := u.newID()
@@ -177,10 +119,7 @@ func (u *WaitlistUsecase) Cancel(
 	if err != nil {
 		return nil, err
 	}
-	reason := enrollment.FailureReason{
-		Code:    enrollment.FailureCodeCancelled,
-		Message: "学生主动取消候补",
-	}
+	reason := enrollment.StudentCancelledWaitlistReason()
 	if err := entry.Cancel(reason, u.now()); err != nil {
 		return nil, err
 	}
@@ -201,10 +140,7 @@ func (u *WaitlistUsecase) PromoteBatch(ctx context.Context, limit int) error {
 		return err
 	}
 	for _, entry := range expired {
-		reason := enrollment.FailureReason{
-			Code:    enrollment.FailureCodeRoundClosed,
-			Message: "选课轮次已结束",
-		}
+		reason := enrollment.SelectionRoundClosedWaitlistReason()
 		if err := entry.Cancel(reason, u.now()); err != nil {
 			return err
 		}
@@ -235,15 +171,15 @@ func (u *WaitlistUsecase) PromoteBatch(ctx context.Context, limit int) error {
 			metrics.IncWaitlistPromotion("promoted")
 			continue
 		}
-		if isRetryablePromotionError(promoteErr) {
+		decision := enrollment.DecidePromotionFailure(promoteErr)
+		if decision.Action == enrollment.PromotionFailureActionRetry {
 			if err := u.repository.ReturnWaitlistToQueue(ctx, entry); err != nil {
 				return err
 			}
 			metrics.IncWaitlistPromotion("retry")
 			continue
 		}
-		reason := failureReasonFromPromotionError(promoteErr)
-		if err := entry.Cancel(reason, u.now()); err != nil {
+		if err := entry.Cancel(decision.Reason, u.now()); err != nil {
 			return err
 		}
 		if err := u.repository.CancelWaitlist(ctx, entry); err != nil {
@@ -252,32 +188,4 @@ func (u *WaitlistUsecase) PromoteBatch(ctx context.Context, limit int) error {
 		metrics.IncWaitlistPromotion("cancelled")
 	}
 	return nil
-}
-
-func isRetryablePromotionError(err error) bool {
-	return errors.Is(err, enrollment.ErrTeachingClassFull) ||
-		errors.Is(err, enrollment.ErrApplicationInProgress)
-}
-
-func failureReasonFromPromotionError(err error) enrollment.FailureReason {
-	switch {
-	case errors.Is(err, enrollment.ErrStudentInactive):
-		return enrollment.FailureReason{Code: enrollment.FailureCodeStudentInactive, Message: err.Error()}
-	case errors.Is(err, enrollment.ErrPrerequisiteNotMet):
-		return enrollment.FailureReason{Code: enrollment.FailureCodePrerequisite, Message: err.Error()}
-	case errors.Is(err, enrollment.ErrMajorNotAllowed):
-		return enrollment.FailureReason{Code: enrollment.FailureCodeMajorNotAllowed, Message: err.Error()}
-	case errors.Is(err, enrollment.ErrGradeNotAllowed):
-		return enrollment.FailureReason{Code: enrollment.FailureCodeGradeNotAllowed, Message: err.Error()}
-	case errors.Is(err, enrollment.ErrScheduleConflict):
-		return enrollment.FailureReason{Code: enrollment.FailureCodeScheduleConflict, Message: err.Error()}
-	case errors.Is(err, enrollment.ErrDuplicateSelection):
-		return enrollment.FailureReason{Code: enrollment.FailureCodeDuplicateCourse, Message: err.Error()}
-	case errors.Is(err, enrollment.ErrCreditQuotaExceeded):
-		return enrollment.FailureReason{Code: enrollment.FailureCodeCreditQuota, Message: err.Error()}
-	case errors.Is(err, enrollment.ErrCourseQuotaExceeded):
-		return enrollment.FailureReason{Code: enrollment.FailureCodeCourseQuota, Message: err.Error()}
-	default:
-		return enrollment.FailureReason{Code: enrollment.FailureCodeInternal, Message: err.Error()}
-	}
 }

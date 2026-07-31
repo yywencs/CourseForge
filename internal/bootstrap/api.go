@@ -7,8 +7,11 @@ import (
 	"fmt"
 
 	"prizeforge/internal/application/api"
+	authdomain "prizeforge/internal/domain/auth"
+	"prizeforge/internal/domain/enrollment"
 	"prizeforge/internal/infrastructure/adapter"
 	authinfra "prizeforge/internal/infrastructure/auth"
+	"prizeforge/internal/infrastructure/query"
 	"prizeforge/internal/infrastructure/repository/enrollmentrepo"
 	"prizeforge/internal/infrastructure/repository/outboxrepo"
 	"prizeforge/internal/job"
@@ -106,11 +109,15 @@ func NewAPIApp() (*HTTPApp, error) {
 		listener.NewSelectionResultListener(enrollmentRepo),
 	)
 
+	selectionAdmission := enrollment.NewSelectionAdmissionService(
+		enrollmentRepo,
+		enrollmentRepo,
+	)
 	enrollmentUsecase := api.NewEnrollmentUsecase(
 		enrollmentRepo,
 		enrollmentRepo,
-		enrollmentRepo,
 		selectionResultPublisher,
+		selectionAdmission,
 	)
 	dropEnrollmentUsecase := api.NewDropEnrollmentUsecase(
 		enrollmentRepo,
@@ -119,9 +126,8 @@ func NewAPIApp() (*HTTPApp, error) {
 	)
 	waitlistUsecase := api.NewWaitlistUsecase(
 		enrollmentRepo,
-		enrollmentRepo,
-		enrollmentRepo,
 		enrollmentUsecase,
+		selectionAdmission,
 	)
 	waitlistPromotionJob := job.NewWaitlistPromotionJob(waitlistUsecase, 100)
 	projectionReconciliationUsecase := api.NewProjectionReconciliationUsecase(
@@ -150,8 +156,13 @@ func NewAPIApp() (*HTTPApp, error) {
 		return nil, fmt.Errorf("student auth: %w", err)
 	}
 	studentAuth := middleware.NewStudentJWTAuth(tokenManager)
+	authenticator := authdomain.NewAuthenticator(
+		authinfra.NewAccountRepository(courseforgeDB),
+		authinfra.BcryptPasswordVerifier{},
+	)
 	authenticationUsecase := api.NewAuthenticationUsecase(
-		authinfra.NewRepository(courseforgeDB),
+		authenticator,
+		query.NewSelectionContextQuery(courseforgeDB),
 		tokenManager,
 	)
 	readinessChecks := common.ReadinessChecks{

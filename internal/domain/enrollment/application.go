@@ -43,6 +43,21 @@ type SelectionApplication struct {
 	CompletedAt     *time.Time
 }
 
+// EnsureMatches 校验同一幂等请求没有被重新绑定到不同的选课意图。
+func (a *SelectionApplication) EnsureMatches(intent SelectionIntent) error {
+	if a == nil || !intent.valid() {
+		return ErrInvalidParams
+	}
+	if a.RequestID != intent.RequestID() ||
+		a.RoundID != intent.RoundID() ||
+		a.StudentID != intent.StudentID() ||
+		a.TeachingClassID != intent.TeachingClassID() ||
+		a.Source != intent.Source() {
+		return ErrIdempotencyConflict
+	}
+	return nil
+}
+
 // NewSelectionApplication 根据已校验的请求创建初始申请单。
 func NewSelectionApplication(
 	applicationID string,

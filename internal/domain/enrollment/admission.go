@@ -1,6 +1,9 @@
 package enrollment
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type StudentState string
 
@@ -52,19 +55,16 @@ const (
 	MajorScopeDeny  MajorScopeType = "deny"
 )
 
-// MajorScope 表示教学班对某个专业的允许或拒绝规则。
 type MajorScope struct {
 	MajorID uint64
 	Type    MajorScopeType
 }
 
-// PrerequisiteRequirement 表示课程的先修课及最低分要求。
 type PrerequisiteRequirement struct {
 	CourseID     uint64
 	MinimumScore *float64
 }
 
-// CourseAchievement 表示学生的一次先修课程达成记录。
 type CourseAchievement struct {
 	CourseID uint64
 	Passed   bool
@@ -83,7 +83,6 @@ type EligibilitySnapshot struct {
 	EnrolledSchedules []ScheduleSlot
 }
 
-// EligibilityRepository 是领域层定义的资格快照查询端口。
 type EligibilityRepository interface {
 	QueryEligibilitySnapshot(
 		ctx context.Context,
@@ -94,7 +93,6 @@ type EligibilityRepository interface {
 	) (*EligibilitySnapshot, error)
 }
 
-// EligibilityPolicy 是选课资格领域策略，不依赖数据库或缓存实现。
 type EligibilityPolicy struct{}
 
 func (EligibilityPolicy) Evaluate(snapshot *EligibilitySnapshot) error {
@@ -177,4 +175,166 @@ func prerequisitesSatisfied(
 		}
 	}
 	return true
+}
+
+// SelectionAdmissionRepository 提供选课准入判断需要的领域数据。
+type SelectionAdmissionRepository interface {
+	QuerySelectionRound(ctx context.Context, roundID uint64) (*SelectionRound, error)
+	QueryTeachingClass(
+		ctx context.Context,
+		roundID uint64,
+		teachingClassID uint64,
+	) (*TeachingClass, error)
+	QueryStudentSelectionQuota(
+		ctx context.Context,
+		roundID uint64,
+		studentID uint64,
+	) (*StudentSelectionQuota, error)
+	HasExistingEnrollment(
+		ctx context.Context,
+		termID uint64,
+		studentID uint64,
+		courseID uint64,
+	) (bool, error)
+}
+
+// SelectionAdmissionService 统一正式选课和候补申请的准入规则。
+// 它通过领域仓储加载判断所需快照，不感知 Redis Lua、消息发布或 HTTP。
+type SelectionAdmissionService struct {
+	selections  SelectionAdmissionRepository
+	eligibility EligibilityRepository
+	policy      EligibilityPolicy
+}
+
+func NewSelectionAdmissionService(
+	selections SelectionAdmissionRepository,
+	eligibility EligibilityRepository,
+) *SelectionAdmissionService {
+	return &SelectionAdmissionService{
+		selections:  selections,
+		eligibility: eligibility,
+		policy:      EligibilityPolicy{},
+	}
+}
+
+func (s *SelectionAdmissionService) AdmitSelection(
+	ctx context.Context,
+	intent SelectionIntent,
+	now time.Time,
+) (*SelectionRequest, error) {
+	request, class, err := s.prepare(ctx, intent, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := class.ValidateForSelection(request); err != nil {
+		return nil, err
+	}
+	return s.evaluateStudent(ctx, request)
+}
+
+func (s *SelectionAdmissionService) AdmitWaitlist(
+	ctx context.Context,
+	intent SelectionIntent,
+	now time.Time,
+) (*SelectionRequest, error) {
+	request, class, err := s.prepare(ctx, intent, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := class.ValidateForWaitlist(request); err != nil {
+		return nil, err
+	}
+	return s.evaluateStudent(ctx, request)
+}
+
+func (s *SelectionAdmissionService) prepare(
+	ctx context.Context,
+	intent SelectionIntent,
+	now time.Time,
+) (*SelectionRequest, *TeachingClass, error) {
+	if s == nil || s.selections == nil || s.eligibility == nil ||
+		!intent.valid() || now.IsZero() {
+		return nil, nil, ErrInvalidParams
+	}
+	round, err := s.selections.QuerySelectionRound(ctx, intent.RoundID())
+	if err != nil {
+		return nil, nil, err
+	}
+	if round == nil {
+		return nil, nil, ErrRecordNotFound
+	}
+	if err := round.EnsureAcceptingAt(now); err != nil {
+		return nil, nil, err
+	}
+	class, err := s.selections.QueryTeachingClass(
+		ctx,
+		round.ID,
+		intent.TeachingClassID(),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	if class == nil {
+		return nil, nil, ErrRecordNotFound
+	}
+	request := &SelectionRequest{
+		RequestID:       intent.RequestID(),
+		RoundID:         round.ID,
+		TermID:          round.TermID,
+		StudentID:       intent.StudentID(),
+		CourseID:        class.CourseID,
+		TeachingClassID: class.ID,
+		Credits:         class.Credits,
+		Source:          intent.Source(),
+	}
+	if err := request.Validate(); err != nil {
+		return nil, nil, err
+	}
+	return request, class, nil
+}
+
+func (s *SelectionAdmissionService) evaluateStudent(
+	ctx context.Context,
+	request *SelectionRequest,
+) (*SelectionRequest, error) {
+	snapshot, err := s.eligibility.QueryEligibilitySnapshot(
+		ctx,
+		request.StudentID,
+		request.TermID,
+		request.CourseID,
+		request.TeachingClassID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.policy.Evaluate(snapshot); err != nil {
+		return nil, err
+	}
+	exists, err := s.selections.HasExistingEnrollment(
+		ctx,
+		request.TermID,
+		request.StudentID,
+		request.CourseID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, ErrDuplicateSelection
+	}
+	quota, err := s.selections.QueryStudentSelectionQuota(
+		ctx,
+		request.RoundID,
+		request.StudentID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if quota == nil {
+		return nil, ErrRecordNotFound
+	}
+	if err := quota.ValidateReservation(request); err != nil {
+		return nil, err
+	}
+	return request, nil
 }

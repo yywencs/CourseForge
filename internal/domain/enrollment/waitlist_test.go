@@ -52,3 +52,17 @@ func TestWaitlistEntryCancelIsIdempotent(t *testing.T) {
 		t.Fatalf("取消结果 = %#v", entry)
 	}
 }
+
+func TestDecidePromotionFailure(t *testing.T) {
+	retry := DecidePromotionFailure(ErrTeachingClassFull)
+	if retry.Action != PromotionFailureActionRetry {
+		t.Fatalf("full class decision = %#v", retry)
+	}
+
+	cancel := DecidePromotionFailure(ErrPrerequisiteNotMet)
+	if cancel.Action != PromotionFailureActionCancel ||
+		cancel.Reason.Code != FailureCodePrerequisite ||
+		cancel.Reason.Message == "" {
+		t.Fatalf("prerequisite decision = %#v", cancel)
+	}
+}

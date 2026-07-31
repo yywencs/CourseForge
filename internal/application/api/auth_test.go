@@ -7,14 +7,11 @@ import (
 	"time"
 
 	authdomain "prizeforge/internal/domain/auth"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 type fakeAuthRepository struct {
-	account          *authdomain.StudentAccount
-	selectionContext *authdomain.SelectionContext
-	err              error
+	account *authdomain.StudentAccount
+	err     error
 }
 
 func (f *fakeAuthRepository) FindStudentByNumber(
@@ -37,10 +34,20 @@ func (f *fakeAuthRepository) FindStudentByID(
 	return f.account, nil
 }
 
-func (f *fakeAuthRepository) FindCurrentSelectionContext(
+type fakeSelectionContextQuery struct {
+	selectionContext *SelectionContext
+}
+
+func (f fakeSelectionContextQuery) FindCurrentSelectionContext(
 	context.Context,
-) (*authdomain.SelectionContext, error) {
+) (*SelectionContext, error) {
 	return f.selectionContext, nil
+}
+
+type fakePasswordVerifier struct{}
+
+func (fakePasswordVerifier) Verify(passwordHash string, password string) bool {
+	return passwordHash == "encoded-password" && password == "correct-password"
 }
 
 type fakeTokenIssuer struct{}
@@ -55,13 +62,15 @@ func TestAuthenticationUsecaseLogin(t *testing.T) {
 			ID:           10001,
 			StudentNo:    "2026001001",
 			StudentName:  "林知夏",
-			PasswordHash: testPasswordHash(t, "correct-password"),
+			PasswordHash: "encoded-password",
 			State:        "active",
 		},
-		selectionContext: &authdomain.SelectionContext{TermID: 1, RoundID: 2},
 	}
 	usecase := NewAuthenticationUsecase(
-		repository,
+		authdomain.NewAuthenticator(repository, fakePasswordVerifier{}),
+		fakeSelectionContextQuery{
+			selectionContext: &SelectionContext{TermID: 1, RoundID: 2},
+		},
 		fakeTokenIssuer{},
 	)
 
@@ -81,14 +90,15 @@ func TestAuthenticationUsecaseLogin(t *testing.T) {
 
 func TestAuthenticationUsecaseRejectsInvalidCredentials(t *testing.T) {
 	usecase := NewAuthenticationUsecase(
-		&fakeAuthRepository{
+		authdomain.NewAuthenticator(&fakeAuthRepository{
 			account: &authdomain.StudentAccount{
 				ID:           10001,
 				StudentNo:    "2026001001",
-				PasswordHash: testPasswordHash(t, "correct-password"),
+				PasswordHash: "encoded-password",
 				State:        "active",
 			},
-		},
+		}, fakePasswordVerifier{}),
+		fakeSelectionContextQuery{},
 		fakeTokenIssuer{},
 	)
 
@@ -99,13 +109,4 @@ func TestAuthenticationUsecaseRejectsInvalidCredentials(t *testing.T) {
 	if !errors.Is(err, authdomain.ErrInvalidCredentials) {
 		t.Fatalf("Login() error = %v, want invalid credentials", err)
 	}
-}
-
-func testPasswordHash(t *testing.T, password string) string {
-	t.Helper()
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
-	if err != nil {
-		t.Fatalf("GenerateFromPassword() error = %v", err)
-	}
-	return string(hash)
 }

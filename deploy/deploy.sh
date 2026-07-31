@@ -78,6 +78,12 @@ if [[ -z "${previous_tag}" ]]; then
 	exit 2
 fi
 
+# 首次接入 Web 时旧版本没有可回滚的前端镜像，因此记录部署前是否已有 Web 容器。
+web_was_deployed=0
+if [[ -n "$("${COMPOSE[@]}" ps -q web)" ]]; then
+	web_was_deployed=1
+fi
+
 env_temp_file=""
 rollback_needed=0
 
@@ -94,15 +100,24 @@ write_image_tag() {
 	env_temp_file=""
 }
 
-# 部署失败后恢复旧镜像标签，并重新启动旧版本的 API 和 Admin 服务。
+# 部署失败后恢复旧镜像标签。已有 Web 的常规升级回滚三个应用；
+# 首次接入 Web 失败时恢复 API/Admin，并停止本次新建的 Web 容器。
 rollback() {
 	echo "deployment failed; rolling back to ${previous_tag}" >&2
 	write_image_tag "${previous_tag}"
-	if ! "${COMPOSE[@]}" up -d api admin; then
-		echo "automatic rollback failed; manual intervention is required" >&2
-		return 1
+	if ((web_was_deployed == 1)); then
+		if "${COMPOSE[@]}" up -d api admin web; then
+			echo "IMAGE_TAG restored to ${previous_tag}" >&2
+			return 0
+		fi
+	elif "${COMPOSE[@]}" up -d api admin; then
+		"${COMPOSE[@]}" stop web >/dev/null 2>&1 || true
+		echo "IMAGE_TAG restored to ${previous_tag}; bootstrap Web stopped" >&2
+		return 0
 	fi
-	echo "IMAGE_TAG restored to ${previous_tag}" >&2
+
+	echo "automatic rollback failed; manual intervention is required" >&2
+	return 1
 }
 
 # 脚本退出时清理残留临时文件；若新版本已经写入，则自动执行回滚。
@@ -119,9 +134,10 @@ on_exit() {
 }
 trap on_exit EXIT
 
-# 轮询 API 和 Admin 的存活、就绪端点，全部通过后才认为部署成功。
+# 轮询 Web、API 和 Admin 的存活、就绪端点，全部通过后才认为部署成功。
 wait_until_ready() {
 	local -a endpoints=(
+		"http://127.0.0.1:8082/web-healthz"
 		"http://127.0.0.1:8080/healthz"
 		"http://127.0.0.1:8080/readyz"
 		"http://127.0.0.1:8081/healthz"
@@ -155,9 +171,10 @@ wait_until_ready() {
 	return 1
 }
 
-# 调用 Admin 稳定状态接口。MySQL 连通性已由 /readyz 的 courseforge_mysql 检查覆盖。
+# 通过 Web 反向代理调用 Admin 稳定状态接口，同时验证前端代理链路。
+# MySQL 连通性已由 /readyz 的 courseforge_mysql 检查覆盖。
 run_business_smoke_test() {
-	local endpoint="http://127.0.0.1:8081/admin/v1/status"
+	local endpoint="http://127.0.0.1:8082/admin-api/admin/v1/status"
 	local response
 
 	if ! response="$(curl \
@@ -186,37 +203,37 @@ echo "validating Compose configuration for ${TARGET_TAG}"
 IMAGE_TAG="${TARGET_TAG}" "${COMPOSE[@]}" config --quiet
 
 # 在修改 .env 前准备本次启动所需的全部镜像，任何镜像失败都会保持旧标签不变。
-# 基础设施镜像版本固定，仅在服务器缺失时拉取；API/Admin 每次拉取目标版本以确认制品存在。
+# 基础设施镜像版本固定，仅在服务器缺失时拉取；应用镜像每次拉取目标版本以确认制品存在。
 echo "preparing infrastructure images"
 IMAGE_TAG="${TARGET_TAG}" "${COMPOSE[@]}" pull --policy missing mysql redis rabbitmq
 
-echo "pulling API and Admin images for ${TARGET_TAG}"
-IMAGE_TAG="${TARGET_TAG}" "${COMPOSE[@]}" pull api admin
+echo "pulling API, Admin and Web images for ${TARGET_TAG}"
+IMAGE_TAG="${TARGET_TAG}" "${COMPOSE[@]}" pull api admin web
 
 # 从这里开始发生失败时需要回滚到 previous_tag。
 echo "updating IMAGE_TAG from ${previous_tag} to ${TARGET_TAG}"
 rollback_needed=1
 write_image_tag "${TARGET_TAG}"
 
-# 使用新镜像标签重新创建并在后台启动两个服务。
-echo "starting API and Admin"
-"${COMPOSE[@]}" up -d api admin
+# 使用新镜像标签重新创建并在后台启动三个应用服务。
+echo "starting API, Admin and Web"
+"${COMPOSE[@]}" up -d api admin web
 
 # 健康检查失败时输出容器状态和最近日志，随后退出并由 EXIT trap 触发回滚。
 if ! wait_until_ready; then
 	"${COMPOSE[@]}" ps >&2 || true
-	"${COMPOSE[@]}" logs --tail=100 api admin >&2 || true
+	"${COMPOSE[@]}" logs --tail=100 api admin web >&2 || true
 	exit 1
 fi
 
 # 健康端点只能证明进程和依赖存活；再执行一次只读业务查询后才判定新版本可用。
 if ! run_business_smoke_test; then
 	"${COMPOSE[@]}" ps >&2 || true
-	"${COMPOSE[@]}" logs --tail=100 admin >&2 || true
+	"${COMPOSE[@]}" logs --tail=100 admin web >&2 || true
 	exit 1
 fi
 
 # 新版本已通过全部检查，关闭回滚标记并输出最终容器状态。
 rollback_needed=0
 echo "deployment of ${TARGET_TAG} succeeded"
-"${COMPOSE[@]}" ps api admin
+"${COMPOSE[@]}" ps api admin web

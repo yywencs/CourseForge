@@ -113,6 +113,21 @@ services:
     networks:
       - backend
 
+  web:
+    image: ${ACR_REGISTRY:?ACR_REGISTRY is required}/${ACR_NAMESPACE:?ACR_NAMESPACE is required}/courseforge-web:${IMAGE_TAG:?IMAGE_TAG is required}
+    restart: unless-stopped
+    init: true
+    ports:
+      - 127.0.0.1:8082:80
+    depends_on:
+      api:
+        condition: service_started
+      admin:
+        condition: service_started
+    mem_limit: 128m
+    networks:
+      - backend
+
 networks:
   backend:
     driver: bridge

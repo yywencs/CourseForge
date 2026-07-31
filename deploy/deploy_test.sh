@@ -13,6 +13,9 @@ trap cleanup EXIT
 
 docker() {
 	printf '%s\n' "$*" >>"${TEST_DOCKER_LOG}"
+	if [[ "$*" == *"ps -q web"* && -n "${TEST_EXISTING_WEB_ID:-}" ]]; then
+		printf '%s\n' "${TEST_EXISTING_WEB_ID}"
+	fi
 	if [[ -n "${TEST_DOCKER_FAIL_ON}" && "$*" == *"${TEST_DOCKER_FAIL_ON}"* ]]; then
 		return 1
 	fi
@@ -40,6 +43,7 @@ curl() {
 
 export -f docker curl
 export TEST_DOCKER_LOG TEST_DOCKER_FAIL_ON TEST_HEALTH_RESULT TEST_SMOKE_RESULT
+export TEST_EXISTING_WEB_ID
 
 new_fixture() {
 	local fixture_name="$1"
@@ -70,29 +74,33 @@ test_successful_deployment() {
 	TEST_DOCKER_FAIL_ON=""
 	TEST_HEALTH_RESULT=success
 	TEST_SMOKE_RESULT=success
+	TEST_EXISTING_WEB_ID=""
 	export TEST_DOCKER_LOG TEST_DOCKER_FAIL_ON TEST_HEALTH_RESULT TEST_SMOKE_RESULT
+	export TEST_EXISTING_WEB_ID
 
 	HEALTHCHECK_ATTEMPTS=1 HEALTHCHECK_INTERVAL_SECONDS=0 \
 		"${DEPLOY_SCRIPT}" v1.0.1 "${fixture_path}"
 
 	assert_image_tag "${fixture_path}" v1.0.1
 	grep -q 'pull --policy missing mysql redis rabbitmq' "${TEST_DOCKER_LOG}"
-	grep -q 'pull api admin' "${TEST_DOCKER_LOG}"
-	grep -q 'up -d api admin' "${TEST_DOCKER_LOG}"
+	grep -q 'pull api admin web' "${TEST_DOCKER_LOG}"
+	grep -q 'up -d api admin web' "${TEST_DOCKER_LOG}"
 }
 
 test_pull_failure_keeps_previous_tag() {
 	local case_spec case_name failure_pattern fixture_path
 	for case_spec in \
 		'infrastructure|pull --policy missing mysql redis rabbitmq' \
-		'applications|pull api admin'; do
+		'applications|pull api admin web'; do
 		IFS='|' read -r case_name failure_pattern <<<"${case_spec}"
 		fixture_path="$(new_fixture "pull-failure-${case_name}")"
 		TEST_DOCKER_LOG="${fixture_path}/docker.log"
 		TEST_DOCKER_FAIL_ON="${failure_pattern}"
 		TEST_HEALTH_RESULT=success
 		TEST_SMOKE_RESULT=success
+		TEST_EXISTING_WEB_ID=""
 		export TEST_DOCKER_LOG TEST_DOCKER_FAIL_ON TEST_HEALTH_RESULT TEST_SMOKE_RESULT
+		export TEST_EXISTING_WEB_ID
 
 		if HEALTHCHECK_ATTEMPTS=1 HEALTHCHECK_INTERVAL_SECONDS=0 \
 			"${DEPLOY_SCRIPT}" v1.0.1 "${fixture_path}"; then
@@ -101,7 +109,7 @@ test_pull_failure_keeps_previous_tag() {
 		fi
 
 		assert_image_tag "${fixture_path}" v1.0.0
-		if grep -q 'up -d api admin' "${TEST_DOCKER_LOG}"; then
+		if grep -q 'up -d api admin web' "${TEST_DOCKER_LOG}"; then
 			echo "services were started after ${case_name} pull failure" >&2
 			exit 1
 		fi
@@ -115,7 +123,9 @@ test_failed_deployment_rolls_back() {
 	TEST_DOCKER_FAIL_ON=""
 	TEST_HEALTH_RESULT=failure
 	TEST_SMOKE_RESULT=success
+	TEST_EXISTING_WEB_ID=existing-web-container
 	export TEST_DOCKER_LOG TEST_DOCKER_FAIL_ON TEST_HEALTH_RESULT TEST_SMOKE_RESULT
+	export TEST_EXISTING_WEB_ID
 
 	if HEALTHCHECK_ATTEMPTS=1 HEALTHCHECK_INTERVAL_SECONDS=0 \
 		"${DEPLOY_SCRIPT}" v1.0.1 "${fixture_path}"; then
@@ -124,7 +134,7 @@ test_failed_deployment_rolls_back() {
 	fi
 
 	assert_image_tag "${fixture_path}" v1.0.0
-	if [[ "$(grep -c 'up -d api admin' "${TEST_DOCKER_LOG}")" != "2" ]]; then
+	if [[ "$(grep -c 'up -d api admin web' "${TEST_DOCKER_LOG}")" != "2" ]]; then
 		echo "rollback did not restart the previous image tag" >&2
 		exit 1
 	fi
@@ -137,7 +147,9 @@ test_failed_business_smoke_rolls_back() {
 	TEST_DOCKER_FAIL_ON=""
 	TEST_HEALTH_RESULT=success
 	TEST_SMOKE_RESULT=invalid-response
+	TEST_EXISTING_WEB_ID=existing-web-container
 	export TEST_DOCKER_LOG TEST_DOCKER_FAIL_ON TEST_HEALTH_RESULT TEST_SMOKE_RESULT
+	export TEST_EXISTING_WEB_ID
 
 	if HEALTHCHECK_ATTEMPTS=1 HEALTHCHECK_INTERVAL_SECONDS=0 \
 		"${DEPLOY_SCRIPT}" v1.0.1 "${fixture_path}"; then
@@ -146,10 +158,32 @@ test_failed_business_smoke_rolls_back() {
 	fi
 
 	assert_image_tag "${fixture_path}" v1.0.0
-	if [[ "$(grep -c 'up -d api admin' "${TEST_DOCKER_LOG}")" != "2" ]]; then
+	if [[ "$(grep -c 'up -d api admin web' "${TEST_DOCKER_LOG}")" != "2" ]]; then
 		echo "business smoke failure did not restart the previous image tag" >&2
 		exit 1
 	fi
+}
+
+test_first_web_deployment_failure_stops_bootstrap_web() {
+	local fixture_path
+	fixture_path="$(new_fixture first-web-rollback)"
+	TEST_DOCKER_LOG="${fixture_path}/docker.log"
+	TEST_DOCKER_FAIL_ON=""
+	TEST_HEALTH_RESULT=failure
+	TEST_SMOKE_RESULT=success
+	TEST_EXISTING_WEB_ID=""
+	export TEST_DOCKER_LOG TEST_DOCKER_FAIL_ON TEST_HEALTH_RESULT TEST_SMOKE_RESULT
+	export TEST_EXISTING_WEB_ID
+
+	if HEALTHCHECK_ATTEMPTS=1 HEALTHCHECK_INTERVAL_SECONDS=0 \
+		"${DEPLOY_SCRIPT}" v1.0.1 "${fixture_path}"; then
+		echo "first Web deployment unexpectedly succeeded" >&2
+		exit 1
+	fi
+
+	assert_image_tag "${fixture_path}" v1.0.0
+	grep -q 'up -d api admin$' "${TEST_DOCKER_LOG}"
+	grep -q 'stop web' "${TEST_DOCKER_LOG}"
 }
 
 test_invalid_tag_is_rejected() {
@@ -159,7 +193,9 @@ test_invalid_tag_is_rejected() {
 	TEST_DOCKER_FAIL_ON=""
 	TEST_HEALTH_RESULT=success
 	TEST_SMOKE_RESULT=success
+	TEST_EXISTING_WEB_ID=""
 	export TEST_DOCKER_LOG TEST_DOCKER_FAIL_ON TEST_HEALTH_RESULT TEST_SMOKE_RESULT
+	export TEST_EXISTING_WEB_ID
 
 	if "${DEPLOY_SCRIPT}" latest "${fixture_path}"; then
 		echo "invalid image tag was accepted" >&2
@@ -172,6 +208,7 @@ test_successful_deployment
 test_pull_failure_keeps_previous_tag
 test_failed_deployment_rolls_back
 test_failed_business_smoke_rolls_back
+test_first_web_deployment_failure_stops_bootstrap_web
 test_invalid_tag_is_rejected
 
 echo "deploy script tests passed"

@@ -18,7 +18,7 @@ env:
 
 jobs:
   check:
-    name: Check
+    name: Backend Check
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -35,8 +35,67 @@ jobs:
       - name: Run formatting, vet, and tests
         run: make check
 
+  frontend-check:
+    name: Frontend Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend type checks
+        run: npm run typecheck
+
+      - name: Run frontend unit tests
+        run: npm run test:run
+
+      - name: Build frontend
+        run: npm run build
+
+  frontend-e2e:
+    name: Frontend E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run frontend end-to-end tests
+        run: npm run test:e2e
+
   integration-test:
-    name: Integration Test
+    name: Backend Integration Test
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -57,6 +116,8 @@ jobs:
     name: Publish ${{ matrix.image }}
     needs:
       - check
+      - frontend-check
+      - frontend-e2e
       - integration-test
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -65,9 +126,17 @@ jobs:
       matrix:
         include:
           - image: prizeforge-api
+            context: .
+            dockerfile: ./Dockerfile
             target: api
           - image: prizeforge-admin
+            context: .
+            dockerfile: ./Dockerfile
             target: admin
+          - image: courseforge-web
+            context: ./web
+            dockerfile: ./web/Dockerfile
+            target: runtime
 
     steps:
       - name: Checkout repository
@@ -96,8 +165,8 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
           platforms: linux/amd64
           push: true

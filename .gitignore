@@ -43,6 +43,7 @@ temp/
 .env.*
 !.env.example
 configs/config.yaml
+/docker-compose-my.yaml
 
 # frontend
 frontend/node_modules/

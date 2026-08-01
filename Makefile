@@ -63,7 +63,7 @@ integration-up: ## 启动并等待临时 MySQL、Redis、RabbitMQ 集成测试�
 .PHONY: integration-db-check
 integration-db-check: ## 验证 CourseForge 集成测试表已经初始化
 	@courseforge_table_count="$$( $(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '"'"'courseforge'"'"'"' )"; \
-	test "$$courseforge_table_count" = "16"; \
+	test "$$courseforge_table_count" = "17"; \
 	printf '%s\n' "CourseForge integration MySQL schema is ready"
 
 .PHONY: integration-redis-check
@@ -159,27 +159,31 @@ docker-build-benchmark: ## 构建 CourseForge 选课压测镜像
 
 .PHONY: compose-config
 compose-config: ## 校验并渲染 Compose 配置
-	$(COMPOSE) config
+	$(COMPOSE) --profile "*" config
 
 .PHONY: infra-up
-infra-up: ## 启动 MySQL、Redis 和 RabbitMQ
-	$(COMPOSE) up -d mysql redis rabbitmq
+infra-up: ## 启动并等待本地 MySQL、Redis 和 RabbitMQ 就绪
+	$(COMPOSE) up -d --wait mysql redis rabbitmq
 
 .PHONY: monitoring-up
-monitoring-up: ## 启动 Prometheus、Grafana 和 MySQL Exporter
-	$(COMPOSE) up -d prometheus grafana mysql-exporter
+monitoring-up: ## 启动 Prometheus 和 Grafana
+	$(COMPOSE) --profile observability up -d prometheus grafana
 
 .PHONY: search-up
-search-up: ## 启动 Elasticsearch、Kibana 和 CDC Sync
-	$(COMPOSE) up -d elasticsearch kibana cdc-sync
+search-up: ## 启动 Elasticsearch 和 Kibana
+	$(COMPOSE) --profile search up -d elasticsearch kibana
+
+.PHONY: cdc-up
+cdc-up: ## 启动 MySQL、Elasticsearch 和 CDC Sync
+	$(COMPOSE) --profile cdc up -d elasticsearch cdc-sync
 
 .PHONY: down
 down: ## 停止 Compose 服务
-	$(COMPOSE) down
+	$(COMPOSE) --profile "*" down
 
 .PHONY: logs
 logs: ## 跟踪 Compose 日志
-	$(COMPOSE) logs --tail=200 -f
+	$(COMPOSE) --profile "*" logs --tail=200 -f
 
 .PHONY: clean
 clean: ## 清理本地构建产物和覆盖率报告

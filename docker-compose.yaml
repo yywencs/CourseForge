@@ -1,179 +1,196 @@
+name: courseforge-local
+
 services:
+  # 首次启动时自动创建 courseforge 库和表结构。
   mysql:
-    image: mysql:8.0.32
-    container_name: mysql
-    restart: always
+    image: mysql:8.4.6
+    restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-    networks:
-      - my-network
-    depends_on:
-      - mysql-job-dbdata
-    # 移除了 ports: "13306:3306"，已彻底屏蔽公网直连，请使用 SSH 隧道
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-password}
+      MYSQL_ROOT_HOST: "%"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --server-id=1
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --binlog-row-image=FULL
     ports:
-      - "127.0.0.1:3306:3306"
+      - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
     volumes:
-      - ./mysql/sql:/docker-entrypoint-initdb.d
-      - ./mysql/conf.d/my.cnf:/etc/mysql/conf.d/my.cnf
+      - ./docs/sql/courseforge.sql:/docker-entrypoint-initdb.d/10-courseforge.sql:ro
+      - ./docs/sql/dev_seed.sql:/docker-entrypoint-initdb.d/20-dev-seed.sql:ro
+      - mysql-data:/var/lib/mysql
     healthcheck:
-      test: [ "CMD", "mysqladmin" ,"ping", "-h", "localhost" ]
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent",
+        ]
       interval: 5s
-      timeout: 10s
-      retries: 10
-      start_period: 15s
-    volumes_from:
-      - mysql-job-dbdata
-
-  # 自动加载数据
-  mysql-job-dbdata:
-    image: alpine:3.18.2
-    container_name: mysql-job-dbdata
-    volumes:
-      - /var/lib/mysql
-
-
-  # Redis
-  redis:
-    image: redis:6.2
-    container_name: redis
-    restart: always
-    hostname: redis
-    privileged: true
-    # 移除了 ports: "16379:6379"，已彻底屏蔽公网直连，请使用 SSH 隧道
-    volumes:
-      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
-    ports:
-      - "127.0.0.1:6379:6379"
-    command: redis-server /usr/local/etc/redis/redis.conf
-    networks:
-      - my-network
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 20
+      start_period: 20s
+    networks:
+      - backend
 
-
-  # rabbitmq
-  # 账密 wen / 读取变量
-  # rabbitmq-plugins enable rabbitmq_management
-  rabbitmq:
-    image: rabbitmq:3.12.9
-    container_name: rabbitmq
-    restart: always
+  # API 热路径与 Asynq 共用同一个 Redis 实例，通过 DB 0/DB 1 隔离。
+  redis:
+    image: redis:7.4.9-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
     ports:
-      - "15672:15672" # 保留：Web 可视化管理面板 (移除了 5672 数据端口)
-      - "127.0.0.1:5672:5672"
-    environment:
-      RABBITMQ_DEFAULT_USER: wen
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
-    command: rabbitmq-server
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
-      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+
+  # management 镜像同时提供 AMQP 端口和本地管理页面。
+  rabbitmq:
+    image: rabbitmq:4.2.8-management-alpine
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-wen}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-password}
+    ports:
+      - "127.0.0.1:${RABBITMQ_AMQP_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - backend
+
+  # 可观测组件默认不启动：docker compose --profile observability up -d。
   prometheus:
     image: prom/prometheus:latest
-    container_name: prometheus
+    profiles: ["observability"]
+    restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    volumes:
-      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./monitoring/prometheus/courseforge-alerts.yml:/etc/prometheus/courseforge-alerts.yml
-      - ./prometheus-data:/prometheus
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/courseforge-alerts.yml:/etc/prometheus/courseforge-alerts.yml:ro
+      - prometheus-data:/prometheus
     networks:
-      - my-network
-    restart: always
+      - backend
+
   grafana:
     image: grafana/grafana:11.2.0
-    container_name: grafana
-    restart: always
-    ports:
-      - "3000:3000"
+    profiles: ["observability"]
+    restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin123456}
       GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
     volumes:
-      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
-      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards/json
-      - ./grafana-data:/var/lib/grafana
-    networks:
-      - my-network
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards/json:ro
+      - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
-  # MySQL 监控插件 (因为 Prometheus 不能直接读 MySQL，需要这个转换器)
-  mysql-exporter:
-    image: prom/mysqld-exporter:latest
-    container_name: mysql-exporter
-    environment:
-      - DATA_SOURCE_NAME=root:${MYSQL_ROOT_PASSWORD}@(mysql:3306)/
     networks:
-      - my-network
-    depends_on:
-      - mysql
+      - backend
 
-
+  # 搜索组件默认不启动：docker compose --profile search up -d。
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
-    container_name: elasticsearch
-    restart: always
+    profiles: ["search", "cdc"]
+    restart: unless-stopped
     environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - bootstrap.memory_lock=true
-      - ES_JAVA_OPTS=-Xms1g -Xmx1g
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
     ports:
-      - "127.0.0.1:9200:9200"
-      - "127.0.0.1:9300:9300"
+      - "127.0.0.1:${ELASTICSEARCH_HTTP_PORT:-9200}:9200"
+      - "127.0.0.1:${ELASTICSEARCH_TRANSPORT_PORT:-9300}:9300"
     volumes:
-      - ./es-data:/usr/share/elasticsearch/data
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl --fail --silent http://127.0.0.1:9200/_cluster/health >/dev/null",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
     networks:
-      - my-network
+      - backend
 
   kibana:
     image: docker.elastic.co/kibana/kibana:8.15.0
-    container_name: kibana
-    restart: always
+    profiles: ["search"]
+    restart: unless-stopped
     environment:
       ELASTICSEARCH_HOSTS: http://elasticsearch:9200
     ports:
-      - "127.0.0.1:5601:5601"
+      - "127.0.0.1:${KIBANA_PORT:-5601}:5601"
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
     networks:
-      - my-network
+      - backend
 
+  # 团队版本默认读取 Compose 内的 MySQL，也可通过 CDC_* 变量覆盖。
   cdc-sync:
     build:
       context: .
       dockerfile: Dockerfile
       target: cdc-sync
-    container_name: cdc-sync
-    restart: always
-    depends_on:
-      - mysql
-      - elasticsearch
+    profiles: ["cdc"]
+    restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      CDC_MYSQL_ADDR: mysql:3306
-      CDC_MYSQL_USER: canal
-      CDC_MYSQL_PASSWORD: ${CANAL_MYSQL_PASSWORD}
+      CDC_MYSQL_ADDR: ${CDC_MYSQL_ADDR:-mysql:3306}
+      CDC_MYSQL_USER: ${CDC_MYSQL_USER:-root}
+      CDC_MYSQL_PASSWORD: ${CDC_MYSQL_PASSWORD:-${MYSQL_ROOT_PASSWORD:-password}}
       CDC_ES_ADDR: http://elasticsearch:9200
       CDC_INCLUDE_TABLE_REGEX: 'courseforge\..*'
       CDC_ES_INDEX_PREFIX: courseforge
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
-      - my-network
+      - backend
 
 networks:
-  my-network:
+  backend:
     driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:
+  rabbitmq-data:
+  prometheus-data:
+  grafana-data:
+  elasticsearch-data:

@@ -8,10 +8,29 @@ CourseForge 是一个使用 Go 实现的高并发选课系统。选课模块采�
 
 环境要求：Go 1.25+、Docker、Docker Compose。
 
-启动临时 MySQL、Redis 和 RabbitMQ：
+复制本地环境变量示例，并启动 MySQL、Redis 和 RabbitMQ：
 
 ```bash
-make integration-up
+cp .env.example .env
+make infra-up
+```
+
+首次启动时，MySQL 会依次执行 `docs/sql/courseforge.sql` 和 `docs/sql/dev_seed.sql`，
+自动创建 `courseforge` 库、表结构和开发演示数据。默认连接信息与
+`configs/config.example.yaml` 一致。
+
+开发演示账号：
+
+```text
+学号：2026001001
+密码：CourseForge@123
+```
+
+MySQL 初始化脚本只会在数据卷为空时自动执行。已有数据库或外部数据库需要手动导入：
+
+```bash
+mysql -h 127.0.0.1 -P 3306 -u root -p < docs/sql/split_student_account.sql
+mysql -h 127.0.0.1 -P 3306 -u root -p < docs/sql/dev_seed.sql
 ```
 
 复制并调整本地配置：
@@ -44,10 +63,10 @@ make run-admin
 - `GET /readyz`
 - Admin：`GET /admin/v1/status`
 
-销毁临时依赖：
+停止本地依赖：
 
 ```bash
-make integration-down
+make down
 ```
 
 ## 测试与压测
@@ -75,8 +94,9 @@ make build-benchmark
 - Prometheus 规则覆盖投影修复积压/失败、Asynq 重试积压和选课内部错误率。
 - Grafana 自动加载 `CourseForge Overview` Dashboard。
 - CDC 默认订阅 `courseforge\..*`，并写入 `courseforge_<table>` Elasticsearch 索引。
-- `make monitoring-up` 启动 Prometheus、Grafana 和 MySQL Exporter。
-- `make search-up` 启动 Elasticsearch、Kibana 和 CDC Sync。
+- `make monitoring-up` 启动 Prometheus 和 Grafana。
+- `make search-up` 启动 Elasticsearch 和 Kibana。
+- `make cdc-up` 启动 MySQL、Elasticsearch 和 CDC Sync。
 
 ## 项目结构
 

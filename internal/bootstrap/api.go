@@ -6,22 +6,32 @@ import (
 	"errors"
 	"fmt"
 
-	"prizeforge/internal/application/api"
-	applicationcatalog "prizeforge/internal/application/catalog"
-	authdomain "prizeforge/internal/domain/auth"
-	"prizeforge/internal/domain/enrollment"
-	"prizeforge/internal/infrastructure/adapter"
-	authinfra "prizeforge/internal/infrastructure/auth"
-	"prizeforge/internal/infrastructure/query"
-	"prizeforge/internal/infrastructure/repository/catalogrepo"
-	"prizeforge/internal/infrastructure/repository/enrollmentrepo"
-	"prizeforge/internal/infrastructure/repository/outboxrepo"
-	"prizeforge/internal/job"
-	"prizeforge/internal/listener"
-	"prizeforge/internal/middleware"
-	"prizeforge/internal/worker"
-	"prizeforge/pkg/config"
-	"prizeforge/pkg/logger"
+	applicationcatalog "prizeforge/internal/catalog/application"
+	catalogrepo "prizeforge/internal/catalog/infrastructure/mysql"
+	cataloghttp "prizeforge/internal/catalog/transport/http"
+	enrollmentapp "prizeforge/internal/enrollment/application"
+	enrollmentasync "prizeforge/internal/enrollment/async"
+	roundrepo "prizeforge/internal/enrollment/infrastructure/management"
+	enrollmentobservability "prizeforge/internal/enrollment/infrastructure/observability"
+	enrollmentrepo "prizeforge/internal/enrollment/infrastructure/persistence"
+	enrollmenthttp "prizeforge/internal/enrollment/transport/http"
+	identityapp "prizeforge/internal/identity/application"
+	authdomain "prizeforge/internal/identity/domain"
+	identitymysql "prizeforge/internal/identity/infrastructure/mysql"
+	identityquery "prizeforge/internal/identity/infrastructure/query"
+	identitysecurity "prizeforge/internal/identity/infrastructure/security"
+	identityhttp "prizeforge/internal/identity/transport/http"
+	"prizeforge/internal/platform/cache"
+	"prizeforge/internal/platform/config"
+	"prizeforge/internal/platform/database"
+	"prizeforge/internal/platform/http/middleware"
+	"prizeforge/internal/platform/identifier"
+	"prizeforge/internal/platform/observability/logger"
+	"prizeforge/internal/platform/outbox"
+	outboxdispatcher "prizeforge/internal/platform/outbox/dispatcher"
+	outboxrepo "prizeforge/internal/platform/outbox/mysql"
+	"prizeforge/internal/platform/rabbitmq"
+	"prizeforge/internal/platform/taskqueue"
 	httpserver "prizeforge/server/http"
 	adminhttp "prizeforge/server/http/admin"
 	apihttp "prizeforge/server/http/api"
@@ -37,8 +47,8 @@ type HTTPApp struct {
 
 	apiServer        httpserver.Server
 	adminServer      httpserver.Server
-	asynqWorker      *worker.AsynqWorker
-	rabbitMQConsumer *listener.RabbitMQConsumer
+	asynqWorker      *taskqueue.AsynqWorker
+	rabbitMQConsumer *rabbitmq.RabbitMQConsumer
 }
 
 func loadRuntimeConfig() *config.Config {
@@ -59,8 +69,11 @@ func loadRuntimeConfig() *config.Config {
 // NewAdminApp 装配 CourseForge MySQL 与可扩展的 Admin HTTP 骨架。
 func NewAdminApp() *HTTPApp {
 	cfg := loadRuntimeConfig()
-	courseforgeDB := adapter.NewCourseforgeDB(&cfg.Data.Database)
+	courseforgeDB := database.NewCourseforgeDB(&cfg.Data.Database)
 	catalogService := applicationcatalog.NewService(catalogrepo.NewRepository(courseforgeDB))
+	roundManagementService := enrollmentapp.NewRoundManagementService(
+		roundrepo.NewRepository(courseforgeDB),
+	)
 	readinessChecks := common.ReadinessChecks{
 		"courseforge_mysql": databaseReadinessCheck(courseforgeDB),
 	}
@@ -70,7 +83,8 @@ func NewAdminApp() *HTTPApp {
 		adminServer: adminhttp.NewServer(
 			resolveAdminAddr(cfg),
 			readinessChecks,
-			adminhttp.NewCatalogRoutes(catalogService),
+			cataloghttp.NewCatalogRoutes(catalogService),
+			enrollmenthttp.NewRoundAdminRoutes(roundManagementService),
 		),
 	}
 }
@@ -85,75 +99,105 @@ func NewAPIApp() (*HTTPApp, error) {
 		return nil, fmt.Errorf("rabbitmq topic config: %w", err)
 	}
 
-	courseforgeDB := adapter.NewCourseforgeDB(&cfg.Data.Database)
-	redis := adapter.NewRedisClient(&cfg.Data.Redis)
-	asynqClient := adapter.NewAsynqClient(&cfg.Asynq)
+	courseforgeDB := database.NewCourseforgeDB(&cfg.Data.Database)
+	redis := cache.NewRedisClient(&cfg.Data.Redis)
+	asynqClient := taskqueue.NewAsynqClient(&cfg.Asynq)
 
-	conn, err := adapter.NewConnection(&cfg.RabbitMQ)
+	conn, err := rabbitmq.NewConnection(&cfg.RabbitMQ)
 	if err != nil {
 		return nil, fmt.Errorf("rabbitmq: %w", err)
 	}
-	rabbitPublisher, err := adapter.NewRabbitMQPublisher(conn, cfg.RabbitMQ.Publisher.PoolSize)
+	rabbitPublisher, err := rabbitmq.NewRabbitMQPublisher(conn, cfg.RabbitMQ.Publisher.PoolSize)
 	if err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("rabbitmq publisher: %w", err)
 	}
-	publisher := adapter.NewPublisher(rabbitPublisher, &cfg.RabbitMQ)
+	publisher := rabbitmq.NewPublisher(rabbitPublisher, &cfg.RabbitMQ)
 
-	enrollmentRepo := enrollmentrepo.NewRepository(courseforgeDB, redis)
+	ids := identifier.NewOrderIDGenerator()
+	enrollmentObserver := enrollmentobservability.NewPrometheusObserver()
+	enrollmentStores := enrollmentrepo.NewStores(courseforgeDB, redis, ids)
 	catalogService := applicationcatalog.NewService(catalogrepo.NewRepository(courseforgeDB))
-	selectionResultPublisher := job.NewSelectionResultPublisher(enrollmentRepo, publisher)
-	selectionResultRecovery := job.NewSelectionResultRecoveryJob(enrollmentRepo, selectionResultPublisher)
-	outboxDispatcher := job.NewOutboxDispatcher(outboxrepo.NewRepository(courseforgeDB), publisher)
+	selectionResultPublisher := enrollmentasync.NewSelectionResultPublisher(enrollmentStores.Selections, publisher)
+	selectionResultRecovery := enrollmentasync.NewSelectionResultRecoveryJob(
+		enrollmentStores.Selections,
+		selectionResultPublisher,
+	)
+	outboxDispatcher := outboxdispatcher.NewOutboxDispatcher(
+		outboxrepo.NewRepository(courseforgeDB),
+		publisher,
+	)
 
-	rabbitMQConsumer := listener.NewRabbitMQConsumer(
+	rabbitMQConsumer := rabbitmq.NewRabbitMQConsumer(
 		conn,
-		listener.WithPrefetch(cfg.RabbitMQ.Listener.Simple.Prefetch),
-		listener.WithDefaultConcurrency(cfg.RabbitMQ.Listener.Simple.DefaultConcurrency),
-		listener.WithQueueConcurrency(cfg.RabbitMQ.Listener.Simple.Concurrency),
+		rabbitmq.WithPrefetch(cfg.RabbitMQ.Listener.Simple.Prefetch),
+		rabbitmq.WithDefaultConcurrency(cfg.RabbitMQ.Listener.Simple.DefaultConcurrency),
+		rabbitmq.WithQueueConcurrency(cfg.RabbitMQ.Listener.Simple.Concurrency),
 	)
 	rabbitMQConsumer.RegisterListener(
 		cfg.RabbitMQ.Topic.SelectionResult,
-		listener.NewSelectionResultListener(enrollmentRepo),
+		enrollmentasync.NewSelectionResultListener(enrollmentStores.Results),
 	)
 
-	selectionAdmission := enrollment.NewSelectionAdmissionService(
-		enrollmentRepo,
-		enrollmentRepo,
+	selectionAdmission := enrollmentapp.NewSelectionAdmissionService(
+		enrollmentStores.Queries,
+		enrollmentStores.Eligibility,
 	)
-	enrollmentUsecase := api.NewEnrollmentUsecase(
-		enrollmentRepo,
-		enrollmentRepo,
+	enrollmentUsecase := enrollmentapp.NewEnrollmentUsecase(
+		enrollmentStores.Queries,
+		enrollmentStores.Selections,
 		selectionResultPublisher,
 		selectionAdmission,
+		ids,
+		enrollmentObserver,
 	)
-	dropEnrollmentUsecase := api.NewDropEnrollmentUsecase(
-		enrollmentRepo,
-		enrollmentRepo,
-		enrollmentRepo,
+	dropEnrollmentUsecase := enrollmentapp.NewDropEnrollmentUsecase(
+		enrollmentStores.Enrollments,
+		enrollmentStores.Projections,
+		enrollmentStores.Repairs,
+		enrollmentObserver,
 	)
-	waitlistUsecase := api.NewWaitlistUsecase(
-		enrollmentRepo,
+	waitlistUsecase := enrollmentapp.NewWaitlistUsecase(
+		enrollmentStores.Waitlist,
 		enrollmentUsecase,
 		selectionAdmission,
+		ids,
+		enrollmentObserver,
 	)
-	waitlistPromotionJob := job.NewWaitlistPromotionJob(waitlistUsecase, 100)
-	projectionReconciliationUsecase := api.NewProjectionReconciliationUsecase(
-		enrollmentRepo,
-		enrollmentRepo,
+	waitlistPromotionJob := enrollmentasync.NewWaitlistPromotionJob(waitlistUsecase, 100)
+	projectionReconciliationUsecase := enrollmentapp.NewProjectionReconciliationUsecase(
+		enrollmentStores.Repairs,
+		enrollmentStores.Projections,
+		enrollmentObserver,
 	)
-	projectionReconciliationJob := job.NewProjectionReconciliationJob(
+	projectionReconciliationJob := enrollmentasync.NewProjectionReconciliationJob(
 		projectionReconciliationUsecase,
 		100,
 	)
-	asynqWorker := worker.NewAsynqWorker(
+	asynqWorker := taskqueue.NewAsynqWorker(
 		&cfg.Asynq,
-		selectionResultRecovery,
-		waitlistPromotionJob,
-		projectionReconciliationJob,
-		outboxDispatcher,
+		taskqueue.NewScheduledHandler(
+			enrollmentasync.TaskTypeSelectionResultPublish,
+			"@every 1s",
+			selectionResultRecovery.ProcessTask,
+		),
+		taskqueue.NewScheduledHandler(
+			enrollmentasync.TaskTypeProjectionRepair,
+			"@every 5s",
+			projectionReconciliationJob.ProcessTask,
+		),
+		taskqueue.NewScheduledHandler(
+			outbox.TaskTypeDispatch,
+			"@every 5s",
+			outboxDispatcher.ProcessTask,
+		),
+		taskqueue.NewScheduledHandler(
+			enrollmentasync.TaskTypeWaitlistPromotion,
+			"@every 1s",
+			waitlistPromotionJob.ProcessTask,
+		),
 	)
-	tokenManager, err := authinfra.NewStudentTokenManager(
+	tokenManager, err := identitysecurity.NewStudentTokenManager(
 		cfg.Auth.JWT.SigningKey,
 		cfg.Auth.JWT.Issuer,
 		cfg.Auth.JWT.Audience,
@@ -165,12 +209,12 @@ func NewAPIApp() (*HTTPApp, error) {
 	}
 	studentAuth := middleware.NewStudentJWTAuth(tokenManager)
 	authenticator := authdomain.NewAuthenticator(
-		authinfra.NewAccountRepository(courseforgeDB),
-		authinfra.BcryptPasswordVerifier{},
+		identitymysql.NewAccountRepository(courseforgeDB),
+		identitysecurity.BcryptPasswordVerifier{},
 	)
-	authenticationUsecase := api.NewAuthenticationUsecase(
+	authenticationUsecase := identityapp.NewAuthenticationUsecase(
 		authenticator,
-		query.NewSelectionContextQuery(courseforgeDB),
+		identityquery.NewSelectionContextQuery(courseforgeDB),
 		tokenManager,
 	)
 	readinessChecks := common.ReadinessChecks{
@@ -191,13 +235,15 @@ func NewAPIApp() (*HTTPApp, error) {
 		Config: cfg,
 		apiServer: apihttp.NewServer(
 			resolveAPIAddr(cfg),
-			authenticationUsecase,
-			enrollmentUsecase,
-			dropEnrollmentUsecase,
-			waitlistUsecase,
-			catalogService,
 			readinessChecks,
-			studentAuth,
+			identityhttp.NewRoutes(authenticationUsecase, studentAuth),
+			enrollmenthttp.NewRoutes(
+				enrollmentUsecase,
+				dropEnrollmentUsecase,
+				waitlistUsecase,
+				studentAuth,
+			),
+			cataloghttp.NewCatalogRoutes(catalogService, studentAuth),
 		),
 		asynqWorker:      asynqWorker,
 		rabbitMQConsumer: rabbitMQConsumer,
@@ -223,10 +269,10 @@ func (a *HTTPApp) APIServer() httpserver.Server { return a.apiServer }
 func (a *HTTPApp) AdminServer() httpserver.Server { return a.adminServer }
 
 // AsynqWorker returns the API worker.
-func (a *HTTPApp) AsynqWorker() *worker.AsynqWorker { return a.asynqWorker }
+func (a *HTTPApp) AsynqWorker() *taskqueue.AsynqWorker { return a.asynqWorker }
 
 // RabbitMQConsumer returns the API consumer.
-func (a *HTTPApp) RabbitMQConsumer() *listener.RabbitMQConsumer { return a.rabbitMQConsumer }
+func (a *HTTPApp) RabbitMQConsumer() *rabbitmq.RabbitMQConsumer { return a.rabbitMQConsumer }
 
 func resolveAPIAddr(cfg *config.Config) string {
 	if cfg != nil && cfg.Server.API.Addr != "" {

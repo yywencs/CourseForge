@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	authinfra "prizeforge/internal/infrastructure/auth"
-	infraquery "prizeforge/internal/infrastructure/query"
+	authinfra "prizeforge/internal/identity/infrastructure/mysql"
+	infraquery "prizeforge/internal/identity/infrastructure/query"
 )
 
 func TestAuthenticationRepositoryLoadsStudentAndCurrentRound(t *testing.T) {

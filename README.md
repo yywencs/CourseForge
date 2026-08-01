@@ -1,8 +1,9 @@
 # CourseForge
 
-CourseForge 是一个使用 Go 实现的高并发选课系统。选课模块采用 DDD 分层：
-`domain` 定义聚合、领域策略与仓储端口，`application` 负责编排，`infrastructure`
-实现 MySQL、Redis 和消息队列端口。
+CourseForge 是一个使用 Go 实现的高并发选课系统。后端采用限界上下文优先的模块化
+单体结构：`enrollment`、`catalog`、`identity` 各自在模块内部划分 `domain`、
+`application`、`infrastructure` 与入站适配器，共享技术能力统一放在 `platform`。
+详细依赖和数据所有权见 [架构说明](docs/architecture.md)。
 
 ## 快速开始
 
@@ -102,12 +103,12 @@ make build-benchmark
 
 ```text
 cmd/                    API、Admin、CDC 与 benchmark 入口
-internal/application/   选课应用编排
-internal/domain/        选课与通用 Outbox 模型
-internal/infrastructure/数据库、缓存、消息队列与仓储实现
-internal/listener/      通用 RabbitMQ Consumer 与选课结果监听器
-internal/job/           结果恢复与 Outbox 任务
-server/http/            Gin 路由和 Handler
+internal/enrollment/    选课、候补、轮次、异步结果与对应适配器
+internal/catalog/       课程、教学班及对应应用和适配器
+internal/identity/      学生认证、账号查询、JWT 与 HTTP 入口
+internal/platform/      数据库、缓存、任务队列、RabbitMQ、Outbox、CDC 与可观测能力
+internal/bootstrap/     进程级组合根，只负责装配上下文和平台能力
+server/http/            通用 Gin 服务外壳、健康检查与路由注册机制
 tests/integration/      真实依赖集成测试
 monitoring/             Prometheus 与 Grafana
 deploy/                 生产 Compose 与部署脚本
@@ -136,5 +137,6 @@ docs/sql/               CourseForge 数据库初始化脚本
 
 ## 当前边界
 
-选课业务闭环及配套能力已经完成。课程运营后台、视频学习和弹幕是后续独立限界上下文；
-通用 Outbox、CDC、消息队列和可观测基础设施可直接复用。
+选课业务闭环及配套能力已经完成。选课轮次由 `enrollment` 管理，课程和教学班规划由
+`catalog` 管理，账号认证由 `identity` 管理。课程运营扩展、视频学习和弹幕是后续独立
+限界上下文；通用 Outbox、CDC、消息队列和可观测基础设施可直接复用。

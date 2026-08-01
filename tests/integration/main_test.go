@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"prizeforge/internal/infrastructure/adapter"
-	"prizeforge/pkg/cache"
-	"prizeforge/pkg/config"
-	"prizeforge/pkg/logger"
+	"prizeforge/internal/platform/cache"
+	"prizeforge/internal/platform/config"
+	"prizeforge/internal/platform/observability/logger"
+	"prizeforge/internal/platform/rabbitmq"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -93,7 +93,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "ping integration Redis: %v\n", err)
 		os.Exit(1)
 	}
-	integrationRabbitMQConnection, err = adapter.NewConnection(integrationRabbitMQConfig)
+	integrationRabbitMQConnection, err = rabbitmq.NewConnection(integrationRabbitMQConfig)
 	cancel()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect integration RabbitMQ: %v\n", err)

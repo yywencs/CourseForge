@@ -5,47 +5,35 @@ import (
 	"fmt"
 	"net/http"
 
-	"prizeforge/internal/application/api"
-	applicationcatalog "prizeforge/internal/application/catalog"
-	"prizeforge/internal/middleware"
+	"prizeforge/internal/platform/http/middleware"
 	"prizeforge/server/http/common"
 
 	"github.com/gin-gonic/gin"
 )
 
 type Server struct {
-	engine            *gin.Engine
-	httpServer        *http.Server
-	addr              string
-	authUsecase       *api.AuthenticationUsecase
-	enrollmentUsecase *api.EnrollmentUsecase
-	dropUsecase       *api.DropEnrollmentUsecase
-	waitlistUsecase   *api.WaitlistUsecase
-	catalogUsecase    *applicationcatalog.Service
-	readinessChecks   common.ReadinessChecks
-	authMiddleware    gin.HandlerFunc
+	engine          *gin.Engine
+	httpServer      *http.Server
+	addr            string
+	readinessChecks common.ReadinessChecks
+	registrars      []RouteRegistrar
+}
+
+// RouteRegistrar lets each bounded context install its own inbound HTTP adapter.
+type RouteRegistrar interface {
+	RegisterAPIRoutes(*gin.RouterGroup)
 }
 
 func NewServer(
 	addr string,
-	authUsecase *api.AuthenticationUsecase,
-	enrollmentUsecase *api.EnrollmentUsecase,
-	dropUsecase *api.DropEnrollmentUsecase,
-	waitlistUsecase *api.WaitlistUsecase,
-	catalogUsecase *applicationcatalog.Service,
 	readinessChecks common.ReadinessChecks,
-	authMiddleware gin.HandlerFunc,
+	registrars ...RouteRegistrar,
 ) *Server {
 	s := &Server{
-		engine:            gin.New(),
-		addr:              addr,
-		authUsecase:       authUsecase,
-		enrollmentUsecase: enrollmentUsecase,
-		dropUsecase:       dropUsecase,
-		waitlistUsecase:   waitlistUsecase,
-		catalogUsecase:    catalogUsecase,
-		readinessChecks:   readinessChecks,
-		authMiddleware:    authMiddleware,
+		engine:          gin.New(),
+		addr:            addr,
+		readinessChecks: readinessChecks,
+		registrars:      registrars,
 	}
 
 	s.engine.Use(gin.Recovery())

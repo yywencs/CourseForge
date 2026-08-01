@@ -10,9 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"prizeforge/internal/infrastructure/adapter"
-	"prizeforge/internal/listener"
-	"prizeforge/pkg/rabbitmq"
+	"prizeforge/internal/platform/rabbitmq"
 	"prizeforge/pkg/xrand"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -26,14 +24,14 @@ func TestRabbitMQConsumerProcessesOneQueueWithMultipleIndependentChannels(t *tes
 
 	topic := "courseforge.integration.consumer.concurrent." + xrand.RandomNumeric(12)
 	trackIntegrationRabbitMQTopology(t, topic)
-	connection, err := adapter.NewConnection(integrationRabbitMQConfig)
+	connection, err := rabbitmq.NewConnection(integrationRabbitMQConfig)
 	if err != nil {
 		t.Fatalf("connect RabbitMQ concurrent consumer test: %v", err)
 	}
-	consumer := listener.NewRabbitMQConsumer(
+	consumer := rabbitmq.NewRabbitMQConsumer(
 		connection,
-		listener.WithPrefetch(1),
-		listener.WithQueueConcurrency(map[string]int{topic + "_queue": 3}),
+		rabbitmq.WithPrefetch(1),
+		rabbitmq.WithQueueConcurrency(map[string]int{topic + "_queue": 3}),
 	)
 	t.Cleanup(consumer.Shutdown)
 
@@ -94,11 +92,11 @@ func TestRabbitMQConsumerRequeuesRetryableFailure(t *testing.T) {
 
 	topic := "courseforge.integration.consumer.retry." + xrand.RandomNumeric(12)
 	trackIntegrationRabbitMQTopology(t, topic)
-	connection, err := adapter.NewConnection(integrationRabbitMQConfig)
+	connection, err := rabbitmq.NewConnection(integrationRabbitMQConfig)
 	if err != nil {
 		t.Fatalf("connect RabbitMQ retry test: %v", err)
 	}
-	consumer := listener.NewRabbitMQConsumer(connection)
+	consumer := rabbitmq.NewRabbitMQConsumer(connection)
 	t.Cleanup(consumer.Shutdown)
 	retryListener := newIntegrationRetryOnceListener()
 	consumer.RegisterListener(topic, retryListener)
@@ -184,13 +182,13 @@ func (l *integrationRetryOnceListener) Handle(_ context.Context, body []byte) (b
 	return call.retry, call.err
 }
 
-func newIntegrationTopicPublisher(t *testing.T, connection *amqp.Connection) *adapter.Publisher {
+func newIntegrationTopicPublisher(t *testing.T, connection *amqp.Connection) *rabbitmq.Publisher {
 	t.Helper()
-	rabbitPublisher, err := adapter.NewRabbitMQPublisher(connection, 1)
+	rabbitPublisher, err := rabbitmq.NewRabbitMQPublisher(connection, 1)
 	if err != nil {
 		t.Fatalf("NewRabbitMQPublisher() error = %v, want nil", err)
 	}
-	return adapter.NewPublisher(rabbitPublisher, integrationRabbitMQConfig)
+	return rabbitmq.NewPublisher(rabbitPublisher, integrationRabbitMQConfig)
 }
 
 func waitIntegrationListenerCall(t *testing.T, ctx context.Context, calls <-chan integrationListenerCall) integrationListenerCall {

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"prizeforge/internal/domain/outbox"
-	"prizeforge/internal/infrastructure/repository/outboxrepo"
+	"prizeforge/internal/platform/outbox"
+	"prizeforge/internal/platform/outbox/mysql"
 	"prizeforge/pkg/xrand"
 )
 

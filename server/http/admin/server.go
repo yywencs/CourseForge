@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"prizeforge/internal/middleware"
+	"prizeforge/internal/platform/http/middleware"
 	"prizeforge/server/http/common"
 
 	"github.com/gin-gonic/gin"

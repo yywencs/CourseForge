@@ -10,11 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"prizeforge/internal/domain/enrollment"
-	"prizeforge/internal/infrastructure/adapter"
-	"prizeforge/internal/infrastructure/repository/enrollmentrepo"
-	"prizeforge/internal/job"
-	"prizeforge/internal/listener"
+	application "prizeforge/internal/enrollment/application"
+	enrollmentasync "prizeforge/internal/enrollment/async"
+	"prizeforge/internal/enrollment/domain"
+	"prizeforge/internal/platform/rabbitmq"
 	"prizeforge/pkg/xrand"
 )
 
@@ -53,7 +52,7 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		requestID,
 	)
 
-	repo := enrollmentrepo.NewRepository(integrationCourseforgeDB, integrationRedis)
+	repo := newEnrollmentRepositoryFixture(integrationCourseforgeDB, integrationRedis)
 	round, err := repo.QuerySelectionRound(context.Background(), roundID)
 	if err != nil || round == nil || !round.AcceptingAt(now) {
 		t.Fatalf("QuerySelectionRound() = %#v, %v", round, err)
@@ -77,16 +76,16 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		Credits:         class.Credits,
 		Source:          enrollment.ApplicationSourceWeb,
 	}
-	application, err := enrollment.NewSelectionApplication(applicationID, request, now)
+	selectionApplication, err := enrollment.NewSelectionApplication(applicationID, request, now)
 	if err != nil {
 		t.Fatalf("NewSelectionApplication() error = %v", err)
 	}
 
-	reservation, err := repo.ReserveSelection(context.Background(), application)
+	reservation, err := repo.ReserveSelection(context.Background(), selectionApplication)
 	if err != nil {
 		t.Fatalf("ReserveSelection() error = %v", err)
 	}
-	if reservation.Status != enrollment.ReservationStatusAcquired ||
+	if reservation.Status != application.ReservationStatusAcquired ||
 		reservation.Application.State != enrollment.ApplicationStateReserved {
 		t.Fatalf("ReserveSelection() = %#v", reservation)
 	}
@@ -102,7 +101,7 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		pendingRecord.Application.ApplicationID != applicationID ||
 		pendingRecord.Application.State != enrollment.ApplicationStateReserved ||
 		pendingRecord.Publication != nil ||
-		pendingRecord.MySQLPersisted {
+		pendingRecord.DurablyPersisted {
 		t.Fatalf("QuerySelectionByRequest(pending) = %#v, %v", pendingRecord, err)
 	}
 
@@ -118,12 +117,12 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteSelection() error = %v", err)
 	}
-	if publication.StreamID == "" || publication.BrokerConfirmed {
+	if publication.DeliveryCursor == "" || publication.DeliveryConfirmed {
 		t.Fatalf("CompleteSelection() publication = %#v", publication)
 	}
 	reusedPublication, err := repo.CompleteSelection(context.Background(), result)
 	if err != nil ||
-		reusedPublication.StreamID != publication.StreamID ||
+		reusedPublication.DeliveryCursor != publication.DeliveryCursor ||
 		reusedPublication.Result.ApplicationID != applicationID {
 		t.Fatalf("CompleteSelection(retry) = %#v, %v", reusedPublication, err)
 	}
@@ -138,7 +137,7 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		completedRecord.Publication == nil ||
 		completedRecord.Application == nil ||
 		completedRecord.Application.State != enrollment.ApplicationStateSelected ||
-		completedRecord.MySQLPersisted {
+		completedRecord.DurablyPersisted {
 		t.Fatalf("QuerySelectionByRequest(result) = %#v, %v", completedRecord, err)
 	}
 	if length := integrationRedisClient.XLen(
@@ -153,26 +152,26 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 	defer cancel()
 	topic := "prizeforge.integration.selection-result." + xrand.RandomNumeric(12)
 	trackIntegrationRabbitMQTopology(t, topic)
-	connection, err := adapter.NewConnection(integrationRabbitMQConfig)
+	connection, err := rabbitmq.NewConnection(integrationRabbitMQConfig)
 	if err != nil {
 		t.Fatalf("connect selection-result RabbitMQ: %v", err)
 	}
-	consumer := listener.NewRabbitMQConsumer(connection)
+	consumer := rabbitmq.NewRabbitMQConsumer(connection)
 	t.Cleanup(consumer.Shutdown)
-	consumer.RegisterListener(topic, listener.NewSelectionResultListener(repo))
+	consumer.RegisterListener(topic, enrollmentasync.NewSelectionResultListener(repo))
 	if err := consumer.Start(ctx); err != nil {
 		t.Fatalf("start selection-result consumer: %v", err)
 	}
 
-	rabbitPublisher, err := adapter.NewRabbitMQPublisher(connection, 1)
+	rabbitPublisher, err := rabbitmq.NewRabbitMQPublisher(connection, 1)
 	if err != nil {
 		t.Fatalf("create selection-result publisher: %v", err)
 	}
 	publisherConfig := *integrationRabbitMQConfig
 	publisherConfig.Topic.SelectionResult = topic
-	selectionPublisher := job.NewSelectionResultPublisher(
+	selectionPublisher := enrollmentasync.NewSelectionResultPublisher(
 		repo,
-		adapter.NewPublisher(rabbitPublisher, &publisherConfig),
+		rabbitmq.NewPublisher(rabbitPublisher, &publisherConfig),
 	)
 	if err := selectionPublisher.Publish(ctx, publication); err != nil {
 		t.Fatalf("publish selection result with confirm: %v", err)
@@ -210,7 +209,7 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		context.Background(), applicationID, studentID,
 	)
 	if err != nil || applicationRecord == nil ||
-		!applicationRecord.MySQLPersisted ||
+		!applicationRecord.DurablyPersisted ||
 		applicationRecord.Application.ApplicationID != applicationID {
 		t.Fatalf("QuerySelectionApplication() = %#v, %v", applicationRecord, err)
 	}
@@ -265,7 +264,7 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		persistedRecord.Application.ApplicationID != applicationID ||
 		persistedRecord.Application.State != enrollment.ApplicationStateSelected ||
 		persistedRecord.Publication != nil ||
-		!persistedRecord.MySQLPersisted {
+		!persistedRecord.DurablyPersisted {
 		t.Fatalf("QuerySelectionByRequest(MySQL) = %#v, %v", persistedRecord, err)
 	}
 }
@@ -373,10 +372,10 @@ func TestEnrollmentRepositoryConcurrentReservationDoesNotOversell(t *testing.T) 
 	})
 
 	type reservationResult struct {
-		reservation *enrollment.SelectionReservation
+		reservation *application.SelectionReservation
 		err         error
 	}
-	repo := enrollmentrepo.NewRepository(integrationCourseforgeDB, integrationRedis)
+	repo := newEnrollmentRepositoryFixture(integrationCourseforgeDB, integrationRedis)
 	start := make(chan struct{})
 	results := make(chan reservationResult, studentCount)
 	var workers sync.WaitGroup
@@ -418,7 +417,7 @@ func TestEnrollmentRepositoryConcurrentReservationDoesNotOversell(t *testing.T) 
 		switch {
 		case result.err == nil:
 			if result.reservation == nil ||
-				result.reservation.Status != enrollment.ReservationStatusAcquired ||
+				result.reservation.Status != application.ReservationStatusAcquired ||
 				result.reservation.Application == nil ||
 				result.reservation.Application.State != enrollment.ApplicationStateReserved {
 				t.Fatalf("unexpected successful reservation: %#v", result.reservation)
@@ -515,7 +514,7 @@ func TestEnrollmentRepositoryDropAndProjectionRepair(t *testing.T) {
 		t.Fatalf("seed drop Redis: %v", err)
 	}
 
-	repo := enrollmentrepo.NewRepository(db, integrationRedis)
+	repo := newEnrollmentRepositoryFixture(db, integrationRedis)
 	target, err := repo.QueryStudentEnrollment(context.Background(), enrollmentID, studentID)
 	if err != nil || target == nil {
 		t.Fatalf("QueryStudentEnrollment() = %#v, %v", target, err)
@@ -583,7 +582,7 @@ func TestEnrollmentRepositoryWaitlistLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWaitlistEntry() error = %v", err)
 	}
-	repo := enrollmentrepo.NewRepository(integrationCourseforgeDB, integrationRedis)
+	repo := newEnrollmentRepositoryFixture(integrationCourseforgeDB, integrationRedis)
 	joined, err := repo.JoinWaitlist(context.Background(), entry)
 	if err != nil || joined.Position == 0 {
 		t.Fatalf("JoinWaitlist() = %#v, %v", joined, err)
@@ -679,7 +678,7 @@ func TestEnrollmentRepositoryLoadsEligibilitySnapshot(t *testing.T) {
 		t.Fatalf("seed grade scope: %v", err)
 	}
 
-	repo := enrollmentrepo.NewRepository(db, integrationRedis)
+	repo := newEnrollmentRepositoryFixture(db, integrationRedis)
 	snapshot, err := repo.QueryEligibilitySnapshot(
 		context.Background(), studentID, termID, courseID, classID,
 	)

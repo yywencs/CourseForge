@@ -28,6 +28,7 @@ Handler → Application command → Repository load → Domain behavior → Repo
 - 禁止把 `state == planned`、能否删除、能否绑定等业务判断只写在 Repository。
 - 禁止由 Application 或 Infrastructure 任意修改领域状态；通过实体行为或领域服务完成。
 - 将 Repository 接口定义在消费它的 Domain 或 Application 层，不让上层依赖具体数据库实现。
+- 同一消费包的 Repository 接口集中放在独立的 `repository.go`；Application 消费的端口留在 Application，不为统一目录而下沉到 Domain。
 - 将事务编排放在 Application；让 Domain 保持与数据库框架无关。
 - 允许 Infrastructure 使用行锁、版本号和条件更新防止并发漂移，但它们只是领域规则的并发兜底。
 - 条件写入影响零行时返回并发冲突；不要在 Infrastructure 中重新发明业务含义。

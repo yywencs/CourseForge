@@ -5,7 +5,7 @@ import (
 	"log"
 	"os/signal"
 	"prizeforge/internal/bootstrap"
-	"prizeforge/pkg/logger"
+	"prizeforge/internal/platform/observability/logger"
 	"syscall"
 	"time"
 )

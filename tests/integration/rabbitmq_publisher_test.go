@@ -10,8 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"prizeforge/internal/infrastructure/adapter"
-	"prizeforge/pkg/rabbitmq"
+	"prizeforge/internal/platform/rabbitmq"
 	"prizeforge/pkg/xrand"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -24,11 +23,11 @@ func TestRabbitMQPublisherRoutesEvent(t *testing.T) {
 	defer cancel()
 
 	exchangeName := "courseforge.integration.publisher." + xrand.RandomNumeric(12)
-	rabbitPublisher, err := adapter.NewRabbitMQPublisher(integrationRabbitMQConnection, 1)
+	rabbitPublisher, err := rabbitmq.NewRabbitMQPublisher(integrationRabbitMQConnection, 1)
 	if err != nil {
 		t.Fatalf("NewRabbitMQPublisher() error = %v, want nil", err)
 	}
-	publisher := adapter.NewPublisher(rabbitPublisher, integrationRabbitMQConfig)
+	publisher := rabbitmq.NewPublisher(rabbitPublisher, integrationRabbitMQConfig)
 
 	// 第一次发布用于验证项目发布器能够自行声明 Exchange；因为此时没有绑定队列，
 	// mandatory return 必须让调用方收到错误，Outbox 才不会误标 completed。
@@ -114,7 +113,7 @@ func TestRabbitMQPublisherPoolPublishesThroughIndependentChannels(t *testing.T) 
 		poolSize     = 3
 		messageCount = 30
 	)
-	rabbitPublisher, err := adapter.NewRabbitMQPublisher(integrationRabbitMQConnection, poolSize)
+	rabbitPublisher, err := rabbitmq.NewRabbitMQPublisher(integrationRabbitMQConnection, poolSize)
 	if err != nil {
 		t.Fatalf("NewRabbitMQPublisher(pool=%d) error = %v", poolSize, err)
 	}

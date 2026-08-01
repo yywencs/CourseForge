@@ -1,0 +1,4 @@
+interface:
+  display_name: "Go DDD 分层守卫"
+  short_description: "在编码前后检查 Go DDD 分层与业务不变量归属"
+  default_prompt: "使用 $guard-go-ddd-layers 审查并实现这个 Go DDD 需求，确保领域规则不会下沉到基础设施层。"

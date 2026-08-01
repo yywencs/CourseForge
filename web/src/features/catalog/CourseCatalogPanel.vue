@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { Search, SlidersHorizontal } from '@lucide/vue'
 import { useQuery } from '@tanstack/vue-query'
-import { computed, shallowRef } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 
+import { listStudentCatalog } from '@/api/catalog'
 import { listMyEnrollments, listMyWaitlist } from '@/api/enrollment'
 import CourseCard from '@/components/CourseCard.vue'
 import { useCatalogActions } from '@/composables/useCatalogActions'
-import { courseCatalog } from '@/data/courseCatalog'
+import { courseCatalog, replaceCourseCatalog } from '@/data/courseCatalog'
 import { useSessionStore } from '@/stores/session'
 import type { TeachingClassSummary } from '@/types/enrollment'
 import CourseMediaRail from './CourseMediaRail.vue'
@@ -21,6 +22,18 @@ const customCourses = shallowRef<TeachingClassSummary[]>([])
 const showDirectEntry = shallowRef(false)
 const { activeTeachingClassId, activeAction, selectionMutation, waitlistMutation } =
   useCatalogActions()
+
+const catalogQuery = useQuery({
+  queryKey: computed(() => ['course-catalog', session.context.roundId]),
+  queryFn: () => listStudentCatalog(session.context.roundId),
+  enabled: computed(() => session.isAuthenticated && session.context.roundId > 0),
+})
+
+watch(
+  [() => catalogQuery.data.value?.items, () => session.context.roundId],
+  ([items, roundId]) => replaceCourseCatalog(items ?? [], roundId),
+  { immediate: true },
+)
 
 const enrollmentsQuery = useQuery({
   queryKey: computed(() => ['my-enrollments', session.studentId, session.context.termId]),
@@ -108,12 +121,20 @@ function submitDirect(course: TeachingClassSummary): void {
           暂时无法同步已有选课或候补状态，请稍后刷新重试。
         </p>
 
+        <p v-if="catalogQuery.isError.value" class="catalog-sync-warning" role="alert">
+          课程目录暂时无法加载，请检查 API 和数据库迁移后重试。
+        </p>
+
         <section class="course-ledger" aria-labelledby="course-ledger-title">
           <header>
             <h2 id="course-ledger-title">本轮课程目录</h2>
             <span>按课程信息逐项比较</span>
           </header>
-          <div v-if="filteredCourses.length" class="course-list">
+          <div v-if="catalogQuery.isLoading.value" class="catalog-empty" aria-live="polite">
+            <strong>正在加载课程目录</strong>
+            <span>请稍候。</span>
+          </div>
+          <div v-else-if="filteredCourses.length" class="course-list">
             <CourseCard
               v-for="(course, index) in filteredCourses"
               :key="course.id"

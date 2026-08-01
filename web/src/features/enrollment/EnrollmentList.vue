@@ -21,7 +21,6 @@ const emit = defineEmits<{
   <section class="records-panel">
     <header>
       <div>
-        <span>Official records</span>
         <h2>正式选课</h2>
       </div>
       <strong>{{ items.filter((item) => item.state === 'enrolled').length }} 门修读中</strong>
@@ -55,7 +54,7 @@ const emit = defineEmits<{
       </article>
     </div>
     <div v-else class="records-state">
-      当前学期还没有正式选课记录。选课结果异步落库后会出现在这里。
+      当前学期还没有正式选课记录。选课成功后会显示在这里。
     </div>
   </section>
 </template>
@@ -78,7 +77,7 @@ const emit = defineEmits<{
 }
 
 .records-panel header span {
-  color: #98630c;
+  color: var(--signal);
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 750;
@@ -118,8 +117,8 @@ const emit = defineEmits<{
   height: 38px;
   place-items: center;
   border-radius: 10px;
-  color: var(--brand);
-  background: #def2eb;
+  color: white;
+  background: var(--brand);
 }
 
 .record-item__main {
@@ -154,10 +153,10 @@ const emit = defineEmits<{
   align-items: center;
   gap: 5px;
   padding: 8px 10px;
-  border: 1px solid #e4c9c5;
+  border: 1px solid #e1aaa4;
   border-radius: 8px;
-  color: #9a3b34;
-  background: #fff7f5;
+  color: var(--danger);
+  background: #fff2ef;
   font-size: 11px;
   cursor: pointer;
 }

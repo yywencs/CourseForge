@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-01T12:50:04+08:00",
+  "title": "Design System: CourseForge",
+  "extensions": {
+    "colorMeta": {
+      "ink": { "role": "neutral", "displayName": "Programme Ink", "canonical": "#252a2f", "tonalRamp": ["#252a2f", "#2b2b2b", "#454545", "#666666", "#8b8b8b", "#b3b3b3", "#d9d9d9", "#f2f2f2"] },
+      "ink-soft": { "role": "neutral", "displayName": "Soft Ink", "canonical": "#424a51", "tonalRamp": ["#171717", "#424a51", "#494949", "#6a6a6a", "#8f8f8f", "#b6b6b6", "#dcdcdc", "#f3f3f3"] },
+      "canvas": { "role": "neutral", "displayName": "Warm Canvas", "canonical": "#f5f4f1", "tonalRamp": ["#29251f", "#4a4338", "#6c6253", "#918575", "#b8ad9e", "#d6cdc0", "#ebe4da", "#f8f5ef"] },
+      "surface": { "role": "neutral", "displayName": "Paper Surface", "canonical": "#ffffff", "tonalRamp": ["#2b2924", "#4c4941", "#6f6b61", "#958f83", "#bdb6aa", "#ddd6cb", "#f2ede5", "#ffffff"] },
+      "surface-muted": { "role": "neutral", "displayName": "Muted Paper", "canonical": "#efefeb", "tonalRamp": ["#28251f", "#49443a", "#6a6458", "#8e877a", "#b5ada0", "#d3ccbf", "#efefeb", "#f8f5ef"] },
+      "academic-blue": { "role": "primary", "displayName": "Academic Blue", "canonical": "#506d8f", "tonalRamp": ["#071744", "#0a2366", "#0d2e89", "#103aac", "#3158cf", "#6b85df", "#a8b7ee", "#edf2f6"] },
+      "academic-blue-deep": { "role": "primary", "displayName": "Deep Academic Blue", "canonical": "#405d7e", "tonalRamp": ["#061338", "#081d54", "#092671", "#0b308e", "#284bad", "#6178ca", "#a0afe4", "#e5e9f7"] },
+      "academic-blue-pale": { "role": "primary", "displayName": "Pale Academic Blue", "canonical": "#edf2f6", "tonalRamp": ["#141a35", "#26315e", "#3d4b87", "#5e6dab", "#8794ca", "#b2bce4", "#d4dcf5", "#f0f3ff"] },
+      "signal-orange": { "role": "secondary", "displayName": "Signal Orange", "canonical": "#a96f52", "tonalRamp": ["#4b1003", "#761a05", "#a52408", "#d5320c", "#a96f52", "#ff8058", "#ffb39a", "#f7efea"] },
+      "signal-orange-pale": { "role": "secondary", "displayName": "Pale Signal Orange", "canonical": "#f7efea", "tonalRamp": ["#3d1d13", "#663225", "#914b39", "#bb6c57", "#dc9581", "#efbbaa", "#f9d8cd", "#f7efea"] },
+      "success": { "role": "tertiary", "displayName": "Success Green", "canonical": "#39735c", "tonalRamp": ["#08291c", "#0d422e", "#115c3e", "#39735c", "#3e916d", "#72b397", "#acd5c1", "#e6f4ed"] },
+      "warning": { "role": "tertiary", "displayName": "Warning Umber", "canonical": "#8a642b", "tonalRamp": ["#321d00", "#523000", "#754400", "#8a642b", "#bd7a28", "#d69f61", "#ebc99e", "#fff1d8"] },
+      "danger": { "role": "tertiary", "displayName": "Danger Red", "canonical": "#a34c46", "tonalRamp": ["#3c0c09", "#61120e", "#891a14", "#ad261d", "#cc4b41", "#df8179", "#efb8b2", "#fff0ed"] },
+      "muted": { "role": "neutral", "displayName": "Editorial Muted", "canonical": "#687078", "tonalRamp": ["#22211e", "#3c3a35", "#55534c", "#706e66", "#929087", "#b8b5ad", "#dad7d0", "#f2f0eb"] },
+      "line": { "role": "neutral", "displayName": "Lead Line", "canonical": "#c8c8c2", "tonalRamp": ["#292723", "#45423d", "#615e57", "#807c74", "#c8c8c2", "#c5c1b8", "#dfdcd5", "#f4f2ed"] },
+      "line-soft": { "role": "neutral", "displayName": "Soft Lead Line", "canonical": "#e4e3de", "tonalRamp": ["#2a2722", "#49453e", "#69645b", "#8c867c", "#b1aba1", "#cec8be", "#e5e0d8", "#f7f4ee"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Programme Display", "purpose": "课程目录与登录海报的大标题；Archivo 只覆盖拉丁字形，中文回退到 Noto Sans SC。" },
+      "headline": { "displayName": "Page Headline", "purpose": "学生页和教务页的页面级标题。" },
+      "title": { "displayName": "Course Title", "purpose": "课程名、面板名和关键区块标题。" },
+      "body": { "displayName": "Chinese Body", "purpose": "课程说明、操作解释和页面正文。" },
+      "label": { "displayName": "Action Label", "purpose": "按钮、导航、状态与字段标签。" },
+      "mono": { "displayName": "Ledger Mono", "purpose": "课程代码、编号和机器可读标识。" }
+    },
+    "shadows": [
+      { "name": "flat-card", "value": "none", "purpose": "课程、课表、候补和教务面板的默认状态。" },
+      { "name": "field-focus", "value": "0 0 0 3px rgba(80, 109, 143, 0.1)", "purpose": "输入焦点的低强度学术蓝反馈。" },
+      { "name": "modal-lift", "value": "0 36px 100px rgba(0, 0, 0, 0.32)", "purpose": "课程预览对话框真正浮起时使用。" }
+    ],
+    "motion": [
+      { "name": "state-fast", "value": "160ms ease", "purpose": "导航颜色与背景状态变化。" },
+      { "name": "state-standard", "value": "180ms ease-out", "purpose": "课程悬停与直接录入面板进出。" },
+      { "name": "reduced-motion", "value": "0.01ms", "purpose": "用户启用减少动态效果时，将动画与过渡压缩至近乎即时。" }
+    ],
+    "breakpoints": [
+      { "name": "catalog-stack", "value": "1100px" },
+      { "name": "student-rail-compact", "value": "1050px" },
+      { "name": "login-stack", "value": "900px" },
+      { "name": "admin-rail-compact", "value": "800px" },
+      { "name": "student-mobile", "value": "680px" },
+      { "name": "admin-mobile", "value": "580px" },
+      { "name": "minimum-viewport", "value": "320px" }
+    ]
+  },
+  "components": [
+      {
+        "name": "Primary Button",
+        "kind": "button",
+        "refersTo": "button-primary",
+        "description": "登录、选课和确定性推进的主动作。",
+        "html": "<button class=\"ds-btn-primary\" type=\"button\">选择这门课</button>",
+        "css": ".ds-btn-primary { min-height: 40px; padding: 9px 10px; border: 1px solid var(--brand, #506d8f); border-radius: 8px; color: white; background: var(--brand, #506d8f); font: 750 11px/1.4 'Noto Sans SC Variable', 'PingFang SC', sans-serif; cursor: pointer; transition: background 180ms ease-out; } .ds-btn-primary:hover { background: #405d7e; } .ds-btn-primary:focus-visible { outline: 3px solid rgba(80, 109, 143, 0.28); outline-offset: 3px; } .ds-btn-primary:active { background: #092a86; }"
+      },
+      {
+        "name": "Waitlist Button",
+        "kind": "button",
+        "refersTo": "button-waitlist",
+        "description": "满额课程的候补动作，以信号橙区别于主选课动作。",
+        "html": "<button class=\"ds-btn-waitlist\" type=\"button\">加入候补</button>",
+        "css": ".ds-btn-waitlist { min-height: 40px; padding: 9px 10px; border: 1px solid var(--signal, #a96f52); border-radius: 8px; color: var(--signal, #a96f52); background: transparent; font: 750 11px/1.4 'Noto Sans SC Variable', 'PingFang SC', sans-serif; cursor: pointer; transition: color 180ms ease-out, background 180ms ease-out; } .ds-btn-waitlist:hover { color: white; background: var(--signal, #a96f52); } .ds-btn-waitlist:focus-visible { outline: 3px solid rgba(80, 109, 143, 0.28); outline-offset: 3px; } .ds-btn-waitlist:active { background: #d5320c; }"
+      },
+      {
+        "name": "Text Field",
+        "kind": "input",
+        "refersTo": "input-default",
+        "description": "登录和直接输入使用的纸面字段。",
+        "html": "<label class=\"ds-field\"><span>学号</span><input placeholder=\"请输入学号\" /></label>",
+        "css": ".ds-field { display: grid; gap: 7px; color: var(--ink, #252a2f); font: 700 11px/1.4 'Noto Sans SC Variable', 'PingFang SC', sans-serif; } .ds-field input { min-height: 50px; padding: 12px 13px; border: 1px solid var(--ink, #252a2f); border-radius: 8px; color: var(--ink, #252a2f); background: var(--surface, #ffffff); font: 400 14px/1.7 'Noto Sans SC Variable', 'PingFang SC', sans-serif; outline: none; } .ds-field input:hover { border-color: var(--brand, #506d8f); } .ds-field input:focus-visible { border-color: var(--brand, #506d8f); box-shadow: 0 0 0 3px rgba(80, 109, 143, 0.1); }"
+      },
+      {
+        "name": "Active Navigation Item",
+        "kind": "nav",
+        "refersTo": "nav-active",
+        "description": "墨黑导航轨道中的当前学生端位置。",
+        "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-item is-active\" href=\"#\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 19.5A2.5 2.5 0 0 1 6.5 17H20V5H6.5A2.5 2.5 0 0 0 4 7.5z M4 7.5v12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\"/></svg><span>选课中心</span></a></nav>",
+        "css": ".ds-nav { width: 210px; padding: 16px; background: var(--ink, #252a2f); } .ds-nav-item { position: relative; display: grid; grid-template-columns: 26px 1fr; align-items: center; gap: 9px; min-height: 46px; padding: 10px 11px; color: rgba(255,255,255,.62); font: 620 13px/1.4 'Noto Sans SC Variable', 'PingFang SC', sans-serif; text-decoration: none; transition: color 160ms ease, background 160ms ease; } .ds-nav-item svg { width: 20px; height: 20px; } .ds-nav-item:hover, .ds-nav-item.is-active { color: white; background: var(--brand, #506d8f); } .ds-nav-item.is-active::before { position: absolute; inset: 8px auto 8px -16px; width: 4px; background: var(--signal, #a96f52); content: ''; } .ds-nav-item:focus-visible { outline: 3px solid rgba(255,255,255,.42); outline-offset: 3px; }"
+      },
+      {
+        "name": "Course Tag",
+        "kind": "chip",
+        "description": "课程属性的非交互标签。",
+        "html": "<span class=\"ds-course-tag\">通识选修</span>",
+        "css": ".ds-course-tag { display: inline-block; padding: 3px 6px; border: 1px solid var(--line, #c8c8c2); border-radius: 5px; color: var(--muted, #687078); background: transparent; font: 400 9px/1.4 'Noto Sans SC Variable', 'PingFang SC', sans-serif; }"
+      },
+      {
+        "name": "Course Programme Entry",
+        "kind": "card",
+        "refersTo": "card-course",
+        "description": "把编号、课程判断信息、名额与动作保持在同一行的签名课程条目。",
+        "html": "<article class=\"ds-course\"><div class=\"ds-course-index\">01</div><div class=\"ds-course-copy\"><code>CS101</code><h3>人工智能导论</h3><p>课程内容、教师、时间与地点在同一条目中清楚呈现。</p></div><div class=\"ds-course-seat\"><small>剩余 12 个名额</small><button type=\"button\">选择这门课</button></div></article>",
+        "css": ".ds-course { display: grid; max-width: 760px; grid-template-columns: 76px minmax(240px,1fr) 170px; overflow: hidden; border: 1px solid var(--ink, #252a2f); border-radius: 14px; color: var(--ink, #252a2f); background: var(--surface, #ffffff); transition: background 180ms ease-out; } .ds-course:hover { background: #faf7f0; } .ds-course-index { display: grid; place-items: start center; padding-top: 21px; border-right: 1px solid var(--line, #c8c8c2); color: var(--brand, #506d8f); font: 820 40px/1 'Archivo Variable', 'Noto Sans SC Variable', sans-serif; letter-spacing: -.05em; } .ds-course-copy { padding: 20px; } .ds-course-copy code { color: var(--brand, #506d8f); font: 750 10px/1.4 SFMono-Regular, 'Cascadia Code', Menlo, monospace; letter-spacing: .04em; } .ds-course-copy h3 { margin: 8px 0 7px; font: 760 28px/1.1 'Archivo Variable', 'Noto Sans SC Variable', sans-serif; letter-spacing: -.03em; } .ds-course-copy p { margin: 0; color: var(--muted, #687078); font: 400 11px/1.65 'Noto Sans SC Variable', sans-serif; } .ds-course-seat { display: grid; align-content: center; gap: 10px; padding: 18px; border-left: 1px solid var(--line-soft, #e4e3de); } .ds-course-seat small { color: var(--success, #39735c); font: 700 11px/1.4 'Noto Sans SC Variable', sans-serif; } .ds-course-seat button { min-height: 40px; border: 1px solid var(--brand, #506d8f); border-radius: 8px; color: white; background: var(--brand, #506d8f); font-weight: 750; cursor: pointer; } .ds-course-seat button:hover { background: #405d7e; } .ds-course-seat button:focus-visible { outline: 3px solid rgba(80,109,143,.28); outline-offset: 3px; }"
+      },
+      {
+        "name": "Live Feature Reservation",
+        "kind": "custom",
+        "description": "直播服务未接入时的诚实功能预留，不表现为可用直播。",
+        "html": "<section class=\"ds-live\"><header><span aria-hidden=\"true\">◉</span><strong>课程直播宣讲</strong></header><div><b>功能预留</b><h3>在选课前，<br>先听老师讲清楚。</h3><p>直播服务接入后，这里会显示课程宣讲、开始时间和提醒入口。</p><button type=\"button\" disabled>直播提醒即将开放</button></div></section>",
+        "css": ".ds-live { width: 320px; overflow: hidden; border: 1px solid var(--signal, #a96f52); border-radius: 14px; color: var(--ink, #252a2f); background: var(--surface, #ffffff); } .ds-live header { display: flex; align-items: center; gap: 8px; min-height: 45px; padding: 11px 15px; color: white; background: var(--signal, #a96f52); font: 700 12px/1.4 'Noto Sans SC Variable', sans-serif; } .ds-live > div { padding: 18px; } .ds-live b { color: var(--signal, #a96f52); font: 760 11px/1.4 'Archivo Variable', 'Noto Sans SC Variable', sans-serif; letter-spacing: .08em; } .ds-live h3 { margin: 9px 0; font: 760 27px/1.12 'Archivo Variable', 'Noto Sans SC Variable', sans-serif; letter-spacing: -.035em; } .ds-live p { margin: 0; color: var(--muted, #687078); font: 400 11px/1.7 'Noto Sans SC Variable', sans-serif; } .ds-live button { width: 100%; margin-top: 15px; padding: 10px; border: 1px solid var(--line, #c8c8c2); border-radius: 8px; color: var(--muted, #687078); background: var(--surface-muted, #efefeb); cursor: not-allowed; }"
+      }
+    ],
+    "narrative": {
+      "northStar": "校园课程节目单（Campus Course Programme）",
+      "overview": "CourseForge 把高校选课组织成一张安静、清晰的校园课程节目单：暖白纸面承载信息，柔和灰蓝标出可信动作，陶土色只提示直播与候补。它以适中的页面标题、细分隔线、连续课程条目与决策侧栏，让学生先理解课程，再靠近名额和动作。\n\n同一视觉语言覆盖三个工作场景：学生端强调课程判断与稳定反馈；登录页以浅灰蓝建立入口氛围；教务端使用浅色导航、纸面面板和紧凑编号结构，提高运行扫描效率。界面直接、可信、克制；装饰从真实任务结构中长出，不伪造学校品牌、教师照片、课程封面或直播状态。",
+      "keyCharacteristics": [
+        "暖白纸面、浅色导航和清晰的一像素分隔线",
+        "柔和灰蓝主动作与少量陶土色信号形成稳定双重识别",
+        "中等尺度标题、可靠中文黑体与紧凑等宽编号协作",
+        "学生端节目条目、登录页海报、教务端运行清单共享同一语法",
+        "扁平为默认，仅对真正浮起的模态层使用强阴影"
+      ],
+      "rules": [
+        { "name": "The Two-Ink Rule", "body": "学术蓝负责主要决策，信号橙负责直播、候补与节目提示；不要让两者竞争同一个主动作。", "section": "colors" },
+        { "name": "The Honest Status Rule", "body": "状态色必须对应真实数据，并始终伴随可读文字或图标。", "section": "colors" },
+        { "name": "The Script-Aware Display Rule", "body": "Archivo 只负责拉丁字形；中文标题由 Noto Sans SC 承载，不得声称中文使用 Archivo，也不要以图片字替代真实中文文本。", "section": "typography" },
+        { "name": "The Poster, Not a Billboard Rule", "body": "超大标题只建立页面入口和节目层级，操作密集区回到紧凑标题与标签，避免整页持续高声量。", "section": "typography" },
+        { "name": "The Decision-Proximity Rule", "body": "名额、当前状态与主要动作保持在同一视觉单元；响应式重排也不能把动作与判断依据拆散。", "section": "layout" },
+        { "name": "The Flat-by-Default Rule", "body": "纸面容器依靠边框和色阶分层；除模态层与键盘焦点外，不添加悬浮阴影。", "section": "elevation" },
+        { "name": "The Selective Radius Rule", "body": "圆角只用于可容纳内容的纸面和控件；品牌、编号、媒体信号与导航色块优先保持直角。", "section": "shapes" }
+      ],
+      "dos": [
+        "Do 用节目编号、细分隔线和同层决策信息组织课程与教务清单。",
+        "Do 让学术蓝承担主要动作，让信号橙承担直播、候补和时间敏感提示。",
+        "Do 在学生端、登录页和教务端复用暖纸、浅色导航、适中标题和克制信号色。",
+        "Do 只有存在真实 `videoUrl` 时才显示可预览入口；直播未接入时只能显示“功能预留”。",
+        "Do 保持键盘焦点可见、状态含文字，并尊重减少动态效果的系统偏好。"
+      ],
+      "donts": [
+        "Don't 把界面退化成通用教务表格、等权卡片网格或圆角 SaaS 仪表盘。",
+        "Don't 伪造学校品牌、课程封面、教师照片、课程成效、直播时间或“正在直播”状态。",
+        "Don't 给常规纸面容器添加漂浮阴影，或把品牌标记、编号和导航色块全部胶囊化。",
+        "Don't 用 Archivo 描述中文标题字形；中文由 Noto Sans SC 回退承担。",
+        "Don't 只用颜色表达选课、候补、成功、警告或错误状态。"
+      ]
+    }
+}

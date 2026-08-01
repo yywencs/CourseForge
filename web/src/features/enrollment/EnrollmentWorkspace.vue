@@ -5,6 +5,7 @@ import { computed, shallowRef } from 'vue'
 
 import { useEnrollmentWorkspace } from '@/composables/useEnrollmentWorkspace'
 import { useTrackedApplications } from '@/composables/useTrackedApplications'
+import { courseLabel } from '@/data/courseCatalog'
 import type {
   StudentEnrollment,
   WaitlistEntry,
@@ -49,13 +50,14 @@ const waitlistError = computed(() =>
 )
 
 async function confirmDrop(record: StudentEnrollment): Promise<void> {
+  const courseName = courseLabel(record.teaching_class_id)
   try {
     await ElMessageBox.confirm(
-      '退课会返还本轮学分额度、课程门数和教学班名额。确认继续吗？',
-      '确认退课',
+      '退课后，这门课将从你的本学期课程和课表中移除。',
+      `确定退掉《${courseName}》吗？`,
       {
         confirmButtonText: '确认退课',
-        cancelButtonText: '保留课程',
+        cancelButtonText: '暂不退课',
         type: 'warning',
       },
     )
@@ -66,10 +68,11 @@ async function confirmDrop(record: StudentEnrollment): Promise<void> {
 }
 
 async function confirmCancelWaitlist(entry: WaitlistEntry): Promise<void> {
+  const courseName = courseLabel(entry.teaching_class_id)
   try {
     await ElMessageBox.confirm(
-      `取消后将退出第 ${entry.position} 位候补队列。`,
-      '取消候补',
+      '取消后，你将不再参与这门课的候补；如有需要，可以重新加入。',
+      `确定取消《${courseName}》的候补吗？`,
       {
         confirmButtonText: '确认取消',
         cancelButtonText: '继续候补',
@@ -105,7 +108,7 @@ async function refresh(): Promise<void> {
         </strong>
       </div>
       <div>
-        <span>本机追踪申请</span>
+        <span>最近申请</span>
         <strong>{{ trackedApplications.length }}</strong>
       </div>
       <button
@@ -181,8 +184,9 @@ async function refresh(): Promise<void> {
   gap: 4px;
   padding: 15px 17px;
   border: 1px solid var(--line);
-  border-radius: 13px;
-  background: rgba(255, 255, 255, 0.72);
+  border-radius: 10px;
+  color: var(--ink);
+  background: var(--surface);
 }
 
 .workspace-summary span {
@@ -192,7 +196,9 @@ async function refresh(): Promise<void> {
 
 .workspace-summary strong {
   font-family: var(--font-display);
+  color: var(--ink);
   font-size: 24px;
+  font-variation-settings: "wdth" 76, "wght" 680;
 }
 
 .workspace-summary > button {
@@ -202,9 +208,9 @@ async function refresh(): Promise<void> {
   gap: 7px;
   padding: 0 16px;
   border: 1px solid var(--line);
-  border-radius: 13px;
-  color: var(--brand);
-  background: white;
+  border-radius: 10px;
+  color: white;
+  background: var(--brand);
   font-size: 12px;
   font-weight: 750;
   cursor: pointer;
@@ -217,7 +223,7 @@ async function refresh(): Promise<void> {
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 11px;
-  background: #e7efeb;
+  background: var(--surface-muted);
 }
 
 .workspace-tabs button {

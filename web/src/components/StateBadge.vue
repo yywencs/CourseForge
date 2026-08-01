@@ -7,7 +7,7 @@ const props = defineProps<{
 
 const labels: Record<string, string> = {
   created: '申请已创建',
-  reserved: '名额已锁定',
+  reserved: '选课确认中',
   selected: '选课成功',
   rejected: '选课未通过',
   cancelled: '已取消',
@@ -48,8 +48,8 @@ const tone = computed(() => {
   width: fit-content;
   padding: 5px 9px;
   border-radius: 999px;
-  color: #52635e;
-  background: #eef2f0;
+  color: var(--muted);
+  background: var(--surface-muted);
   font-size: 11px;
   font-weight: 700;
 }
@@ -62,12 +62,12 @@ const tone = computed(() => {
 }
 
 .state-badge.is-success {
-  color: #0b7458;
-  background: #daf4ea;
+  color: var(--success);
+  background: #e3f3ea;
 }
 
 .state-badge.is-warning {
-  color: #8b5a08;
-  background: #fff0c9;
+  color: var(--warning);
+  background: #fff0d2;
 }
 </style>

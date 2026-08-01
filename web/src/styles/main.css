@@ -1,28 +1,50 @@
 @import "tailwindcss";
 
 :root {
-  color: #10231f;
-  background: #edf4f1;
-  font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #252a2f;
+  background: #f5f4f1;
+  font-family: "Noto Sans SC Variable", "PingFang SC", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --ink: #10231f;
-  --canvas: #edf4f1;
-  --surface: #fbfefd;
-  --surface-muted: #f0f6f3;
-  --brand: #0f5b4a;
-  --brand-bright: #56c5aa;
-  --success: #13795d;
-  --warning: #9a650a;
-  --danger: #a4433c;
-  --muted: #647872;
-  --line: #cbdad4;
-  --line-soft: #e1ebe7;
-  --radius-card: 20px 20px 20px 7px;
-  --radius-panel: 18px 18px 18px 6px;
-  --shadow-card: 0 10px 30px rgba(15, 56, 46, 0.06);
-  --font-display: "Iowan Old Style", "Noto Serif SC", "Songti SC", serif;
+  --ink: #252a2f;
+  --ink-soft: #424a51;
+  --canvas: #f5f4f1;
+  --surface: #ffffff;
+  --surface-muted: #efefeb;
+  --brand: #506d8f;
+  --brand-hover: #405d7e;
+  --brand-bright: #a96f52;
+  --brand-pale: #edf2f6;
+  --signal: #a96f52;
+  --signal-pale: #f7efea;
+  --success: #39735c;
+  --warning: #8a642b;
+  --danger: #a34c46;
+  --muted: #687078;
+  --line: #c8c8c2;
+  --line-soft: #e4e3de;
+  --radius-card: 14px;
+  --radius-panel: 14px;
+  --shadow-card: none;
+  --font-display: "Archivo Variable", "Noto Sans SC Variable", sans-serif;
   --font-mono: "SFMono-Regular", "Cascadia Code", Menlo, monospace;
+  /* Element Plus 只承载全局确认框与操作反馈，颜色跟随 CourseForge 设计令牌。 */
+  --el-color-primary: var(--brand);
+  --el-color-primary-light-3: #7890aa;
+  --el-color-primary-light-5: #9dacc0;
+  --el-color-primary-light-7: #c4ced9;
+  --el-color-primary-light-8: #d8dfe6;
+  --el-color-primary-light-9: var(--brand-pale);
+  --el-color-primary-dark-2: var(--brand-hover);
+  --el-color-warning: var(--warning);
+  --el-color-danger: var(--danger);
+  --el-color-success: var(--success);
+  --el-font-family: "Noto Sans SC Variable", "PingFang SC", sans-serif;
+  --el-border-radius-base: 8px;
+  --el-border-color: var(--line);
+  --el-border-color-light: var(--line-soft);
+  --el-text-color-primary: var(--ink);
+  --el-text-color-regular: var(--ink-soft);
 }
 
 * {
@@ -32,15 +54,14 @@
 html {
   min-width: 320px;
   min-height: 100%;
+  background: var(--canvas);
 }
 
 body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  background:
-    radial-gradient(circle at 10% 2%, rgba(192, 233, 221, 0.55), transparent 28rem),
-    var(--canvas);
+  background: var(--canvas);
 }
 
 button,
@@ -58,9 +79,10 @@ a {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
-textarea:focus-visible {
-  outline: 3px solid rgba(86, 197, 170, 0.35);
-  outline-offset: 2px;
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgba(80, 109, 143, 0.24);
+  outline-offset: 3px;
 }
 
 a {
@@ -68,49 +90,63 @@ a {
   text-decoration: none;
 }
 
+button {
+  touch-action: manipulation;
+}
+
+::selection {
+  color: white;
+  background: var(--brand);
+}
+
 .student-page {
-  width: min(1180px, calc(100% - 46px));
+  width: min(1360px, calc(100% - 64px));
   margin: 0 auto;
-  padding: 56px 0 76px;
+  padding: 44px 0 88px;
 }
 
 .compact-page {
-  width: min(990px, calc(100% - 46px));
+  width: min(1120px, calc(100% - 64px));
 }
 
 .page-heading {
-  margin-bottom: 28px;
+  max-width: 760px;
+  margin: 0 0 34px;
 }
 
-.page-heading > span {
-  color: #98630c;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+.page-heading > span,
+.admin-page-heading > span {
+  display: none;
 }
 
-.page-heading h1 {
-  margin: 6px 0 7px;
+.page-heading h1,
+.admin-page-heading h1 {
+  margin: 0 0 10px;
   font-family: var(--font-display);
-  font-size: clamp(32px, 5vw, 42px);
-  letter-spacing: -0.035em;
+  font-size: clamp(32px, 4vw, 46px);
+  font-variation-settings: "wdth" 82, "wght" 680;
+  letter-spacing: -0.025em;
+  line-height: 1.12;
 }
 
-.page-heading p {
-  max-width: 630px;
+.page-heading p,
+.admin-page-heading p {
+  max-width: 70ch;
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.6;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
-@media (max-width: 700px) {
+@media (max-width: 760px) {
   .student-page,
   .compact-page {
-    width: min(100% - 28px, 1180px);
-    padding-top: 28px;
+    width: min(100% - 28px, 1360px);
+    padding-top: 26px;
+  }
+
+  .page-heading {
+    margin-bottom: 24px;
   }
 }
 

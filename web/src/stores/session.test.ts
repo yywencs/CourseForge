@@ -64,6 +64,6 @@ describe('session store', () => {
         },
         selection_context: { term_id: 1, round_id: 1 },
       }),
-    ).toThrow('JWT 已过期')
+    ).toThrow('登录已过期，请重新登录')
   })
 })

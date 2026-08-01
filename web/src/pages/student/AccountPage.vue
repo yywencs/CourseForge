@@ -39,20 +39,21 @@ function disconnect(): void {
 </script>
 
 <template>
-  <section class="account-panel">
+  <section class="student-page compact-page">
+    <div class="account-panel">
     <header>
       <span><ShieldCheck :size="20" /></span>
       <div>
-        <small>Authenticated student</small>
-        <h2>学生身份与选课上下文</h2>
-        <p>学生 ID 来自 JWT，不允许在页面修改；学期和轮次用于列表查询与提交。</p>
+        <small>Student profile</small>
+        <h1>个人信息与选课设置</h1>
+        <p>查看当前身份信息，并调整正在使用的学期和选课轮次。</p>
       </div>
     </header>
 
     <div class="identity-strip">
       <span>{{ session.studentName }} · {{ session.studentNo }}</span>
       <strong>学生 ID {{ session.studentId }}</strong>
-      <i>后端验签</i>
+      <i>已登录</i>
     </div>
 
     <form @submit.prevent="save">
@@ -75,6 +76,7 @@ function disconnect(): void {
         </button>
       </div>
     </form>
+    </div>
   </section>
 </template>
 
@@ -99,12 +101,13 @@ function disconnect(): void {
   height: 44px;
   place-items: center;
   border-radius: 12px;
-  color: var(--brand);
-  background: #def2eb;
+  color: white;
+  background: var(--brand);
 }
 
 .account-panel small {
-  color: #98630c;
+  display: none;
+  color: var(--signal);
   font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 750;
@@ -112,10 +115,12 @@ function disconnect(): void {
   text-transform: uppercase;
 }
 
-.account-panel h2 {
+.account-panel h1 {
   margin: 5px 0;
   font-family: var(--font-display);
-  font-size: 28px;
+  font-size: 30px;
+  font-variation-settings: "wdth" 82, "wght" 680;
+  letter-spacing: -0.02em;
 }
 
 .account-panel header p {
@@ -131,6 +136,7 @@ function disconnect(): void {
   margin: 26px 0;
   padding: 15px;
   border-radius: 12px;
+  border: 1px solid var(--line);
   background: var(--surface-muted);
 }
 
@@ -148,7 +154,7 @@ function disconnect(): void {
   padding: 4px 8px;
   border-radius: 999px;
   color: var(--success);
-  background: #d9f3e9;
+  background: #e3f3ea;
   font-size: 10px;
   font-style: normal;
 }
@@ -165,7 +171,7 @@ function disconnect(): void {
 }
 
 .account-panel label span {
-  color: #536760;
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
 }
@@ -179,7 +185,7 @@ function disconnect(): void {
 }
 
 .account-panel input:focus {
-  border-color: var(--brand-bright);
+  border-color: var(--brand);
 }
 
 .save-state,
@@ -196,7 +202,7 @@ function disconnect(): void {
 
 .save-state.is-success {
   color: var(--success);
-  background: #def5ec;
+  background: #e3f3ea;
 }
 
 .save-state.is-error {
@@ -228,9 +234,9 @@ function disconnect(): void {
 }
 
 .disconnect-button {
-  border: 1px solid #e4c9c5;
+  border: 1px solid #e1aaa4;
   color: var(--danger);
-  background: #fff8f6;
+  background: #fff2ef;
 }
 
 @media (max-width: 580px) {

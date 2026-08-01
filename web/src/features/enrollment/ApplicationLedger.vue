@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import {
   CheckCircle2,
-  Database,
   RefreshCw,
   Search,
-  Send,
 } from '@lucide/vue'
 import { computed, shallowRef } from 'vue'
 
@@ -63,9 +61,8 @@ function displayFailure(item: TrackedApplicationView): string | undefined {
   <section class="ledger-panel">
     <header class="ledger-panel__heading">
       <div>
-        <span>Application ledger</span>
         <h2>申请单追踪</h2>
-        <p>{{ unsettledCount }} 个申请仍在等待持久化确认</p>
+        <p>{{ unsettledCount }} 个申请仍在等待结果确认</p>
       </div>
       <button type="button" :disabled="refreshing" @click="emit('refresh')">
         <RefreshCw :size="15" :class="{ 'is-spinning': refreshing }" />
@@ -77,7 +74,7 @@ function displayFailure(item: TrackedApplicationView): string | undefined {
       <Search :size="17" />
       <input
         v-model="applicationId"
-        placeholder="输入 application_id 查询本人申请"
+        placeholder="输入申请单编号"
         aria-label="申请单 ID"
       />
       <button type="submit" :disabled="lookupLoading">
@@ -92,8 +89,8 @@ function displayFailure(item: TrackedApplicationView): string | undefined {
       </div>
       <StateBadge :state="manualRecord.state" />
       <small>
-        RabbitMQ {{ manualRecord.broker_confirmed ? '已确认' : '待确认' }} ·
-        MySQL {{ manualRecord.mysql_persisted ? '已落库' : '处理中' }}
+        申请{{ manualRecord.broker_confirmed ? '已受理' : '确认中' }} ·
+        结果{{ manualRecord.mysql_persisted ? '已完成' : '处理中' }}
       </small>
     </div>
     <p v-else-if="lookupError" class="lookup-error" role="alert">{{ lookupError }}</p>
@@ -108,12 +105,12 @@ function displayFailure(item: TrackedApplicationView): string | undefined {
         <StateBadge :state="displayState(item)" />
         <div class="ledger-item__checks">
           <span :class="{ 'is-done': item.live?.broker_confirmed ?? item.brokerConfirmed }">
-            <Send :size="14" />
-            Broker Confirm
+            <CheckCircle2 :size="14" />
+            申请已受理
           </span>
           <span :class="{ 'is-done': item.live?.mysql_persisted ?? item.mysqlPersisted }">
-            <Database :size="14" />
-            MySQL 落库
+            <CheckCircle2 :size="14" />
+            选课记录已生成
           </span>
         </div>
         <p v-if="displayFailure(item)" class="ledger-item__failure">
@@ -124,8 +121,8 @@ function displayFailure(item: TrackedApplicationView): string | undefined {
     </div>
     <div v-else class="ledger-empty">
       <CheckCircle2 :size="27" />
-      <strong>还没有本机追踪的申请</strong>
-      <span>从选课中心提交后，申请会在这里持续追踪至 MySQL 落库。</span>
+      <strong>还没有选课申请</strong>
+      <span>提交选课后，申请进度会显示在这里。</span>
     </div>
   </section>
 </template>
@@ -147,7 +144,7 @@ function displayFailure(item: TrackedApplicationView): string | undefined {
 }
 
 .ledger-panel__heading span {
-  color: #98630c;
+  color: var(--signal);
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 750;
@@ -210,7 +207,7 @@ function displayFailure(item: TrackedApplicationView): string | undefined {
   margin-bottom: 14px;
   padding: 14px;
   border-radius: 12px;
-  background: #edf7f3;
+  background: var(--brand-pale);
 }
 
 .manual-result > div {
@@ -250,7 +247,7 @@ function displayFailure(item: TrackedApplicationView): string | undefined {
   padding: 16px;
   border: 1px solid var(--line-soft);
   border-radius: 13px;
-  background: #fcfefd;
+  background: var(--surface);
 }
 
 .ledger-item__identity {

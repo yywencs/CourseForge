@@ -26,14 +26,14 @@ function submit(): void {
     courseId: teachingClassId,
     courseCode: `CLASS-${teachingClassId}`,
     courseName: form.courseName.trim() || `教学班 #${teachingClassId}`,
-    teacherName: '由后端教学班数据确定',
+    teacherName: '教师待公布',
     credits: 0,
-    schedule: '提交后按后端数据校验',
-    location: '待课程查询接口返回',
+    schedule: '时间待公布',
+    location: '地点待公布',
     capacity: 1,
     selectedCount: 0,
     tags: ['教学班直达'],
-    introduction: '课程目录接口尚未提供时，可使用教学班 ID 直接进入正式选课主链路。',
+    introduction: '输入教学班编号即可提交选课。',
     hasVideo: false,
   })
 }
@@ -45,15 +45,15 @@ function submit(): void {
       <Hash :size="17" />
       <span>
         <strong>教学班直达</strong>
-        <small>按后端真实 ID 提交，不依赖演示目录</small>
+        <small>输入教学班编号快速选课</small>
       </span>
     </div>
     <label>
-      <span>教学班 ID</span>
+      <span>教学班编号</span>
       <input
         v-model="form.teachingClassId"
         inputmode="numeric"
-        placeholder="例如 30001"
+        placeholder="例如 20001"
         required
       />
     </label>
@@ -75,10 +75,9 @@ function submit(): void {
   align-items: end;
   gap: 12px;
   padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 16px;
-  background: rgba(5, 36, 29, 0.32);
-  backdrop-filter: blur(12px);
+  border: 1px solid var(--ink);
+  border-radius: 12px;
+  background: var(--surface);
 }
 
 .class-entry__label {
@@ -97,7 +96,7 @@ function submit(): void {
 }
 
 .class-entry__label small {
-  color: rgba(255, 255, 255, 0.62);
+  color: var(--muted);
   font-size: 10px;
 }
 
@@ -107,7 +106,7 @@ function submit(): void {
 }
 
 .class-entry label span {
-  color: rgba(255, 255, 255, 0.64);
+  color: var(--muted);
   font-size: 10px;
 }
 
@@ -115,19 +114,19 @@ function submit(): void {
   width: 100%;
   min-width: 0;
   padding: 10px 11px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
   outline: none;
-  color: white;
-  background: rgba(255, 255, 255, 0.09);
+  color: var(--ink);
+  background: #fff;
 }
 
 .class-entry input::placeholder {
-  color: rgba(255, 255, 255, 0.38);
+  color: #8c8982;
 }
 
 .class-entry input:focus {
-  border-color: var(--brand-bright);
+  border-color: var(--brand);
 }
 
 .class-entry button {
@@ -136,10 +135,10 @@ function submit(): void {
   justify-content: center;
   gap: 7px;
   padding: 11px 14px;
-  border: 0;
-  border-radius: 10px;
-  color: #0d3d32;
-  background: #a8ead8;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  color: white;
+  background: var(--ink);
   font-weight: 750;
   cursor: pointer;
 }

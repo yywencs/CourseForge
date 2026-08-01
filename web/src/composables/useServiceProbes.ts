@@ -11,20 +11,20 @@ import type { ServiceProbe } from '@/types/api'
 export function useServiceProbes() {
   const probes = shallowRef<ServiceProbe[]>([
     {
-      name: '学生 API',
-      description: '负责 JWT 鉴权和选课请求编排',
+      name: '学生服务',
+      description: '学生登录与选课',
       status: 'unknown',
       detail: '等待检测',
     },
     {
-      name: '核心依赖',
-      description: 'MySQL、Redis、RabbitMQ 就绪状态',
+      name: '基础服务',
+      description: '系统运行所需服务',
       status: 'unknown',
       detail: '等待检测',
     },
     {
       name: '教务服务',
-      description: '独立 Admin 进程与扩展路由',
+      description: '教务管理功能',
       status: 'unknown',
       detail: '等待检测',
     },
@@ -57,15 +57,15 @@ export function useServiceProbes() {
 
     probes.value = [
       {
-        name: '学生 API',
-        description: '负责 JWT 鉴权和选课请求编排',
+        name: '学生服务',
+        description: '学生登录与选课',
         status: apiHealthy ? 'healthy' : 'degraded',
-        detail: apiHealthy ? '进程存活' : '无法连接 /healthz',
+        detail: apiHealthy ? '运行正常' : '暂时无法连接',
         checkedAt,
       },
       {
-        name: '核心依赖',
-        description: 'MySQL、Redis、RabbitMQ 就绪状态',
+        name: '基础服务',
+        description: '系统运行所需服务',
         status:
           readiness?.status === 'ready'
             ? 'healthy'
@@ -74,15 +74,17 @@ export function useServiceProbes() {
               : 'unknown',
         detail:
           readiness?.status === 'ready'
-            ? '全部依赖已就绪'
-            : readiness?.failed_checks?.join('、') || '未获取就绪状态',
+            ? '运行正常'
+            : readiness
+              ? '部分服务不可用'
+              : '暂未获取状态',
         checkedAt,
       },
       {
         name: '教务服务',
-        description: '独立 Admin 进程与扩展路由',
+        description: '教务管理功能',
         status: adminHealthy ? 'healthy' : 'degraded',
-        detail: adminHealthy ? 'Admin 服务已就绪' : 'Admin 服务未连接',
+        detail: adminHealthy ? '运行正常' : '暂时无法连接',
         checkedAt,
       },
     ]

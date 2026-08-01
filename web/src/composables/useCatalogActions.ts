@@ -39,7 +39,7 @@ export function useCatalogActions() {
     onSuccess: (receipt) => {
       const message = receipt.mysql_persisted
         ? '选课完成，正式记录已生成'
-        : '名额已锁定，正在异步写入正式记录'
+        : '选课申请已受理，结果确认中'
       ElMessage.success(message)
       void queryClient.invalidateQueries({ queryKey: ['my-enrollments'] })
     },

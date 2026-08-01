@@ -46,11 +46,8 @@ export function useEnrollmentWorkspace() {
   const dropMutation = useMutation({
     mutationFn: (record: StudentEnrollment) =>
       dropEnrollment(record.enrollment_id),
-    onSuccess: (receipt) => {
-      const projection = receipt.redis_released
-        ? '名额与额度已返还'
-        : '正式记录已退课，名额正在后台修复'
-      ElMessage.success(projection)
+    onSuccess: () => {
+      ElMessage.success('退课成功')
       void queryClient.invalidateQueries({ queryKey: ['my-enrollments'] })
       void queryClient.invalidateQueries({ queryKey: ['my-waitlist'] })
     },

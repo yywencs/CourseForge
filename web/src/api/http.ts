@@ -38,7 +38,7 @@ http.interceptors.response.use(
           ? '请求超时，请检查服务状态后重试'
           : error.response
             ? `服务返回 ${error.response.status}`
-            : '无法连接后端服务'
+            : '服务暂时不可用，请稍后重试'
       return Promise.reject(
         new ApiError(error.response?.status ?? 0, message, true),
       )

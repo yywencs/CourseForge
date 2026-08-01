@@ -93,13 +93,13 @@ export const useSessionStore = defineStore('session', () => {
     const identity = payload.sub
     const parsedStudentId = Number(identity)
     if (!Number.isSafeInteger(parsedStudentId) || parsedStudentId <= 0) {
-      throw new Error('JWT 中缺少有效的学生身份')
+      throw new Error('登录凭证中缺少有效的学生身份')
     }
     if (isJwtExpired(token)) {
-      throw new Error('JWT 已过期，请获取新令牌')
+      throw new Error('登录已过期，请重新登录')
     }
     if (parsedStudentId !== input.student.id) {
-      throw new Error('登录身份与 JWT 不一致')
+      throw new Error('登录身份信息不一致')
     }
 
     accessToken.value = token

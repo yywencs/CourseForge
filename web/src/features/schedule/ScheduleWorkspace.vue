@@ -102,9 +102,7 @@ function courseAt(dayIndex: number, startSection: number) {
       <CalendarX2 :size="20" />
       <div>
         <strong>{{ unscheduledCourses.length }} 门课程暂未排入课表</strong>
-        <p>
-          后端选课记录目前只返回教学班 ID，课程时间查询接口接入后会自动补齐未知教学班。
-        </p>
+        <p>部分课程暂未公布上课时间，公布后会自动显示在课表中。</p>
       </div>
     </aside>
   </div>
@@ -159,10 +157,10 @@ function courseAt(dayIndex: number, startSection: number) {
   flex-direction: column;
   gap: 5px;
   padding: 11px;
-  border-left: 3px solid var(--brand-bright);
+  border-left: 1px solid var(--brand);
   border-radius: 8px;
-  color: #164b3e;
-  background: #dcf0e8;
+  color: #102a76;
+  background: var(--brand-pale);
 }
 
 .schedule-course > span {
@@ -179,7 +177,7 @@ function courseAt(dayIndex: number, startSection: number) {
   align-items: center;
   gap: 4px;
   margin-top: auto;
-  color: #55736a;
+  color: #53607d;
   font-size: 9px;
 }
 
@@ -197,10 +195,10 @@ function courseAt(dayIndex: number, startSection: number) {
   display: flex;
   gap: 12px;
   padding: 16px;
-  border: 1px solid #ead6a5;
+  border: 1px solid #e2ae63;
   border-radius: 12px;
-  color: #76500f;
-  background: #fff5d9;
+  color: #714300;
+  background: #fff4db;
 }
 
 .unscheduled-panel strong {

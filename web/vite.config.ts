@@ -14,7 +14,13 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
-      vue(),
+      vue({
+        template: {
+          compilerOptions: {
+            comments: true,
+          },
+        },
+      }),
       tailwindcss(),
       Components({
         dts: 'src/components.d.ts',

@@ -21,7 +21,6 @@ const emit = defineEmits<{
   <section class="waitlist-panel">
     <header>
       <div>
-        <span>Waitlist queue</span>
         <h2>候补队列</h2>
       </div>
       <strong>{{ items.filter((item) => item.state === 'waiting').length }} 个等待中</strong>
@@ -77,7 +76,7 @@ const emit = defineEmits<{
 }
 
 .waitlist-panel header span {
-  color: #98630c;
+  color: var(--signal);
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 750;
@@ -92,7 +91,7 @@ const emit = defineEmits<{
 }
 
 .waitlist-panel header > strong {
-  color: #8b5a08;
+  color: var(--warning);
   font-size: 12px;
 }
 
@@ -117,8 +116,8 @@ const emit = defineEmits<{
   height: 44px;
   place-items: center;
   border-radius: 11px;
-  color: #80530b;
-  background: #ffedbd;
+  color: white;
+  background: var(--signal);
 }
 
 .waitlist-position strong {
@@ -154,7 +153,7 @@ const emit = defineEmits<{
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  color: #5f6e69;
+  color: var(--muted);
   background: white;
   font-size: 11px;
   cursor: pointer;

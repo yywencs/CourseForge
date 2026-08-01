@@ -20,12 +20,12 @@ function decodeBase64Url(value: string): string {
 export function decodeJwtPayload(token: string): JwtPayload {
   const parts = token.trim().split('.')
   if (parts.length !== 3 || !parts[1]) {
-    throw new Error('JWT 格式不正确')
+    throw new Error('登录凭证格式不正确')
   }
   try {
     return JSON.parse(decodeBase64Url(parts[1])) as JwtPayload
   } catch {
-    throw new Error('JWT 载荷无法解析')
+    throw new Error('登录凭证无法解析')
   }
 }
 

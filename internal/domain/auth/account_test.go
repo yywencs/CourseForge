@@ -13,12 +13,13 @@ func TestStudentAccountEnsureLoginAllowed(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name: "active account",
+			name: "enabled account",
 			account: &StudentAccount{
 				ID:           10001,
+				AccountID:    20001,
 				StudentNo:    "2026001001",
 				PasswordHash: "bcrypt-hash",
-				State:        "active",
+				AccountState: "enabled",
 			},
 		},
 		{
@@ -29,21 +30,23 @@ func TestStudentAccountEnsureLoginAllowed(t *testing.T) {
 		{
 			name: "incomplete account",
 			account: &StudentAccount{
-				ID:        10001,
-				StudentNo: "2026001001",
-				State:     "active",
+				ID:           10001,
+				AccountID:    20001,
+				StudentNo:    "2026001001",
+				AccountState: "enabled",
 			},
 			wantErr: ErrInvalidCredentials,
 		},
 		{
-			name: "inactive account",
+			name: "disabled account",
 			account: &StudentAccount{
 				ID:           10001,
+				AccountID:    20001,
 				StudentNo:    "2026001001",
 				PasswordHash: "bcrypt-hash",
-				State:        "disabled",
+				AccountState: "disabled",
 			},
-			wantErr: ErrStudentInactive,
+			wantErr: ErrAccountUnavailable,
 		},
 	}
 

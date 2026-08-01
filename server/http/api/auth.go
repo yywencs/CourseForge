@@ -117,8 +117,8 @@ func handleAuthenticationError(c *gin.Context, err error) {
 		common.Error(c, 400, "学号或密码格式不正确")
 	case errors.Is(err, authdomain.ErrInvalidCredentials):
 		common.Error(c, 401, "学号或密码错误")
-	case errors.Is(err, authdomain.ErrStudentInactive):
-		common.Error(c, 403, "学生账号当前不可用")
+	case errors.Is(err, authdomain.ErrAccountUnavailable):
+		common.Error(c, 403, "账号当前不可用")
 	case errors.Is(err, authdomain.ErrAccountNotFound):
 		common.Error(c, 404, "学生账号不存在")
 	default:

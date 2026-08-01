@@ -22,11 +22,12 @@ func NewAccountRepository(db *gorm.DB) *AccountRepository {
 }
 
 type studentAccountRow struct {
-	ID           uint64 `gorm:"column:id"`
+	StudentID    uint64 `gorm:"column:student_id"`
+	AccountID    uint64 `gorm:"column:account_id"`
 	StudentNo    string `gorm:"column:student_no"`
 	StudentName  string `gorm:"column:student_name"`
 	PasswordHash string `gorm:"column:password_hash"`
-	State        string `gorm:"column:state"`
+	AccountState string `gorm:"column:account_state"`
 }
 
 func (r *AccountRepository) FindStudentByNumber(
@@ -35,9 +36,17 @@ func (r *AccountRepository) FindStudentByNumber(
 ) (*authdomain.StudentAccount, error) {
 	var row studentAccountRow
 	err := r.db.WithContext(ctx).
-		Table("student").
-		Select("id", "student_no", "student_name", "password_hash", "state").
-		Where("student_no = ?", strings.TrimSpace(studentNo)).
+		Table("student AS s").
+		Select(`
+			s.id AS student_id,
+			a.id AS account_id,
+			s.student_no,
+			s.student_name,
+			a.password_hash,
+			a.state AS account_state
+		`).
+		Joins("JOIN user_account AS a ON a.id = s.account_id").
+		Where("s.student_no = ?", strings.TrimSpace(studentNo)).
 		Take(&row).Error
 	if err != nil {
 		return nil, mapAccountQueryError(err)
@@ -51,9 +60,17 @@ func (r *AccountRepository) FindStudentByID(
 ) (*authdomain.StudentAccount, error) {
 	var row studentAccountRow
 	err := r.db.WithContext(ctx).
-		Table("student").
-		Select("id", "student_no", "student_name", "password_hash", "state").
-		Where("id = ?", studentID).
+		Table("student AS s").
+		Select(`
+			s.id AS student_id,
+			a.id AS account_id,
+			s.student_no,
+			s.student_name,
+			a.password_hash,
+			a.state AS account_state
+		`).
+		Joins("JOIN user_account AS a ON a.id = s.account_id").
+		Where("s.id = ?", studentID).
 		Take(&row).Error
 	if err != nil {
 		return nil, mapAccountQueryError(err)
@@ -70,10 +87,11 @@ func mapAccountQueryError(err error) error {
 
 func (r studentAccountRow) toEntity() *authdomain.StudentAccount {
 	return &authdomain.StudentAccount{
-		ID:           r.ID,
+		ID:           r.StudentID,
+		AccountID:    r.AccountID,
 		StudentNo:    r.StudentNo,
 		StudentName:  r.StudentName,
 		PasswordHash: r.PasswordHash,
-		State:        authdomain.AccountState(r.State),
+		AccountState: authdomain.AccountState(r.AccountState),
 	}
 }

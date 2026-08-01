@@ -26,10 +26,11 @@ func (r handlerAuthRepository) FindStudentByNumber(
 ) (*authdomain.StudentAccount, error) {
 	return &authdomain.StudentAccount{
 		ID:           10001,
+		AccountID:    20001,
 		StudentNo:    "2026001001",
 		StudentName:  "林知夏",
 		PasswordHash: r.passwordHash,
-		State:        "active",
+		AccountState: "enabled",
 	}, nil
 }
 

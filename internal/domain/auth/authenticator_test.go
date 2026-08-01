@@ -43,9 +43,10 @@ func TestAuthenticatorAuthenticate(t *testing.T) {
 	repository := &authenticatorRepositoryStub{
 		account: &StudentAccount{
 			ID:           10001,
+			AccountID:    20001,
 			StudentNo:    "2026001001",
 			PasswordHash: "encoded-password",
-			State:        AccountStateActive,
+			AccountState: AccountStateEnabled,
 		},
 	}
 	passwords := &passwordVerifierStub{matched: true}
@@ -91,9 +92,10 @@ func TestAuthenticatorRejectsInactiveAccount(t *testing.T) {
 	authenticator := NewAuthenticator(
 		&authenticatorRepositoryStub{account: &StudentAccount{
 			ID:           10001,
+			AccountID:    20001,
 			StudentNo:    "2026001001",
 			PasswordHash: "encoded-password",
-			State:        AccountStateDisabled,
+			AccountState: AccountStateDisabled,
 		}},
 		&passwordVerifierStub{matched: true},
 	)
@@ -103,7 +105,7 @@ func TestAuthenticatorRejectsInactiveAccount(t *testing.T) {
 	}
 
 	_, err = authenticator.Authenticate(context.Background(), credentials)
-	if !errors.Is(err, ErrStudentInactive) {
-		t.Fatalf("Authenticate() error = %v, want inactive account", err)
+	if !errors.Is(err, ErrAccountUnavailable) {
+		t.Fatalf("Authenticate() error = %v, want unavailable account", err)
 	}
 }

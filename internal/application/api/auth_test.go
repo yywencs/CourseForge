@@ -60,10 +60,11 @@ func TestAuthenticationUsecaseLogin(t *testing.T) {
 	repository := &fakeAuthRepository{
 		account: &authdomain.StudentAccount{
 			ID:           10001,
+			AccountID:    20001,
 			StudentNo:    "2026001001",
 			StudentName:  "林知夏",
 			PasswordHash: "encoded-password",
-			State:        "active",
+			AccountState: "enabled",
 		},
 	}
 	usecase := NewAuthenticationUsecase(
@@ -93,9 +94,10 @@ func TestAuthenticationUsecaseRejectsInvalidCredentials(t *testing.T) {
 		authdomain.NewAuthenticator(&fakeAuthRepository{
 			account: &authdomain.StudentAccount{
 				ID:           10001,
+				AccountID:    20001,
 				StudentNo:    "2026001001",
 				PasswordHash: "encoded-password",
-				State:        "active",
+				AccountState: "enabled",
 			},
 		}, fakePasswordVerifier{}),
 		fakeSelectionContextQuery{},

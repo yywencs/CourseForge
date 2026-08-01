@@ -20,14 +20,34 @@ CREATE DATABASE IF NOT EXISTS `courseforge`
 USE `courseforge`;
 
 -- --------------------------------------------------------------------------
--- Student identity
+-- Account and student identity
 -- --------------------------------------------------------------------------
+
+CREATE TABLE `user_account` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '账户ID',
+  `password_hash` varchar(255) NOT NULL COMMENT 'bcrypt密码哈希',
+  `state` varchar(16) NOT NULL DEFAULT 'enabled'
+    COMMENT 'enabled/locked/disabled',
+  `password_changed_at` datetime(3) DEFAULT NULL COMMENT '最近修改密码时间',
+  `last_login_at` datetime(3) DEFAULT NULL COMMENT '最近登录时间',
+  `token_version` int unsigned NOT NULL DEFAULT 1 COMMENT '令牌失效版本号',
+  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+    ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  KEY `idx_account_state` (`state`),
+  CONSTRAINT `chk_account_state`
+    CHECK (`state` IN ('enabled', 'locked', 'disabled')),
+  CONSTRAINT `chk_account_token_version`
+    CHECK (`token_version` > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='统一登录账户；只保存认证和安全状态';
 
 CREATE TABLE `student` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '内部学生ID',
+  `account_id` bigint unsigned DEFAULT NULL COMMENT '一对一关联登录账户；NULL表示未开通登录',
   `student_no` varchar(32) DEFAULT NULL COMMENT '登录学号；未开通登录时为NULL',
   `student_name` varchar(64) NOT NULL DEFAULT '' COMMENT '学生姓名',
-  `password_hash` varchar(255) DEFAULT NULL COMMENT 'bcrypt密码哈希',
   `major_id` bigint unsigned NOT NULL COMMENT '专业标识',
   `grade_year` smallint unsigned NOT NULL COMMENT '入学年份',
   `state` varchar(16) NOT NULL DEFAULT 'active'
@@ -36,6 +56,7 @@ CREATE TABLE `student` (
   `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_student_account` (`account_id`),
   UNIQUE KEY `uq_student_no` (`student_no`),
   KEY `idx_student_major_grade_state` (`major_id`, `grade_year`, `state`),
   CONSTRAINT `chk_student_state`

@@ -8,7 +8,7 @@ import (
 var (
 	ErrAccountNotFound    = errors.New("student account not found")
 	ErrInvalidCredentials = errors.New("invalid student number or password")
-	ErrStudentInactive    = errors.New("student account is not active")
+	ErrAccountUnavailable = errors.New("account is not enabled")
 	ErrInvalidLoginInput  = errors.New("invalid login input")
 )
 
@@ -20,30 +20,33 @@ const (
 type AccountState string
 
 const (
-	AccountStateActive   AccountState = "active"
+	AccountStateEnabled  AccountState = "enabled"
+	AccountStateLocked   AccountState = "locked"
 	AccountStateDisabled AccountState = "disabled"
 )
 
-// StudentAccount 是登录与会话展示所需的学生账号最小快照。
-// PasswordHash 仅在服务端登录校验中使用，不允许通过 HTTP 返回。
+// StudentAccount 是账户认证信息与学生公开信息组合后的登录快照。
+// ID 始终是学生 ID，继续用于 JWT 和选课领域；AccountID 只标识登录账户。
 type StudentAccount struct {
 	ID           uint64
+	AccountID    uint64
 	StudentNo    string
 	StudentName  string
 	PasswordHash string
-	State        AccountState
+	AccountState AccountState
 }
 
 // EnsureLoginAllowed 校验账号自身是否完整并且具备登录资格。
 func (a *StudentAccount) EnsureLoginAllowed() error {
 	if a == nil ||
 		a.ID == 0 ||
+		a.AccountID == 0 ||
 		strings.TrimSpace(a.StudentNo) == "" ||
 		strings.TrimSpace(a.PasswordHash) == "" {
 		return ErrInvalidCredentials
 	}
-	if a.State != AccountStateActive {
-		return ErrStudentInactive
+	if a.AccountState != AccountStateEnabled {
+		return ErrAccountUnavailable
 	}
 	return nil
 }

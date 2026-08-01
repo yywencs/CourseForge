@@ -71,7 +71,7 @@ func TestLoginReturnsStudentSessionWithoutPasswordHash(t *testing.T) {
 		handlerSelectionContextQuery{},
 		handlerTokenIssuer{},
 	)
-	server := NewServer(":0", usecase, nil, nil, nil, nil, nil)
+	server := NewServer(":0", usecase, nil, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/api/v1/auth/login",

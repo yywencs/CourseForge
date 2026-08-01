@@ -22,4 +22,10 @@ func (s *Server) registerRoutes() {
 		selectionGroup.GET("/waitlist/:waitlist_id", s.QueryWaitlist)
 		selectionGroup.DELETE("/waitlist/:waitlist_id", s.CancelWaitlist)
 	}
+
+	catalogGroup := s.engine.Group("/api/v1/catalog")
+	if s.authMiddleware != nil {
+		catalogGroup.Use(s.authMiddleware)
+	}
+	catalogGroup.GET("/teaching-classes", s.ListCatalog)
 }

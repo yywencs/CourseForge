@@ -7,11 +7,13 @@ import (
 	"fmt"
 
 	"prizeforge/internal/application/api"
+	applicationcatalog "prizeforge/internal/application/catalog"
 	authdomain "prizeforge/internal/domain/auth"
 	"prizeforge/internal/domain/enrollment"
 	"prizeforge/internal/infrastructure/adapter"
 	authinfra "prizeforge/internal/infrastructure/auth"
 	"prizeforge/internal/infrastructure/query"
+	"prizeforge/internal/infrastructure/repository/catalogrepo"
 	"prizeforge/internal/infrastructure/repository/enrollmentrepo"
 	"prizeforge/internal/infrastructure/repository/outboxrepo"
 	"prizeforge/internal/job"
@@ -58,13 +60,18 @@ func loadRuntimeConfig() *config.Config {
 func NewAdminApp() *HTTPApp {
 	cfg := loadRuntimeConfig()
 	courseforgeDB := adapter.NewCourseforgeDB(&cfg.Data.Database)
+	catalogService := applicationcatalog.NewService(catalogrepo.NewRepository(courseforgeDB))
 	readinessChecks := common.ReadinessChecks{
 		"courseforge_mysql": databaseReadinessCheck(courseforgeDB),
 	}
 
 	return &HTTPApp{
-		Config:      cfg,
-		adminServer: adminhttp.NewServer(resolveAdminAddr(cfg), readinessChecks),
+		Config: cfg,
+		adminServer: adminhttp.NewServer(
+			resolveAdminAddr(cfg),
+			readinessChecks,
+			adminhttp.NewCatalogRoutes(catalogService),
+		),
 	}
 }
 
@@ -94,6 +101,7 @@ func NewAPIApp() (*HTTPApp, error) {
 	publisher := adapter.NewPublisher(rabbitPublisher, &cfg.RabbitMQ)
 
 	enrollmentRepo := enrollmentrepo.NewRepository(courseforgeDB, redis)
+	catalogService := applicationcatalog.NewService(catalogrepo.NewRepository(courseforgeDB))
 	selectionResultPublisher := job.NewSelectionResultPublisher(enrollmentRepo, publisher)
 	selectionResultRecovery := job.NewSelectionResultRecoveryJob(enrollmentRepo, selectionResultPublisher)
 	outboxDispatcher := job.NewOutboxDispatcher(outboxrepo.NewRepository(courseforgeDB), publisher)
@@ -187,6 +195,7 @@ func NewAPIApp() (*HTTPApp, error) {
 			enrollmentUsecase,
 			dropEnrollmentUsecase,
 			waitlistUsecase,
+			catalogService,
 			readinessChecks,
 			studentAuth,
 		),

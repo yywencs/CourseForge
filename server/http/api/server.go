@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"prizeforge/internal/application/api"
+	applicationcatalog "prizeforge/internal/application/catalog"
 	"prizeforge/internal/middleware"
 	"prizeforge/server/http/common"
 
@@ -20,6 +21,7 @@ type Server struct {
 	enrollmentUsecase *api.EnrollmentUsecase
 	dropUsecase       *api.DropEnrollmentUsecase
 	waitlistUsecase   *api.WaitlistUsecase
+	catalogUsecase    *applicationcatalog.Service
 	readinessChecks   common.ReadinessChecks
 	authMiddleware    gin.HandlerFunc
 }
@@ -30,6 +32,7 @@ func NewServer(
 	enrollmentUsecase *api.EnrollmentUsecase,
 	dropUsecase *api.DropEnrollmentUsecase,
 	waitlistUsecase *api.WaitlistUsecase,
+	catalogUsecase *applicationcatalog.Service,
 	readinessChecks common.ReadinessChecks,
 	authMiddleware gin.HandlerFunc,
 ) *Server {
@@ -40,6 +43,7 @@ func NewServer(
 		enrollmentUsecase: enrollmentUsecase,
 		dropUsecase:       dropUsecase,
 		waitlistUsecase:   waitlistUsecase,
+		catalogUsecase:    catalogUsecase,
 		readinessChecks:   readinessChecks,
 		authMiddleware:    authMiddleware,
 	}

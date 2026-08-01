@@ -31,7 +31,7 @@ type ScheduleSlot struct {
 	EndSection   uint8
 }
 
-func (s ScheduleSlot) Valid() bool {
+func (s ScheduleSlot) valid() bool {
 	return s.DayOfWeek >= 1 && s.DayOfWeek <= 7 &&
 		s.StartWeek >= 1 && s.EndWeek >= s.StartWeek &&
 		s.StartSection >= 1 && s.EndSection >= s.StartSection
@@ -39,7 +39,7 @@ func (s ScheduleSlot) Valid() bool {
 
 // Conflicts 判断两个上课时间是否在星期、教学周和节次三个维度重叠。
 func (s ScheduleSlot) Conflicts(other ScheduleSlot) bool {
-	if !s.Valid() || !other.Valid() || s.DayOfWeek != other.DayOfWeek {
+	if !s.valid() || !other.valid() || s.DayOfWeek != other.DayOfWeek {
 		return false
 	}
 	weeksOverlap := s.StartWeek <= other.EndWeek && other.StartWeek <= s.EndWeek
@@ -226,7 +226,7 @@ func (s *SelectionAdmissionService) AdmitSelection(
 	if err != nil {
 		return nil, err
 	}
-	if err := class.ValidateForSelection(request); err != nil {
+	if err := class.validateForSelection(request); err != nil {
 		return nil, err
 	}
 	return s.evaluateStudent(ctx, request)
@@ -241,7 +241,7 @@ func (s *SelectionAdmissionService) AdmitWaitlist(
 	if err != nil {
 		return nil, err
 	}
-	if err := class.ValidateForWaitlist(request); err != nil {
+	if err := class.validateForWaitlist(request); err != nil {
 		return nil, err
 	}
 	return s.evaluateStudent(ctx, request)
@@ -263,7 +263,7 @@ func (s *SelectionAdmissionService) prepare(
 	if round == nil {
 		return nil, nil, ErrRecordNotFound
 	}
-	if err := round.EnsureAcceptingAt(now); err != nil {
+	if err := round.ensureAcceptingAt(now); err != nil {
 		return nil, nil, err
 	}
 	class, err := s.selections.QueryTeachingClass(
@@ -333,7 +333,7 @@ func (s *SelectionAdmissionService) evaluateStudent(
 	if quota == nil {
 		return nil, ErrRecordNotFound
 	}
-	if err := quota.ValidateReservation(request); err != nil {
+	if err := quota.validateReservation(request); err != nil {
 		return nil, err
 	}
 	return request, nil

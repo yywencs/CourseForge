@@ -116,24 +116,24 @@ func TestTeachingClassValidateForSelection(t *testing.T) {
 		State:         TeachingClassStateOpen,
 	}
 
-	if err := class.ValidateForSelection(request); err != nil {
-		t.Fatalf("ValidateForSelection() error = %v, want nil", err)
+	if err := class.validateForSelection(request); err != nil {
+		t.Fatalf("validateForSelection() error = %v, want nil", err)
 	}
 
 	class.SelectedCount = 100
-	if err := class.ValidateForSelection(request); !errors.Is(err, ErrTeachingClassFull) {
+	if err := class.validateForSelection(request); !errors.Is(err, ErrTeachingClassFull) {
 		t.Fatalf("full class error = %v, want %v", err, ErrTeachingClassFull)
 	}
 
 	class.SelectedCount = 99
 	class.State = TeachingClassStateClosed
-	if err := class.ValidateForSelection(request); !errors.Is(err, ErrTeachingClassNotOpen) {
+	if err := class.validateForSelection(request); !errors.Is(err, ErrTeachingClassNotOpen) {
 		t.Fatalf("closed class error = %v, want %v", err, ErrTeachingClassNotOpen)
 	}
 
 	class.State = TeachingClassStateOpen
 	class.CourseID++
-	if err := class.ValidateForSelection(request); !errors.Is(err, ErrInvalidParams) {
+	if err := class.validateForSelection(request); !errors.Is(err, ErrInvalidParams) {
 		t.Fatalf("mismatched class error = %v, want %v", err, ErrInvalidParams)
 	}
 }
@@ -151,18 +151,18 @@ func TestStudentSelectionQuotaValidateReservation(t *testing.T) {
 		SelectedCourseCount: 5,
 	}
 
-	if err := quota.ValidateReservation(request); err != nil {
-		t.Fatalf("ValidateReservation() error = %v, want nil", err)
+	if err := quota.validateReservation(request); err != nil {
+		t.Fatalf("validateReservation() error = %v, want nil", err)
 	}
 
 	quota.SelectedCredits = Credit(166)
-	if err := quota.ValidateReservation(request); !errors.Is(err, ErrCreditQuotaExceeded) {
+	if err := quota.validateReservation(request); !errors.Is(err, ErrCreditQuotaExceeded) {
 		t.Fatalf("credit quota error = %v, want %v", err, ErrCreditQuotaExceeded)
 	}
 
 	quota.SelectedCredits = Credit(100)
 	quota.SelectedCourseCount = quota.CourseLimit
-	if err := quota.ValidateReservation(request); !errors.Is(err, ErrCourseQuotaExceeded) {
+	if err := quota.validateReservation(request); !errors.Is(err, ErrCourseQuotaExceeded) {
 		t.Fatalf("course quota error = %v, want %v", err, ErrCourseQuotaExceeded)
 	}
 }

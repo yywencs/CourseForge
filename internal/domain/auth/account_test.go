@@ -52,9 +52,9 @@ func TestStudentAccountEnsureLoginAllowed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.account.EnsureLoginAllowed()
+			err := tt.account.ensureLoginAllowed()
 			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("EnsureLoginAllowed() error = %v, want %v", err, tt.wantErr)
+				t.Fatalf("ensureLoginAllowed() error = %v, want %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -65,8 +65,8 @@ func TestNewLoginCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLoginCredentials() error = %v", err)
 	}
-	if credentials.StudentNumber() != "2026001001" ||
-		credentials.Password() != "correct-password" {
+	if credentials.studentNumber != "2026001001" ||
+		credentials.password != "correct-password" {
 		t.Fatalf("credentials = %#v", credentials)
 	}
 }

@@ -36,29 +36,29 @@ func (a *Authenticator) Authenticate(
 	credentials LoginCredentials,
 ) (*StudentAccount, error) {
 	if a == nil || a.accounts == nil || a.passwords == nil {
-		return nil, fmt.Errorf("authenticator is not configured")
+		return nil, errAuthenticatorNotConfigured
 	}
 	if !credentials.valid() {
 		return nil, ErrInvalidLoginInput
 	}
 
-	account, err := a.accounts.FindStudentByNumber(ctx, credentials.StudentNumber())
+	account, err := a.accounts.FindStudentByNumber(ctx, credentials.studentNumber)
 	if err != nil {
 		if errors.Is(err, ErrAccountNotFound) {
 			// 空哈希由基础设施实现替换为固定成本哈希，避免通过耗时枚举学号。
-			_ = a.passwords.Verify("", credentials.Password())
+			_ = a.passwords.Verify("", credentials.password)
 			return nil, ErrInvalidCredentials
 		}
-		return nil, fmt.Errorf("query student account: %w", err)
+		return nil, fmt.Errorf("%w: %w", errAccountQueryFailed, err)
 	}
 	if account == nil {
-		_ = a.passwords.Verify("", credentials.Password())
+		_ = a.passwords.Verify("", credentials.password)
 		return nil, ErrInvalidCredentials
 	}
-	if !a.passwords.Verify(account.PasswordHash, credentials.Password()) {
+	if !a.passwords.Verify(account.PasswordHash, credentials.password) {
 		return nil, ErrInvalidCredentials
 	}
-	if err := account.EnsureLoginAllowed(); err != nil {
+	if err := account.ensureLoginAllowed(); err != nil {
 		return nil, err
 	}
 	return account, nil
@@ -76,7 +76,7 @@ func (a *Authenticator) ResolveActiveAccount(
 	if err != nil {
 		return nil, err
 	}
-	if err := account.EnsureLoginAllowed(); err != nil {
+	if err := account.ensureLoginAllowed(); err != nil {
 		return nil, err
 	}
 	return account, nil

@@ -1,15 +1,7 @@
 package auth
 
 import (
-	"errors"
 	"strings"
-)
-
-var (
-	ErrAccountNotFound    = errors.New("student account not found")
-	ErrInvalidCredentials = errors.New("invalid student number or password")
-	ErrAccountUnavailable = errors.New("account is not enabled")
-	ErrInvalidLoginInput  = errors.New("invalid login input")
 )
 
 const (
@@ -36,8 +28,8 @@ type StudentAccount struct {
 	AccountState AccountState
 }
 
-// EnsureLoginAllowed 校验账号自身是否完整并且具备登录资格。
-func (a *StudentAccount) EnsureLoginAllowed() error {
+// ensureLoginAllowed 校验账号自身是否完整并且具备登录资格。
+func (a *StudentAccount) ensureLoginAllowed() error {
 	if a == nil ||
 		a.ID == 0 ||
 		a.AccountID == 0 ||
@@ -68,14 +60,6 @@ func NewLoginCredentials(studentNumber string, password string) (LoginCredential
 		studentNumber: studentNumber,
 		password:      password,
 	}, nil
-}
-
-func (c LoginCredentials) StudentNumber() string {
-	return c.studentNumber
-}
-
-func (c LoginCredentials) Password() string {
-	return c.password
 }
 
 func (c LoginCredentials) valid() bool {

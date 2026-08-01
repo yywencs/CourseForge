@@ -18,7 +18,7 @@ var (
 	ErrScheduleConflict        = xerr.New("ENROLLMENT_SCHEDULE_CONFLICT", "教学班上课时间与已选课程冲突")
 	ErrWaitlistAlreadyExists   = xerr.New("ENROLLMENT_WAITLIST_EXISTS", "该课程已有有效候补申请")
 	ErrWaitlistNotRequired     = xerr.New("ENROLLMENT_WAITLIST_NOT_REQUIRED", "教学班仍有余量，请直接选课")
-	ErrIdempotencyConflict     = xerr.New("ENROLLMENT_IDEMPOTENCY_CONFLICT", "幂等请求ID已绑定其他选课参数")
+	ErrIdempotencyConflict     = xerr.New("ENROLLMENT_IDEMPOTENCY_CONFLICT", "幂等请求编号已绑定其他选课参数")
 	ErrApplicationInProgress   = xerr.New("ENROLLMENT_APPLICATION_IN_PROGRESS", "选课申请正在处理中")
 	ErrApplicationCancelled    = xerr.New("ENROLLMENT_APPLICATION_CANCELLED", "选课申请已取消")
 	ErrInvalidApplicationState = xerr.New(

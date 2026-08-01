@@ -21,7 +21,7 @@ const (
 	EnrollmentStateCompleted EnrollmentState = "completed"
 )
 
-func (s EnrollmentState) Valid() bool {
+func (s EnrollmentState) valid() bool {
 	switch s {
 	case EnrollmentStateEnrolled, EnrollmentStateDropped, EnrollmentStateCompleted:
 		return true
@@ -55,7 +55,7 @@ func (e *StudentEnrollment) Validate() error {
 		e.CourseID == 0 ||
 		e.TeachingClassID == 0 ||
 		!e.Credits.Valid() ||
-		!e.State.Valid() ||
+		!e.State.valid() ||
 		e.EnrolledAt.IsZero() {
 		return ErrInvalidParams
 	}

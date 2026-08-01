@@ -3,7 +3,6 @@ package outbox
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"time"
 )
@@ -19,7 +18,7 @@ const (
 	StateFailed     State = "failed"
 )
 
-func (s State) Valid() bool {
+func (s State) valid() bool {
 	switch s {
 	case StatePending, StatePublishing, StatePublished, StateFailed:
 		return true
@@ -58,7 +57,7 @@ type NewEvent struct {
 
 func (e *NewEvent) Validate() error {
 	if e == nil {
-		return errors.New("new outbox event is nil")
+		return errNewEventRequired
 	}
 	return validateContent(
 		e.EventID,
@@ -72,13 +71,13 @@ func (e *NewEvent) Validate() error {
 
 func (e *Event) Validate() error {
 	if e == nil {
-		return errors.New("outbox event is nil")
+		return errEventRequired
 	}
 	if e.ID == 0 {
-		return errors.New("outbox event ID is missing")
+		return errEventIDMissing
 	}
-	if !e.State.Valid() {
-		return errors.New("outbox event state is invalid")
+	if !e.State.valid() {
+		return errInvalidEventState
 	}
 	return validateContent(
 		e.EventID,
@@ -103,17 +102,17 @@ func validateContent(
 		strings.TrimSpace(aggregateID) == "" ||
 		strings.TrimSpace(topic) == "" ||
 		strings.TrimSpace(eventType) == "" {
-		return errors.New("outbox event identity is incomplete")
+		return errIncompleteEventIdentity
 	}
 	if len(eventID) > 64 ||
 		len(aggregateType) > 32 ||
 		len(aggregateID) > 64 ||
 		len(topic) > 64 ||
 		len(eventType) > 32 {
-		return errors.New("outbox event identity exceeds schema limits")
+		return errEventIdentityTooLong
 	}
 	if len(payload) == 0 || !json.Valid(payload) {
-		return errors.New("outbox event payload is invalid JSON")
+		return errInvalidEventPayload
 	}
 	return nil
 }

@@ -193,7 +193,7 @@ func (r *SelectionRound) AcceptingAt(now time.Time) bool {
 	return !now.Before(r.StartTime) && now.Before(r.EndTime)
 }
 
-func (r *SelectionRound) EnsureAcceptingAt(now time.Time) error {
+func (r *SelectionRound) ensureAcceptingAt(now time.Time) error {
 	if !r.AcceptingAt(now) {
 		return ErrRoundNotOpen
 	}
@@ -221,9 +221,9 @@ type TeachingClass struct {
 	State         TeachingClassState
 }
 
-// ValidateForSelection 校验教学班与请求是否匹配并且仍有名额。
+// validateForSelection 校验教学班与请求是否匹配并且仍有名额。
 // Redis Lua 会再次执行等价校验，这里的判断用于提前失败和保护领域调用。
-func (c *TeachingClass) ValidateForSelection(request *SelectionRequest) error {
+func (c *TeachingClass) validateForSelection(request *SelectionRequest) error {
 	if err := c.validateRequest(request); err != nil {
 		return err
 	}
@@ -236,8 +236,8 @@ func (c *TeachingClass) ValidateForSelection(request *SelectionRequest) error {
 	return nil
 }
 
-// ValidateForWaitlist 校验教学班与请求匹配、已经开放并且当前必须通过候补进入。
-func (c *TeachingClass) ValidateForWaitlist(request *SelectionRequest) error {
+// validateForWaitlist 校验教学班与请求匹配、已经开放并且当前必须通过候补进入。
+func (c *TeachingClass) validateForWaitlist(request *SelectionRequest) error {
 	if err := c.validateRequest(request); err != nil {
 		return err
 	}
@@ -274,9 +274,9 @@ type StudentSelectionQuota struct {
 	SelectedCourseCount uint16
 }
 
-// ValidateReservation 校验本次申请是否仍在学生额度范围内。
+// validateReservation 校验本次申请是否仍在学生额度范围内。
 // 该方法不修改快照；真正扣减由 Redis Lua 和 MySQL 条件更新完成。
-func (q *StudentSelectionQuota) ValidateReservation(request *SelectionRequest) error {
+func (q *StudentSelectionQuota) validateReservation(request *SelectionRequest) error {
 	if q == nil || request == nil {
 		return ErrInvalidParams
 	}

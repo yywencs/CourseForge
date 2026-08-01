@@ -73,6 +73,9 @@ CREATE TABLE `course` (
   `course_code` varchar(32) NOT NULL COMMENT '课程编码',
   `course_name` varchar(128) NOT NULL COMMENT '课程名称',
   `credits` decimal(5,1) unsigned NOT NULL COMMENT '课程学分',
+  `introduction` varchar(1000) NOT NULL DEFAULT '' COMMENT '课程简介',
+  `tags` json DEFAULT NULL COMMENT '课程标签JSON数组',
+  `video_url` varchar(512) NOT NULL DEFAULT '' COMMENT '课程介绍视频地址',
   `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     ON UPDATE CURRENT_TIMESTAMP(3),
@@ -134,6 +137,8 @@ CREATE TABLE `teaching_class` (
   `class_code` varchar(32) NOT NULL COMMENT '教学班编码',
   `term_id` bigint unsigned NOT NULL COMMENT '学期ID',
   `course_id` bigint unsigned NOT NULL COMMENT '课程ID',
+  `teacher_name` varchar(64) NOT NULL DEFAULT '' COMMENT '任课教师展示名称',
+  `location` varchar(128) NOT NULL DEFAULT '' COMMENT '上课地点',
   `capacity` int unsigned NOT NULL COMMENT '教学班容量',
   `selected_count` int unsigned NOT NULL DEFAULT 0 COMMENT 'MySQL已确认选课人数',
   `minimum_grade_year` smallint unsigned DEFAULT NULL COMMENT '最小允许入学年份',

@@ -66,17 +66,28 @@ ON DUPLICATE KEY UPDATE
 
 -- --------------------------------------------------------------------------
 -- Course catalog
--- IDs 与 web/src/data/courseCatalog.ts 保持一致。
+-- 使用稳定 ID，便于接口、选课记录和界面联调。
 -- --------------------------------------------------------------------------
 
-INSERT INTO `course` (`id`, `course_code`, `course_name`, `credits`) VALUES
-  (10001, 'CS-304', '分布式系统设计', 3.5),
-  (10002, 'AI-217', '智能交互产品实践', 2.0),
-  (10003, 'HUM-109', '影像叙事与当代文化', 2.0)
+INSERT INTO `course` (
+  `id`, `course_code`, `course_name`, `credits`, `introduction`, `tags`, `video_url`
+) VALUES
+  (10001, 'CS-304', '分布式系统设计', 3.5,
+   '从一致性协议到消息可靠性，用一次完整工程实践理解分布式系统。',
+   JSON_ARRAY('专业核心', '项目制'), 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4'),
+  (10002, 'AI-217', '智能交互产品实践', 2.0,
+   '围绕真实校园场景，完成从用户研究、原型到可用产品的完整过程。',
+   JSON_ARRAY('跨专业', '工作坊'), 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4'),
+  (10003, 'HUM-109', '影像叙事与当代文化', 2.0,
+   '以经典影像片段为入口，讨论媒介如何改变我们理解世界的方式。',
+   JSON_ARRAY('通识选修', '研讨'), '')
 ON DUPLICATE KEY UPDATE
   `course_code` = VALUES(`course_code`),
   `course_name` = VALUES(`course_name`),
-  `credits` = VALUES(`credits`);
+  `credits` = VALUES(`credits`),
+  `introduction` = VALUES(`introduction`),
+  `tags` = VALUES(`tags`),
+  `video_url` = VALUES(`video_url`);
 
 -- 开发学期使用稳定 ID 202601；当前开放轮次使用稳定 ID 30001。
 INSERT INTO `selection_round` (
@@ -108,19 +119,23 @@ INSERT INTO `teaching_class` (
   `class_code`,
   `term_id`,
   `course_id`,
+  `teacher_name`,
+  `location`,
   `capacity`,
   `selected_count`,
   `minimum_grade_year`,
   `maximum_grade_year`,
   `state`
 ) VALUES
-  (20001, 'CS-304-01', 202601, 10001, 60, 0, NULL, NULL, 'open'),
-  (20002, 'AI-217-01', 202601, 10002, 40, 0, NULL, NULL, 'open'),
-  (20003, 'HUM-109-01', 202601, 10003, 80, 0, NULL, NULL, 'open')
+  (20001, 'CS-304-01', 202601, 10001, '周屿教授', '格物楼 A308', 60, 0, NULL, NULL, 'open'),
+  (20002, 'AI-217-01', 202601, 10002, '许南乔副教授', '创新中心 C201', 40, 0, NULL, NULL, 'open'),
+  (20003, 'HUM-109-01', 202601, 10003, '陈见微讲师', '人文馆 109', 80, 0, NULL, NULL, 'open')
 ON DUPLICATE KEY UPDATE
   `class_code` = VALUES(`class_code`),
   `term_id` = VALUES(`term_id`),
   `course_id` = VALUES(`course_id`),
+  `teacher_name` = VALUES(`teacher_name`),
+  `location` = VALUES(`location`),
   `capacity` = GREATEST(`selected_count`, VALUES(`capacity`)),
   `minimum_grade_year` = VALUES(`minimum_grade_year`),
   `maximum_grade_year` = VALUES(`maximum_grade_year`),

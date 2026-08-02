@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { Search, SlidersHorizontal } from '@lucide/vue'
 import { useQuery } from '@tanstack/vue-query'
-import { computed, shallowRef, watch } from 'vue'
+import { computed, shallowRef } from 'vue'
 
-import { listStudentCatalog } from '@/api/catalog'
 import { listMyEnrollments, listMyWaitlist } from '@/api/enrollment'
 import CourseCard from '@/components/CourseCard.vue'
 import { useCatalogActions } from '@/composables/useCatalogActions'
-import { courseCatalog, replaceCourseCatalog } from '@/data/courseCatalog'
+import { useStudentCatalog } from '@/composables/useStudentCatalog'
 import { useSessionStore } from '@/stores/session'
 import type { TeachingClassSummary } from '@/types/enrollment'
 import CourseMediaRail from './CourseMediaRail.vue'
@@ -22,18 +21,7 @@ const customCourses = shallowRef<TeachingClassSummary[]>([])
 const showDirectEntry = shallowRef(false)
 const { activeTeachingClassId, activeAction, selectionMutation, waitlistMutation } =
   useCatalogActions()
-
-const catalogQuery = useQuery({
-  queryKey: computed(() => ['course-catalog', session.context.roundId]),
-  queryFn: () => listStudentCatalog(session.context.roundId),
-  enabled: computed(() => session.isAuthenticated && session.context.roundId > 0),
-})
-
-watch(
-  [() => catalogQuery.data.value?.items, () => session.context.roundId],
-  ([items, roundId]) => replaceCourseCatalog(items ?? [], roundId),
-  { immediate: true },
-)
+const { catalogQuery, courses: catalogCourses } = useStudentCatalog()
 
 const enrollmentsQuery = useQuery({
   queryKey: computed(() => ['my-enrollments', session.studentId, session.context.termId]),
@@ -49,7 +37,7 @@ const waitlistQuery = useQuery({
 
 const courses = computed(() => [
   ...customCourses.value,
-  ...courseCatalog(session.context.roundId),
+  ...catalogCourses.value,
 ])
 const selectedClassIds = computed(
   () => new Set((enrollmentsQuery.data.value?.items ?? [])

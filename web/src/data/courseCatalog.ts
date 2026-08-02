@@ -1,7 +1,8 @@
 import type { TeachingClass } from '@/types/catalog'
 import type { TeachingClassSummary } from '@/types/enrollment'
+import { shallowRef } from 'vue'
 
-let cachedCatalog: TeachingClassSummary[] = []
+const cachedCatalog = shallowRef<TeachingClassSummary[]>([])
 
 const weekdays = ['一', '二', '三', '四', '五', '六', '日']
 
@@ -39,19 +40,19 @@ export function toCourseSummary(item: TeachingClass, roundId: number): TeachingC
 }
 
 export function replaceCourseCatalog(items: TeachingClass[], roundId: number): TeachingClassSummary[] {
-  cachedCatalog = items.map((item) => toCourseSummary(item, roundId))
-  return cachedCatalog
+  cachedCatalog.value = items.map((item) => toCourseSummary(item, roundId))
+  return cachedCatalog.value
 }
 
 export function courseCatalog(roundId: number): TeachingClassSummary[] {
-  return cachedCatalog.map((course) => ({ ...course, roundId }))
+  return cachedCatalog.value.map((course) => ({ ...course, roundId }))
 }
 
 export function findCourse(
   teachingClassId: number,
   roundId = 0,
 ): TeachingClassSummary | undefined {
-  const course = cachedCatalog.find((item) => item.id === teachingClassId)
+  const course = cachedCatalog.value.find((item) => item.id === teachingClassId)
   return course ? { ...course, roundId: roundId || course.roundId } : undefined
 }
 

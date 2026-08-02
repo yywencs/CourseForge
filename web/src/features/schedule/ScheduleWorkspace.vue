@@ -4,10 +4,12 @@ import { CalendarX2, MapPin } from '@lucide/vue'
 import { computed } from 'vue'
 
 import { listMyEnrollments } from '@/api/enrollment'
+import { useStudentCatalog } from '@/composables/useStudentCatalog'
 import { findCourse } from '@/data/courseCatalog'
 import { useSessionStore } from '@/stores/session'
 
 const session = useSessionStore()
+const { catalogQuery } = useStudentCatalog()
 const weekdays = ['周一', '周二', '周三', '周四', '周五']
 const periods = [
   { label: '1–2 节', start: 1, end: 2 },
@@ -55,7 +57,7 @@ function courseAt(dayIndex: number, startSection: number) {
 
 <template>
   <div class="schedule-workspace">
-    <div v-if="enrollmentsQuery.isLoading.value" class="schedule-state">
+    <div v-if="enrollmentsQuery.isLoading.value || catalogQuery.isLoading.value" class="schedule-state">
       正在生成课表…
     </div>
     <div

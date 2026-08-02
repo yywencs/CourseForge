@@ -4,6 +4,7 @@ import { ElMessageBox } from 'element-plus'
 import { computed, shallowRef } from 'vue'
 
 import { useEnrollmentWorkspace } from '@/composables/useEnrollmentWorkspace'
+import { useStudentCatalog } from '@/composables/useStudentCatalog'
 import { useTrackedApplications } from '@/composables/useTrackedApplications'
 import { courseLabel } from '@/data/courseCatalog'
 import type {
@@ -22,6 +23,7 @@ const {
   cancelWaitlistMutation,
   refreshAll,
 } = useEnrollmentWorkspace()
+const { catalogQuery } = useStudentCatalog()
 const {
   items: trackedApplications,
   isRefreshing: applicationsRefreshing,
@@ -151,7 +153,7 @@ async function refresh(): Promise<void> {
     <EnrollmentList
       v-if="activeView === 'records'"
       :items="enrollmentsQuery.data.value?.items ?? []"
-      :loading="enrollmentsQuery.isLoading.value"
+      :loading="enrollmentsQuery.isLoading.value || catalogQuery.isLoading.value"
       :dropping-id="droppingId"
       :error="enrollmentError"
       @drop="confirmDrop"
@@ -159,7 +161,7 @@ async function refresh(): Promise<void> {
     <WaitlistList
       v-else
       :items="waitlistQuery.data.value?.items ?? []"
-      :loading="waitlistQuery.isLoading.value"
+      :loading="waitlistQuery.isLoading.value || catalogQuery.isLoading.value"
       :cancelling-id="cancellingId"
       :error="waitlistError"
       @cancel="confirmCancelWaitlist"

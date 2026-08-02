@@ -1,4 +1,40 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+
+async function mockStudentCatalog(page: Page): Promise<void> {
+  await page.route('**/api/v1/catalog/teaching-classes**', async (route) => {
+    await route.fulfill({
+      json: {
+        code: 0,
+        info: 'success',
+        data: {
+          items: [{
+            id: 20001,
+            class_code: 'CS-20001',
+            term_id: 1,
+            course_id: 10001,
+            course_code: 'CS401',
+            course_name: '分布式系统设计',
+            credits: 3.5,
+            introduction: '面向工程实践的分布式系统课程。',
+            tags: ['分布式系统'],
+            teacher_name: '陈老师',
+            location: '教学楼 A101',
+            capacity: 60,
+            selected_count: 20,
+            state: 'open',
+            schedules: [{
+              day_of_week: 1,
+              start_week: 1,
+              end_week: 16,
+              start_section: 1,
+              end_section: 2,
+            }],
+          }],
+        },
+      },
+    })
+  })
+}
 
 function sessionToken(): string {
   const encode = (value: object) =>
@@ -10,6 +46,7 @@ function sessionToken(): string {
 }
 
 test('student signs in with a student number and password', async ({ page }) => {
+  await mockStudentCatalog(page)
   await page.route('**/api/v1/auth/login', async (route) => {
     await route.fulfill({
       json: {
@@ -51,6 +88,7 @@ test('student signs in with a student number and password', async ({ page }) => 
 test('student submits a selection and keeps tracking its application', async ({
   page,
 }) => {
+  await mockStudentCatalog(page)
   await page.addInitScript(
     ({ token }) => {
       window.sessionStorage.setItem(
@@ -148,6 +186,7 @@ test('student submits a selection and keeps tracking its application', async ({
 })
 
 test('drop confirmation opens as a centered modal', async ({ page }) => {
+  await mockStudentCatalog(page)
   await page.addInitScript(
     ({ token }) => {
       window.sessionStorage.setItem(

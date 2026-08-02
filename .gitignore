@@ -44,6 +44,7 @@ temp/
 !.env.example
 configs/config.yaml
 /docker-compose-my.yaml
+/monitoring/prometheus/prometheus.local.yml
 
 # frontend
 frontend/node_modules/

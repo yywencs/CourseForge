@@ -41,6 +41,7 @@ func NewServer(
 	s.engine.Use(middleware.CORS())
 	s.engine.Use(middleware.PrometheusMetrics())
 	common.RegisterHealthRoutes(s.engine, s.readinessChecks)
+	common.RegisterMetricsRoute(s.engine)
 	s.registerRoutes()
 	return s
 }

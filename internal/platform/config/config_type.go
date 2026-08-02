@@ -14,7 +14,6 @@ type Config struct {
 	Log      LogConfig      `mapstructure:"log"`
 	RabbitMQ RabbitMQConfig `mapstructure:"rabbitmq"`
 	Asynq    AsynqConfig    `mapstructure:"asynq"`
-	Monitor  MonitorConfig  `mapstructure:"monitor"`
 	Dcc      DccConfig      `mapstructure:"dcc"`
 }
 
@@ -144,14 +143,6 @@ func (c RabbitMQTopicConfig) Validate() error {
 type AsynqConfig struct {
 	Redis       RedisConfig `mapstructure:"redis"`
 	Concurrency int         `mapstructure:"concurrency"`
-}
-
-// --- Monitor 部分 ---
-
-type MonitorConfig struct {
-	Enable bool   `mapstructure:"enable"`
-	Addr   string `mapstructure:"addr"`
-	Path   string `mapstructure:"path"`
 }
 
 // --- DCC 部分 ---

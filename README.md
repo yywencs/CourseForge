@@ -9,14 +9,19 @@ CourseForge 是一个使用 Go 实现的高并发选课系统。后端采用限�
 
 环境要求：Go 1.25+、Docker、Docker Compose。
 
-复制本地环境变量示例，并启动 MySQL、Redis 和 RabbitMQ：
+复制本地环境变量示例，并启动本地基础设施：
 
 ```bash
 cp .env.example .env
 make infra-up
 ```
 
-首次启动时，MySQL 会依次执行 `docs/sql/courseforge.sql` 和 `docs/sql/dev_seed.sql`，
+`make infra-up` 会优先使用已被 Git 忽略的 `docker-compose-my.yaml`。该个人配置只启动
+Redis 和 RabbitMQ，MySQL 使用宿主机服务或 SSH 隧道；没有该文件时会回退到仓库中的
+`docker-compose.yaml`，同时启动 MySQL、Redis 和 RabbitMQ。
+
+使用仓库默认 Compose 首次启动 MySQL 时，会依次执行 `docs/sql/courseforge.sql` 和
+`docs/sql/dev_seed.sql`，
 自动创建 `courseforge` 库、表结构和开发演示数据。默认连接信息与
 `configs/config.example.yaml` 一致。
 
@@ -95,7 +100,12 @@ make build-benchmark
 - Prometheus 规则覆盖投影修复积压/失败、Asynq 重试积压和选课内部错误率。
 - Grafana 自动加载 `CourseForge Overview` Dashboard。
 - CDC 默认订阅 `courseforge\..*`，并写入 `courseforge_<table>` Elasticsearch 索引。
-- `make monitoring-up` 启动 Prometheus 和 Grafana。
+- `make monitoring-up` 首次运行时会从示例生成已被 Git 忽略的本地 Prometheus 配置，
+  随后启动 Prometheus 和 Grafana。本地需要自定义抓取目标时，修改
+  `monitoring/prometheus/prometheus.local.yml`。
+- ECS 部署使用 `monitoring/prometheus/prometheus.deploy.yml`，在仓库根目录执行
+  `docker compose --env-file deploy/.env -f deploy/compose.yaml --profile observability up -d prometheus grafana`
+  可独立启动生产监控，不影响 API、Admin 和 Web 的版本回滚。
 - `make search-up` 启动 Elasticsearch 和 Kibana。
 - `make cdc-up` 启动 MySQL、Elasticsearch 和 CDC Sync。
 

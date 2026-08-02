@@ -2,12 +2,14 @@ package enrollmentapp
 
 import "time"
 
-// IDGenerator supplies business identifiers without coupling application
-// services to a concrete ID algorithm or global generator.
+// IDGenerator 为应用服务提供业务标识，避免应用层依赖具体的 ID 算法或全局生成器。
+// 具体实现由基础设施层注入，例如 UUID 或分布式 ID 生成器。
 type IDGenerator interface {
 	NewID() (string, error)
 }
 
+// SelectionOutcome 表示一次选课流程的标准化结果，用于监控统计。
+// 它只描述流程结果，不替代领域错误，也不参与业务判断。
 type SelectionOutcome string
 
 const (
@@ -31,35 +33,52 @@ const (
 	SelectionOutcomeError               SelectionOutcome = "error"
 )
 
+// ProjectionOperation 表示选课投影的更新操作类型。
 type ProjectionOperation string
 
 const (
+	// ProjectionOperationDropRelease 表示退课后释放选课投影中的占用资源。
 	ProjectionOperationDropRelease ProjectionOperation = "drop_release"
-	ProjectionOperationReconcile   ProjectionOperation = "reconcile"
+	// ProjectionOperationReconcile 表示对待修复的投影进行一致性补偿。
+	ProjectionOperationReconcile ProjectionOperation = "reconcile"
 )
 
+// ProjectionOutcome 表示一次投影更新的标准化结果。
 type ProjectionOutcome string
 
 const (
+	// ProjectionOutcomePending 表示投影更新已进入待补偿状态。
 	ProjectionOutcomePending ProjectionOutcome = "pending"
+	// ProjectionOutcomeSuccess 表示投影更新成功。
 	ProjectionOutcomeSuccess ProjectionOutcome = "success"
-	ProjectionOutcomeFailed  ProjectionOutcome = "failed"
+	// ProjectionOutcomeFailed 表示投影更新或补偿失败。
+	ProjectionOutcomeFailed ProjectionOutcome = "failed"
 )
 
+// WaitlistPromotionOutcome 表示一次候补晋级处理的标准化结果。
 type WaitlistPromotionOutcome string
 
 const (
-	WaitlistPromotionOutcomeExpired   WaitlistPromotionOutcome = "expired"
-	WaitlistPromotionOutcomePromoted  WaitlistPromotionOutcome = "promoted"
-	WaitlistPromotionOutcomeRetry     WaitlistPromotionOutcome = "retry"
+	// WaitlistPromotionOutcomeExpired 表示候补记录已过期。
+	WaitlistPromotionOutcomeExpired WaitlistPromotionOutcome = "expired"
+	// WaitlistPromotionOutcomePromoted 表示候补学生已成功转为正式选课。
+	WaitlistPromotionOutcomePromoted WaitlistPromotionOutcome = "promoted"
+	// WaitlistPromotionOutcomeRetry 表示本次未能晋级，候补记录将等待重试。
+	WaitlistPromotionOutcomeRetry WaitlistPromotionOutcome = "retry"
+	// WaitlistPromotionOutcomeCancelled 表示候补记录已取消。
 	WaitlistPromotionOutcomeCancelled WaitlistPromotionOutcome = "cancelled"
 )
 
-// EnrollmentObserver is an application port expressed in workflow outcomes.
-// Prometheus labels and collectors belong to its infrastructure adapter.
+// EnrollmentObserver 是应用层定义的选课流程可观测性端口。
+// 应用层只上报与业务流程相关的标准化结果；Prometheus 标签、计数器和采集器等实现细节
+// 由基础设施适配器负责，避免监控技术反向侵入应用服务。
 type EnrollmentObserver interface {
+	// SelectionCompleted 记录一次选课流程的结果及耗时。
 	SelectionCompleted(SelectionOutcome, time.Duration)
+	// ProjectionUpdated 记录一次投影更新操作的结果。
 	ProjectionUpdated(ProjectionOperation, ProjectionOutcome)
+	// WaitlistPromotionCompleted 记录一次候补晋级处理的结果。
 	WaitlistPromotionCompleted(WaitlistPromotionOutcome)
+	// ProjectionRepairBacklogObserved 记录当前待修复投影的积压数量。
 	ProjectionRepairBacklogObserved(int64)
 }

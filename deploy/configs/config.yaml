@@ -82,8 +82,3 @@ dcc:
   rate_limit: 5
   enable_degrade: false
   black_list: ""
-
-monitor:
-  enable: false
-  addr: 0.0.0.0:9091
-  path: /metrics

@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/courseforge-alerts.yml
+
+scrape_configs:
+  - job_name: courseforge-api
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - api:8080
+
+  - job_name: courseforge-admin
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - admin:8081
+
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090

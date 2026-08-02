@@ -9,12 +9,12 @@ import (
 	"prizeforge/server/http/common"
 )
 
-func TestServerRegistersHealthRoutes(t *testing.T) {
+func TestServerRegistersManagementRoutes(t *testing.T) {
 	server := NewServer(":0", common.ReadinessChecks{
 		"dependency": func(context.Context) error { return nil },
 	})
 
-	for _, path := range []string{"/healthz", "/readyz"} {
+	for _, path := range []string{"/healthz", "/readyz", "/metrics"} {
 		response := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		server.Engine().ServeHTTP(response, request)

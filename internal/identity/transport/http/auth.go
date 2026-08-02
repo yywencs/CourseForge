@@ -74,7 +74,7 @@ func (s *Routes) CurrentSession(c *gin.Context) {
 		common.Error(c, 503, "authentication service is not configured")
 		return
 	}
-	studentID, ok := middleware.AuthenticatedStudentID(c)
+	studentID, ok := middleware.AuthenticatedSubjectID(c)
 	if !ok {
 		common.Error(c, 401, "authentication required")
 		return

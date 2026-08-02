@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import AdminLayout from '@/layouts/AdminLayout.vue'
 import StudentLayout from '@/layouts/StudentLayout.vue'
+import { useAdministratorSessionStore } from '@/stores/adminSession'
 import { useSessionStore } from '@/stores/session'
 
 const router = createRouter({
@@ -50,9 +51,15 @@ const router = createRouter({
       ],
     },
     {
+      path: '/admin/login',
+      name: 'admin-login',
+      component: () => import('@/pages/auth/AdminLoginPage.vue'),
+      meta: { title: '教务登录', public: true },
+    },
+    {
       path: '/admin',
       component: AdminLayout,
-      meta: { public: true },
+      meta: { requiresAdministrator: true },
       children: [
         {
           path: '',
@@ -84,11 +91,21 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   const session = useSessionStore()
+  const administratorSession = useAdministratorSessionStore()
   if (to.matched.some((record) => record.meta.requiresStudent) && !session.isAuthenticated) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
+  if (
+    to.matched.some((record) => record.meta.requiresAdministrator) &&
+    !administratorSession.isAuthenticated
+  ) {
+    return { name: 'admin-login', query: { redirect: to.fullPath } }
+  }
   if (to.name === 'login' && session.isAuthenticated) {
     return { name: 'student-courses' }
+  }
+  if (to.name === 'admin-login' && administratorSession.isAuthenticated) {
+    return { name: 'admin-dashboard' }
   }
   return true
 })

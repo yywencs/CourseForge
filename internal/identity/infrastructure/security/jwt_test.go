@@ -29,6 +29,46 @@ func TestStudentTokenManagerIssuesAndVerifiesToken(t *testing.T) {
 	}
 }
 
+func TestStudentTokenManagerIssuesAndVerifiesAdministratorToken(t *testing.T) {
+	manager := newTestStudentTokenManager(t)
+	fixedNow := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+	manager.now = func() time.Time { return fixedNow }
+
+	token, expiresAt, err := manager.IssueAdministrator(30001)
+	if err != nil {
+		t.Fatalf("IssueAdministrator() error = %v", err)
+	}
+	if !expiresAt.Equal(fixedNow.Add(2 * time.Hour)) {
+		t.Fatalf("ExpiresAt = %v", expiresAt)
+	}
+	administratorID, err := manager.VerifyAdministrator(token)
+	if err != nil {
+		t.Fatalf("VerifyAdministrator() error = %v", err)
+	}
+	if administratorID != 30001 {
+		t.Fatalf("administrator ID = %d, want 30001", administratorID)
+	}
+}
+
+func TestStudentAndAdministratorTokensCannotBeInterchanged(t *testing.T) {
+	manager := newTestStudentTokenManager(t)
+	studentToken, _, err := manager.Issue(10001)
+	if err != nil {
+		t.Fatalf("Issue() error = %v", err)
+	}
+	administratorToken, _, err := manager.IssueAdministrator(30001)
+	if err != nil {
+		t.Fatalf("IssueAdministrator() error = %v", err)
+	}
+
+	if _, err := manager.VerifyAdministrator(studentToken); err == nil {
+		t.Fatal("VerifyAdministrator() accepted a student token")
+	}
+	if _, err := manager.Verify(administratorToken); err == nil {
+		t.Fatal("Verify() accepted an administrator token")
+	}
+}
+
 func TestStudentTokenManagerRejectsExpiredToken(t *testing.T) {
 	manager := newTestStudentTokenManager(t)
 	fixedNow := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)

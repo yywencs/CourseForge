@@ -12,6 +12,7 @@ auth:
     signing_key: "courseforge-local-development-key-change-me"
     issuer: "courseforge"
     audience: "courseforge-student"
+    administrator_audience: "courseforge-administrator"
     clock_skew: 30s
     token_ttl: 2h
 

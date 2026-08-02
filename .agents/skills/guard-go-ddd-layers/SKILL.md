@@ -7,6 +7,27 @@ description: 守护 Go 项目的 DDD 分层和业务不变量归属。用于新�
 
 在编码前确定业务规则属于哪一层，编码后检查规则没有下沉到基础设施层。
 
+## 目录与包组织
+
+优先按限界上下文纵向组织代码，再在上下文内部按职责分层；不要在 `internal` 下建立覆盖全项目的
+`domain`、`application`、`infrastructure`、`transport` 四棵横向大目录。
+
+```text
+internal/<context>/
+├── domain/              # 实体、值对象、领域服务、领域端口和领域错误
+├── application/         # 用例、事务编排及由用例消费的端口
+├── infrastructure/      # 数据库、消息、缓存和外部服务适配器
+└── transport/http/      # HTTP 请求响应模型、参数校验和错误映射
+```
+
+- `platform` 只承载数据库连接、配置、日志、指标、ID 等无业务语义的通用技术能力。
+- `shared` 只放真正跨上下文且稳定的最小共享内核，不能成为业务代码的兜底目录。
+- Go 的包边界由目录决定；同一个包内用多个文件表达模型、策略、用例或适配器，不为每个类型、聚合或用例创建子目录。
+- 文件按职责内聚拆分，而不是机械地“一类型一文件”。只有文件已经承载多个独立概念、明显难以导航时才拆分；强相关且规模较小的模型与行为可以放在同一文件。
+- 只有出现独立依赖方向、可替换适配器或需要单独封装的实现时，才在 `infrastructure` 下继续建立 `mysql`、`security`、`query` 等子包。
+- 同一上下文可以同时包含多个用例，例如学生认证和管理员认证仍属于 `identity`；不要仅因调用方不同就复制一套分层目录。
+- 包名表达业务概念，可与职责目录名不同，例如 `internal/identity/domain` 使用 `package auth`；调用方通过清晰的 import alias 表达其角色。
+
 ## 编码前
 
 先列出本次需求的业务不变量，并为每条规则标注唯一的主要归属：
@@ -81,10 +102,11 @@ Repository 仍可执行 `UPDATE ... WHERE state = 'planned'`，但 Domain 必须
 
 逐项检查并在交付说明中简要报告：
 
-1. Domain 是否包含本次新增的业务行为和错误语义。
-2. Application 是否形成完整用例，而非透传 CRUD。
-3. Infrastructure 是否只保留持久化与并发实现细节。
-4. 同一业务规则是否有明确的唯一来源。
-5. 是否测试领域规则、Application 编排和 Repository 并发冲突。
+1. 新代码是否落在正确的限界上下文，且没有形成全局横向分层或无意义的细粒度子包。
+2. Domain 是否包含本次新增的业务行为和错误语义。
+3. Application 是否形成完整用例，而非透传 CRUD。
+4. Infrastructure 是否只保留持久化与并发实现细节。
+5. 同一业务规则是否有明确的唯一来源。
+6. 是否测试领域规则、Application 编排和 Repository 并发冲突。
 
 发现贫血 Domain、透传 Application 或胖 Repository 时，先重构分层再宣告完成。

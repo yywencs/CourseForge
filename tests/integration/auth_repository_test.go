@@ -98,3 +98,61 @@ func TestAuthenticationRepositoryLoadsStudentAndCurrentRound(t *testing.T) {
 		t.Fatalf("selection context = %#v", selectionContext)
 	}
 }
+
+func TestAuthenticationRepositoryLoadsAdministrator(t *testing.T) {
+	const (
+		administratorID = uint64(9_300_000_000_001)
+		accountID       = uint64(9_300_000_000_002)
+		username        = "integration-admin-001"
+		password        = "integration-admin-bcrypt-hash"
+	)
+	database := integrationCourseforgeDB
+	if err := database.Exec(
+		`INSERT INTO user_account
+			(id, password_hash, state)
+		 VALUES (?, ?, 'enabled')
+		 ON DUPLICATE KEY UPDATE
+			password_hash = VALUES(password_hash),
+			state = 'enabled'`,
+		accountID,
+		password,
+	).Error; err != nil {
+		t.Fatalf("seed administrator user account: %v", err)
+	}
+	if err := database.Exec(
+		`INSERT INTO administrator (id, account_id, username)
+		 VALUES (?, ?, ?)
+		 ON DUPLICATE KEY UPDATE
+			account_id = VALUES(account_id),
+			username = VALUES(username)`,
+		administratorID,
+		accountID,
+		username,
+	).Error; err != nil {
+		t.Fatalf("seed administrator: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = database.Exec("DELETE FROM administrator WHERE id = ?", administratorID).Error
+		_ = database.Exec("DELETE FROM user_account WHERE id = ?", accountID).Error
+	})
+
+	repository := authinfra.NewAccountRepository(database)
+	account, err := repository.FindAdministratorByUsername(context.Background(), username)
+	if err != nil {
+		t.Fatalf("FindAdministratorByUsername() error = %v", err)
+	}
+	if account.ID != administratorID ||
+		account.AccountID != accountID ||
+		account.Username != username ||
+		account.PasswordHash != password {
+		t.Fatalf("account = %#v", account)
+	}
+
+	accountByID, err := repository.FindAdministratorByID(context.Background(), administratorID)
+	if err != nil {
+		t.Fatalf("FindAdministratorByID() error = %v", err)
+	}
+	if accountByID.Username != username {
+		t.Fatalf("account by ID = %#v", accountByID)
+	}
+}

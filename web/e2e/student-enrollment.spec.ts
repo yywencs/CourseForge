@@ -41,6 +41,7 @@ function sessionToken(): string {
     Buffer.from(JSON.stringify(value)).toString('base64url')
   return `${encode({ alg: 'HS256' })}.${encode({
     sub: '10001',
+    actor_type: 'student',
     exp: Math.floor(Date.now() / 1000) + 3600,
   })}.signature`
 }

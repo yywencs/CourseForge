@@ -9,13 +9,19 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-type studentClaims struct {
+const (
+	studentActorType       = "student"
+	administratorActorType = "administrator"
+)
+
+type identityClaims struct {
+	ActorType string `json:"actor_type"`
 	jwt.RegisteredClaims
 }
 
-// StudentTokenManager 统一负责学生 JWT 的签发与验证。
-// 当前单体服务固定使用 HS256，签名密钥只保存在服务端。
-type StudentTokenManager struct {
+// TokenManager 复用同一套 JWT 实现与注册声明管理学生和管理员令牌。
+// actor_type 是两类身份的强制边界，避免同一个 subject 被跨端解释。
+type TokenManager struct {
 	signingKey []byte
 	issuer     string
 	audience   string
@@ -24,13 +30,16 @@ type StudentTokenManager struct {
 	now        func() time.Time
 }
 
-func NewStudentTokenManager(
+// StudentTokenManager 保留原类型名，兼容现有学生认证装配代码。
+type StudentTokenManager = TokenManager
+
+func NewTokenManager(
 	signingKey string,
 	issuer string,
 	audience string,
 	tokenTTL time.Duration,
 	clockSkew time.Duration,
-) (*StudentTokenManager, error) {
+) (*TokenManager, error) {
 	if len(signingKey) < 32 {
 		return nil, fmt.Errorf("JWT signing key must contain at least 32 bytes")
 	}
@@ -43,7 +52,7 @@ func NewStudentTokenManager(
 	if clockSkew < 0 {
 		return nil, fmt.Errorf("JWT clock skew must not be negative")
 	}
-	return &StudentTokenManager{
+	return &TokenManager{
 		signingKey: []byte(signingKey),
 		issuer:     strings.TrimSpace(issuer),
 		audience:   strings.TrimSpace(audience),
@@ -53,16 +62,43 @@ func NewStudentTokenManager(
 	}, nil
 }
 
-func (m *StudentTokenManager) Issue(studentID uint64) (string, time.Time, error) {
+func NewStudentTokenManager(
+	signingKey string,
+	issuer string,
+	audience string,
+	tokenTTL time.Duration,
+	clockSkew time.Duration,
+) (*StudentTokenManager, error) {
+	return NewTokenManager(signingKey, issuer, audience, tokenTTL, clockSkew)
+}
+
+func (m *TokenManager) Issue(studentID uint64) (string, time.Time, error) {
 	if studentID == 0 {
 		return "", time.Time{}, fmt.Errorf("student ID is required")
 	}
+	return m.issue(studentID, studentActorType)
+}
+
+func (m *TokenManager) IssueAdministrator(
+	administratorID uint64,
+) (string, time.Time, error) {
+	if administratorID == 0 {
+		return "", time.Time{}, fmt.Errorf("administrator ID is required")
+	}
+	return m.issue(administratorID, administratorActorType)
+}
+
+func (m *TokenManager) issue(
+	identityID uint64,
+	actorType string,
+) (string, time.Time, error) {
 	issuedAt := m.now()
 	expiresAt := issuedAt.Add(m.tokenTTL)
-	claims := studentClaims{
+	claims := identityClaims{
+		ActorType: actorType,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    m.issuer,
-			Subject:   strconv.FormatUint(studentID, 10),
+			Subject:   strconv.FormatUint(identityID, 10),
 			Audience:  jwt.ClaimStrings{m.audience},
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			IssuedAt:  jwt.NewNumericDate(issuedAt),
@@ -71,13 +107,21 @@ func (m *StudentTokenManager) Issue(studentID uint64) (string, time.Time, error)
 	}
 	value, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(m.signingKey)
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("sign student JWT: %w", err)
+		return "", time.Time{}, fmt.Errorf("sign %s JWT: %w", actorType, err)
 	}
 	return value, expiresAt, nil
 }
 
-func (m *StudentTokenManager) Verify(value string) (uint64, error) {
-	claims := &studentClaims{}
+func (m *TokenManager) Verify(value string) (uint64, error) {
+	return m.verify(value, studentActorType)
+}
+
+func (m *TokenManager) VerifyAdministrator(value string) (uint64, error) {
+	return m.verify(value, administratorActorType)
+}
+
+func (m *TokenManager) verify(value string, expectedActorType string) (uint64, error) {
+	claims := &identityClaims{}
 	token, err := jwt.ParseWithClaims(
 		strings.TrimSpace(value),
 		claims,
@@ -95,14 +139,17 @@ func (m *StudentTokenManager) Verify(value string) (uint64, error) {
 		jwt.WithExpirationRequired(),
 	)
 	if err != nil {
-		return 0, fmt.Errorf("verify student JWT: %w", err)
+		return 0, fmt.Errorf("verify %s JWT: %w", expectedActorType, err)
 	}
 	if !token.Valid {
-		return 0, fmt.Errorf("student JWT is invalid")
+		return 0, fmt.Errorf("%s JWT is invalid", expectedActorType)
 	}
-	studentID, err := strconv.ParseUint(claims.Subject, 10, 64)
-	if err != nil || studentID == 0 {
-		return 0, fmt.Errorf("student JWT subject is invalid")
+	if claims.ActorType != expectedActorType {
+		return 0, fmt.Errorf("JWT actor type is invalid")
 	}
-	return studentID, nil
+	identityID, err := strconv.ParseUint(claims.Subject, 10, 64)
+	if err != nil || identityID == 0 {
+		return 0, fmt.Errorf("%s JWT subject is invalid", expectedActorType)
+	}
+	return identityID, nil
 }

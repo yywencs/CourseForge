@@ -1,5 +1,6 @@
 export interface JwtPayload {
   sub?: string | number
+  actor_type?: string
   iss?: string
   aud?: string | string[]
   iat?: number

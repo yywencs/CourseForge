@@ -211,7 +211,7 @@ func (s *Routes) DropEnrollment(c *gin.Context) {
 }
 
 func authenticatedStudentID(c *gin.Context) (uint64, bool) {
-	studentID, ok := middleware.AuthenticatedStudentID(c)
+	studentID, ok := middleware.AuthenticatedSubjectID(c)
 	if !ok {
 		common.Error(c, 401, "authentication required")
 		return 0, false

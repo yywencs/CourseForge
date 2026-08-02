@@ -210,6 +210,7 @@ func (r *benchmarkRunner) studentToken(studentID uint64, issuedAt time.Time) (st
 	claims := jwt.MapClaims{
 		"student_id": strconv.FormatUint(studentID, 10),
 		"sub":        strconv.FormatUint(studentID, 10),
+		"actor_type": "student",
 		"iss":        r.config.JWTIssuer,
 		"aud":        r.config.JWTAudience,
 		"iat":        issuedAt.Unix(),

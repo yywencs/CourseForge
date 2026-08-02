@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"os/signal"
 	"prizeforge/internal/bootstrap"
 	"prizeforge/internal/platform/observability/logger"
@@ -10,7 +11,10 @@ import (
 )
 
 func main() {
-	app := bootstrap.NewAdminApp()
+	app, err := bootstrap.NewAdminApp()
+	if err != nil {
+		log.Fatalf("bootstrap Admin app: %v", err)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()

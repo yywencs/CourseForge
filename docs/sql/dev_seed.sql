@@ -7,6 +7,10 @@
 -- 演示账号：
 --   学号：2026001001
 --   密码：CourseForge@123
+--
+-- 开发管理员：
+--   用户名：admin
+--   密码：CourseForgeAdmin@123
 
 SET NAMES utf8mb4;
 SET time_zone = '+08:00';
@@ -63,6 +67,39 @@ ON DUPLICATE KEY UPDATE
   `major_id` = VALUES(`major_id`),
   `grade_year` = VALUES(`grade_year`),
   `state` = VALUES(`state`);
+
+-- password_hash 为 CourseForgeAdmin@123 的 bcrypt 哈希，cost=10。
+INSERT INTO `user_account` (
+  `id`,
+  `password_hash`,
+  `state`,
+  `password_changed_at`,
+  `token_version`
+) VALUES (
+  30002,
+  '$2a$10$f..MW0bDyzpdXe9RbYYI8ON/B9oFkQWLiAfp/RSw4QX98AltD.5ry',
+  'enabled',
+  NOW(3),
+  1
+)
+ON DUPLICATE KEY UPDATE
+  `password_hash` = VALUES(`password_hash`),
+  `state` = VALUES(`state`),
+  `password_changed_at` = VALUES(`password_changed_at`),
+  `token_version` = VALUES(`token_version`);
+
+INSERT INTO `administrator` (
+  `id`,
+  `account_id`,
+  `username`
+) VALUES (
+  30001,
+  30002,
+  'admin'
+)
+ON DUPLICATE KEY UPDATE
+  `account_id` = VALUES(`account_id`),
+  `username` = VALUES(`username`);
 
 -- --------------------------------------------------------------------------
 -- Course catalog
@@ -203,3 +240,12 @@ FROM `student` AS s
 CROSS JOIN `selection_round` AS sr
 WHERE s.`id` = 30001
   AND sr.`id` = 30001;
+
+SELECT
+  a.`id` AS `administrator_id`,
+  a.`username`,
+  ua.`state` AS `account_state`,
+  ua.`token_version`
+FROM `administrator` AS a
+JOIN `user_account` AS ua ON ua.`id` = a.`account_id`
+WHERE a.`id` = 30001;

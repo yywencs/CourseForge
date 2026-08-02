@@ -81,6 +81,7 @@ app
 .claude/
 .codegraph/
 .mcp.json
+scripts/
 
 # test / coverage
 coverage.out

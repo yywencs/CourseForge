@@ -19,6 +19,7 @@ function sessionToken(): string {
     encode({ alg: 'HS256', typ: 'JWT' }),
     encode({
       sub: '10001',
+      actor_type: 'student',
       exp: Math.floor(Date.now() / 1000) + 3600,
     }),
     'test-signature',

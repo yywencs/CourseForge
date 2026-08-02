@@ -66,7 +66,26 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "open integration courseforge database: %v\n", err)
 		os.Exit(1)
 	}
-	integrationRedisClient = redis.NewClient(&redis.Options{Addr: redisAddr})
+	// 与应用默认配置保持一致，避免并发用例为每个 goroutine 同时新建连接，
+	// 从而让 Docker Desktop/OrbStack 的端口转发层成为测试瓶颈。
+	integrationSQLDB, err := integrationCourseforgeDB.DB()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "get integration courseforge database: %v\n", err)
+		os.Exit(1)
+	}
+	integrationSQLDB.SetMaxOpenConns(25)
+	integrationSQLDB.SetMaxIdleConns(15)
+	// 限制连接并放宽容器端口转发环境下的读写等待时间；默认按 CPU 数扩大的
+	// Redis 连接池会在 100 路并发用例中同时穿过 Docker 代理并触发 3 秒读超时。
+	integrationRedisClient = redis.NewClient(&redis.Options{
+		Addr:         redisAddr,
+		PoolSize:     10,
+		MinIdleConns: 5,
+		DialTimeout:  5 * time.Second,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		PoolTimeout:  10 * time.Second,
+	})
 	integrationRedis = cache.New(&cache.Options{Redis: integrationRedisClient})
 	integrationRabbitMQConfig = &config.RabbitMQConfig{
 		Addresses: rabbitMQHost,
@@ -79,11 +98,7 @@ func TestMain(m *testing.M) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	if sqlDB, dbErr := integrationCourseforgeDB.DB(); dbErr != nil {
-		cancel()
-		fmt.Fprintf(os.Stderr, "get integration courseforge database: %v\n", dbErr)
-		os.Exit(1)
-	} else if pingErr := sqlDB.PingContext(ctx); pingErr != nil {
+	if pingErr := integrationSQLDB.PingContext(ctx); pingErr != nil {
 		cancel()
 		fmt.Fprintf(os.Stderr, "ping integration courseforge database: %v\n", pingErr)
 		os.Exit(1)

@@ -66,10 +66,34 @@ func loadRuntimeConfig() *config.Config {
 	return cfg
 }
 
-// NewAdminApp 装配 CourseForge MySQL 与可扩展的 Admin HTTP 骨架。
-func NewAdminApp() *HTTPApp {
+// NewAdminApp 装配 CourseForge MySQL、管理员认证与 Admin HTTP 服务。
+func NewAdminApp() (*HTTPApp, error) {
 	cfg := loadRuntimeConfig()
+	if err := cfg.Auth.JWT.Validate(); err != nil {
+		return nil, fmt.Errorf("auth config: %w", err)
+	}
 	courseforgeDB := database.NewCourseforgeDB(&cfg.Data.Database)
+	tokenManager, err := identitysecurity.NewTokenManager(
+		cfg.Auth.JWT.SigningKey,
+		cfg.Auth.JWT.Issuer,
+		cfg.Auth.JWT.ResolvedAdministratorAudience(),
+		cfg.Auth.JWT.TokenTTL,
+		cfg.Auth.JWT.ClockSkew,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("administrator auth: %w", err)
+	}
+	accountRepository := identitymysql.NewAccountRepository(courseforgeDB)
+	administratorAuthentication := identityapp.NewAdministratorAuthenticationUsecase(
+		authdomain.NewAdministratorAuthenticator(
+			accountRepository,
+			identitysecurity.BcryptPasswordVerifier{},
+		),
+		tokenManager,
+	)
+	administratorAuth := middleware.NewJWTAuth(
+		middleware.TokenVerifierFunc(tokenManager.VerifyAdministrator),
+	)
 	catalogService := applicationcatalog.NewService(catalogrepo.NewRepository(courseforgeDB))
 	roundManagementService := enrollmentapp.NewRoundManagementService(
 		roundrepo.NewRepository(courseforgeDB),
@@ -80,13 +104,15 @@ func NewAdminApp() *HTTPApp {
 
 	return &HTTPApp{
 		Config: cfg,
-		adminServer: adminhttp.NewServer(
+		adminServer: adminhttp.NewAuthenticatedServer(
 			resolveAdminAddr(cfg),
 			readinessChecks,
+			administratorAuth,
+			identityhttp.NewAdministratorRoutes(administratorAuthentication),
 			cataloghttp.NewCatalogRoutes(catalogService),
 			enrollmenthttp.NewRoundAdminRoutes(roundManagementService),
 		),
-	}
+	}, nil
 }
 
 // NewAPIApp 装配选课 API、异步结果落库与通用 Outbox 分发链路。
@@ -197,7 +223,7 @@ func NewAPIApp() (*HTTPApp, error) {
 			waitlistPromotionJob.ProcessTask,
 		),
 	)
-	tokenManager, err := identitysecurity.NewStudentTokenManager(
+	tokenManager, err := identitysecurity.NewTokenManager(
 		cfg.Auth.JWT.SigningKey,
 		cfg.Auth.JWT.Issuer,
 		cfg.Auth.JWT.Audience,
@@ -207,7 +233,7 @@ func NewAPIApp() (*HTTPApp, error) {
 	if err != nil {
 		return nil, fmt.Errorf("student auth: %w", err)
 	}
-	studentAuth := middleware.NewStudentJWTAuth(tokenManager)
+	studentAuth := middleware.NewJWTAuth(tokenManager)
 	authenticator := authdomain.NewAuthenticator(
 		identitymysql.NewAccountRepository(courseforgeDB),
 		identitysecurity.BcryptPasswordVerifier{},

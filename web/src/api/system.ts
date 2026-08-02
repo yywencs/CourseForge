@@ -1,5 +1,6 @@
 import axios from 'axios'
 
+import { adminHttp } from '@/api/adminHttp'
 import type {
   AdminStatus,
   ApiEnvelope,
@@ -9,11 +10,6 @@ import type {
 
 const apiSystemHttp = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '',
-  timeout: 6_000,
-})
-
-const adminSystemHttp = axios.create({
-  baseURL: import.meta.env.VITE_ADMIN_API_BASE_URL || '/admin-api',
   timeout: 6_000,
 })
 
@@ -36,7 +32,7 @@ export async function queryApiReadiness(): Promise<ReadinessStatus> {
 
 export async function queryAdminStatus(): Promise<AdminStatus> {
   const response =
-    await adminSystemHttp.get<ApiEnvelope<AdminStatus>>('/admin/v1/status')
+    await adminHttp.get<ApiEnvelope<AdminStatus>>('/admin/v1/status')
   if (response.data.code !== 0) {
     throw new Error(response.data.info)
   }
@@ -45,7 +41,7 @@ export async function queryAdminStatus(): Promise<AdminStatus> {
 
 export async function queryAdminReadiness(): Promise<ReadinessStatus> {
   try {
-    const response = await adminSystemHttp.get<ReadinessStatus>('/readyz')
+    const response = await adminHttp.get<ReadinessStatus>('/readyz')
     return response.data
   } catch (error) {
     if (axios.isAxiosError<ReadinessStatus>(error) && error.response?.data) {

@@ -22,8 +22,19 @@ func (s *Server) registerRoutes() {
 		})
 	})
 	for _, registrar := range s.registrars {
+		if publicRegistrar, ok := registrar.(PublicRouteRegistrar); ok {
+			publicRegistrar.RegisterPublicAdminRoutes(group)
+		}
+	}
+
+	protected := group
+	if s.authMiddleware != nil {
+		protected = group.Group("")
+		protected.Use(s.authMiddleware)
+	}
+	for _, registrar := range s.registrars {
 		if registrar != nil {
-			registrar.RegisterAdminRoutes(group)
+			registrar.RegisterAdminRoutes(protected)
 		}
 	}
 }

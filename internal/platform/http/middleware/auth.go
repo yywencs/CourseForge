@@ -7,38 +7,47 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const authenticatedStudentIDKey = "authenticatedStudentID"
+const authenticatedSubjectIDKey = "authenticatedSubjectID"
 
-type StudentTokenVerifier interface {
+// TokenVerifier 将令牌验证为一个与具体业务身份无关的 subject ID。
+type TokenVerifier interface {
 	Verify(token string) (uint64, error)
 }
 
-// NewStudentJWTAuth 只接受 Authorization: Bearer JWT，并将验签后的学生 ID
-// 写入 Gin Context。Token 的签发与密码校验不属于 HTTP 中间件职责。
-func NewStudentJWTAuth(verifier StudentTokenVerifier) gin.HandlerFunc {
+// TokenVerifierFunc 让不同身份的验签方法可以适配为通用 TokenVerifier。
+type TokenVerifierFunc func(token string) (uint64, error)
+
+func (f TokenVerifierFunc) Verify(token string) (uint64, error) {
+	return f(token)
+}
+
+// NewJWTAuth 只接受 Authorization: Bearer JWT，并将验签后的 subject ID
+// 写入 Gin Context。具体身份类型及令牌声明由调用方提供的 verifier 校验。
+func NewJWTAuth(verifier TokenVerifier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token, ok := bearerToken(c.GetHeader("Authorization"))
 		if !ok || verifier == nil {
 			abortAuthentication(c)
 			return
 		}
-		studentID, err := verifier.Verify(token)
-		if err != nil || studentID == 0 {
+		subjectID, err := verifier.Verify(token)
+		if err != nil || subjectID == 0 {
 			abortAuthentication(c)
 			return
 		}
-		c.Set(authenticatedStudentIDKey, studentID)
+		c.Set(authenticatedSubjectIDKey, subjectID)
 		c.Next()
 	}
 }
 
-func AuthenticatedStudentID(c *gin.Context) (uint64, bool) {
-	value, ok := c.Get(authenticatedStudentIDKey)
+// AuthenticatedSubjectID 返回当前请求已经验签的 subject ID。
+func AuthenticatedSubjectID(c *gin.Context) (uint64, bool) {
+	value, ok := c.Get(authenticatedSubjectIDKey)
 	if !ok {
 		return 0, false
 	}
-	studentID, ok := value.(uint64)
-	return studentID, ok && studentID > 0
+	subjectID, ok := value.(uint64)
+	return subjectID, ok && subjectID > 0
 }
 
 func bearerToken(header string) (string, bool) {

@@ -1,13 +1,22 @@
 <script setup lang="ts">
-import { Activity, BookCopy, ChevronLeft, LayoutDashboard } from '@lucide/vue'
-import { RouterLink, RouterView, useRoute } from 'vue-router'
+import { Activity, BookCopy, ChevronLeft, LayoutDashboard, LogOut } from '@lucide/vue'
+import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
+
+import { useAdministratorSessionStore } from '@/stores/adminSession'
 
 const route = useRoute()
+const router = useRouter()
+const administratorSession = useAdministratorSessionStore()
 const navigation = [
   { to: '/admin', label: '运行概览', icon: LayoutDashboard },
   { to: '/admin/courses', label: '课程管理', icon: BookCopy },
   { to: '/admin/enrollments', label: '选课管理', icon: Activity },
 ]
+
+function logout(): void {
+  administratorSession.disconnect()
+  void router.replace({ name: 'admin-login' })
+}
 </script>
 
 <template>
@@ -29,7 +38,13 @@ const navigation = [
     <div class="admin-workspace">
       <header class="admin-topbar">
         <div><span>教务管理台</span><strong>{{ route.meta.title }}</strong></div>
-        <div class="admin-operator"><span>教务值班</span><i>CF</i></div>
+        <div class="admin-operator">
+          <span>{{ administratorSession.username }}</span>
+          <i>{{ administratorSession.username.slice(0, 2).toUpperCase() }}</i>
+          <button type="button" aria-label="退出管理员登录" title="退出登录" @click="logout">
+            <LogOut :size="17" />
+          </button>
+        </div>
       </header>
       <main class="admin-content"><RouterView /></main>
     </div>
@@ -174,6 +189,25 @@ const navigation = [
   font-size: 10px;
   font-style: normal;
   font-weight: 800;
+}
+
+.admin-operator button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.admin-operator button:hover {
+  color: var(--danger);
+  border-color: #d8aaa6;
+  background: #fff5f3;
 }
 
 .admin-content {

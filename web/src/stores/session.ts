@@ -66,10 +66,17 @@ export const useSessionStore = defineStore('session', () => {
   })
 
   const isAuthenticated = computed(
-    () =>
-      Boolean(accessToken.value) &&
-      studentId.value > 0 &&
-      !isJwtExpired(accessToken.value),
+    () => {
+      if (!accessToken.value || studentId.value <= 0 || isJwtExpired(accessToken.value)) {
+        return false
+      }
+      try {
+        const payload = decodeJwtPayload(accessToken.value)
+        return payload.actor_type === 'student' && Number(payload.sub) === studentId.value
+      } catch {
+        return false
+      }
+    },
   )
   const initials = computed(() => {
     const value = studentName.value || studentNo.value || String(studentId.value)
@@ -92,6 +99,9 @@ export const useSessionStore = defineStore('session', () => {
     const payload = decodeJwtPayload(token)
     const identity = payload.sub
     const parsedStudentId = Number(identity)
+    if (payload.actor_type !== 'student') {
+      throw new Error('登录凭证不是学生身份')
+    }
     if (!Number.isSafeInteger(parsedStudentId) || parsedStudentId <= 0) {
       throw new Error('登录凭证中缺少有效的学生身份')
     }

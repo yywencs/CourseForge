@@ -125,3 +125,37 @@ func TestRabbitMQTopicConfigValidate(t *testing.T) {
 		t.Fatalf("missing topic Validate() error = %v, want selection_result required", err)
 	}
 }
+
+func TestJWTAuthConfigResolvesAdministratorAudience(t *testing.T) {
+	tests := []struct {
+		name   string
+		config JWTAuthConfig
+		want   string
+	}{
+		{
+			name: "explicit audience",
+			config: JWTAuthConfig{
+				Audience: "courseforge-student", AdministratorAudience: "custom-admin",
+			},
+			want: "custom-admin",
+		},
+		{
+			name:   "derive from student audience",
+			config: JWTAuthConfig{Audience: "courseforge-student"},
+			want:   "courseforge-administrator",
+		},
+		{
+			name:   "derive from generic audience",
+			config: JWTAuthConfig{Audience: "courseforge"},
+			want:   "courseforge-administrator",
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := testCase.config.ResolvedAdministratorAudience(); got != testCase.want {
+				t.Fatalf("ResolvedAdministratorAudience() = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}

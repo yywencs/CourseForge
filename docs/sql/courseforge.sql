@@ -64,6 +64,19 @@ CREATE TABLE `student` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='学生';
 
+CREATE TABLE `administrator` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '管理员ID',
+  `account_id` bigint unsigned NOT NULL COMMENT '关联统一登录账户',
+  `username` varchar(64) NOT NULL COMMENT '管理员登录名',
+  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+    ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_administrator_account` (`account_id`),
+  UNIQUE KEY `uq_administrator_username` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='管理员身份；认证凭据和账户状态由user_account统一管理';
+
 -- --------------------------------------------------------------------------
 -- Academic catalog
 -- --------------------------------------------------------------------------

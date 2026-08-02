@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	platformmiddleware "prizeforge/internal/platform/http/middleware"
 	"prizeforge/server/http/common"
 
 	"github.com/gin-gonic/gin"
@@ -45,4 +47,60 @@ func (testRouteRegistrar) RegisterAdminRoutes(group *gin.RouterGroup) {
 	group.GET("/courses", func(ctx *gin.Context) {
 		common.Success(ctx, gin.H{"items": []any{}})
 	})
+}
+
+type authenticatedTestRouteRegistrar struct{}
+
+func (authenticatedTestRouteRegistrar) RegisterPublicAdminRoutes(group *gin.RouterGroup) {
+	group.POST("/auth/login", func(ctx *gin.Context) {
+		common.Success(ctx, gin.H{"access_token": "administrator-token"})
+	})
+}
+
+func (authenticatedTestRouteRegistrar) RegisterAdminRoutes(group *gin.RouterGroup) {
+	group.GET("/courses", func(ctx *gin.Context) {
+		common.Success(ctx, gin.H{"items": []any{}})
+	})
+}
+
+type tokenVerifierStub struct{}
+
+func (tokenVerifierStub) Verify(token string) (uint64, error) {
+	if token == "administrator-token" {
+		return 30001, nil
+	}
+	return 0, context.Canceled
+}
+
+func TestAuthenticatedServerKeepsLoginPublicAndProtectsManagementRoutes(t *testing.T) {
+	server := NewAuthenticatedServer(
+		":0",
+		nil,
+		platformmiddleware.NewJWTAuth(tokenVerifierStub{}),
+		authenticatedTestRouteRegistrar{},
+	)
+
+	for _, testCase := range []struct {
+		method        string
+		path          string
+		authorization string
+		wantBodyPart  string
+	}{
+		{method: http.MethodGet, path: "/admin/v1/status", wantBodyPart: `"code":0`},
+		{method: http.MethodPost, path: "/admin/v1/auth/login", wantBodyPart: `"code":0`},
+		{method: http.MethodGet, path: "/admin/v1/courses", wantBodyPart: `"code":401`},
+		{
+			method: http.MethodGet, path: "/admin/v1/courses",
+			authorization: "Bearer administrator-token", wantBodyPart: `"code":0`,
+		},
+	} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(testCase.method, testCase.path, nil)
+		request.Header.Set("Authorization", testCase.authorization)
+		server.Engine().ServeHTTP(response, request)
+		if response.Code != http.StatusOK ||
+			!strings.Contains(response.Body.String(), testCase.wantBodyPart) {
+			t.Errorf("%s %s response = status:%d body:%s", testCase.method, testCase.path, response.Code, response.Body.String())
+		}
+	}
 }

@@ -22,11 +22,25 @@ type AuthConfig struct {
 }
 
 type JWTAuthConfig struct {
-	SigningKey string        `mapstructure:"signing_key"`
-	Issuer     string        `mapstructure:"issuer"`
-	Audience   string        `mapstructure:"audience"`
-	ClockSkew  time.Duration `mapstructure:"clock_skew"`
-	TokenTTL   time.Duration `mapstructure:"token_ttl"`
+	SigningKey            string        `mapstructure:"signing_key"`
+	Issuer                string        `mapstructure:"issuer"`
+	Audience              string        `mapstructure:"audience"`
+	AdministratorAudience string        `mapstructure:"administrator_audience"`
+	ClockSkew             time.Duration `mapstructure:"clock_skew"`
+	TokenTTL              time.Duration `mapstructure:"token_ttl"`
+}
+
+// ResolvedAdministratorAudience 返回管理员服务使用的 JWT audience。
+// 旧配置未声明该字段时，从学生 audience 派生，避免部署升级必须同步修改配置。
+func (c JWTAuthConfig) ResolvedAdministratorAudience() string {
+	if audience := strings.TrimSpace(c.AdministratorAudience); audience != "" {
+		return audience
+	}
+	audience := strings.TrimSpace(c.Audience)
+	if strings.HasSuffix(audience, "-student") {
+		return strings.TrimSuffix(audience, "-student") + "-administrator"
+	}
+	return audience + "-administrator"
 }
 
 func (c JWTAuthConfig) Validate() error {

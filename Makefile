@@ -67,7 +67,7 @@ integration-test: ## 启动临时 MySQL、Redis、RabbitMQ，运行集成测试�
 	INTEGRATION_MYSQL_PASSWORD='$(INTEGRATION_MYSQL_PASSWORD)' INTEGRATION_MYSQL_PORT='$(INTEGRATION_MYSQL_PORT)' INTEGRATION_REDIS_PORT='$(INTEGRATION_REDIS_PORT)' INTEGRATION_RABBITMQ_PORT='$(INTEGRATION_RABBITMQ_PORT)' INTEGRATION_RABBITMQ_USER='$(INTEGRATION_RABBITMQ_USER)' INTEGRATION_RABBITMQ_PASSWORD='$(INTEGRATION_RABBITMQ_PASSWORD)' $(INTEGRATION_COMPOSE) up -d --wait mysql redis rabbitmq; \
 	trap '$(INTEGRATION_COMPOSE) down --volumes --remove-orphans' EXIT; \
 	courseforge_table_count="$$( $(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '"'"'courseforge'"'"'"' )"; \
-	test "$$courseforge_table_count" = "17"; \
+	test "$$courseforge_table_count" = "18"; \
 	printf '%s\n' "CourseForge integration MySQL schema is ready"; \
 	redis_response="$$( $(INTEGRATION_COMPOSE) exec -T redis redis-cli ping )"; \
 	test "$$redis_response" = "PONG"; \

@@ -16,6 +16,7 @@ function testToken(studentId: string, expiresInSeconds = 3600): string {
     encode({ alg: 'HS256', typ: 'JWT' }),
     encode({
       sub: studentId,
+      actor_type: 'student',
       exp: Math.floor(Date.now() / 1000) + expiresInSeconds,
     }),
     'test-signature',

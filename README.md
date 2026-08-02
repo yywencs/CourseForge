@@ -103,8 +103,8 @@ make build-benchmark
 - `make monitoring-up` 首次运行时会从示例生成已被 Git 忽略的本地 Prometheus 配置，
   随后启动 Prometheus 和 Grafana。本地需要自定义抓取目标时，修改
   `monitoring/prometheus/prometheus.local.yml`。
-- ECS 部署使用 `monitoring/prometheus/prometheus.deploy.yml`，在仓库根目录执行
-  `docker compose --env-file deploy/.env -f deploy/compose.yaml --profile observability up -d prometheus grafana`
+- ECS 部署使用 `/srv/courseforge/monitoring/prometheus/prometheus.deploy.yml`，在部署目录执行
+  `docker compose --env-file .env -f compose.yaml --profile observability up -d prometheus grafana`
   可独立启动生产监控，不影响 API、Admin 和 Web 的版本回滚。
 - `make search-up` 启动 Elasticsearch 和 Kibana。
 - `make cdc-up` 启动 MySQL、Elasticsearch 和 CDC Sync。

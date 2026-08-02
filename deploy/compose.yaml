@@ -141,8 +141,8 @@ services:
     ports:
       - 127.0.0.1:9090:9090
     volumes:
-      - ../monitoring/prometheus/prometheus.deploy.yml:/etc/prometheus/prometheus.yml:ro
-      - ../monitoring/prometheus/courseforge-alerts.yml:/etc/prometheus/courseforge-alerts.yml:ro
+      - ./monitoring/prometheus/prometheus.deploy.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/courseforge-alerts.yml:/etc/prometheus/courseforge-alerts.yml:ro
       - prometheus-data:/prometheus
     healthcheck:
       test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:9090/-/ready"]
@@ -168,9 +168,9 @@ services:
     ports:
       - 127.0.0.1:3000:3000
     volumes:
-      - ../monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
-      - ../monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ../monitoring/grafana/dashboards:/var/lib/courseforge/grafana/dashboards:ro
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards:/var/lib/courseforge/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     depends_on:
       prometheus:

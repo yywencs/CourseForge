@@ -89,6 +89,12 @@ test('student submits a selection and keeps tracking its application', async ({
   page,
 }) => {
   await mockStudentCatalog(page)
+  await page.addInitScript(() => {
+    Object.defineProperty(window.crypto, 'randomUUID', {
+      configurable: true,
+      value: undefined,
+    })
+  })
   await page.addInitScript(
     ({ token }) => {
       window.sessionStorage.setItem(

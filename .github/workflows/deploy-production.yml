@@ -5,7 +5,13 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: Image tag to deploy (for example, v1.0.1)
+        description: Image tag to deploy (for example, v1.0.1 or sha-<commit>)
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      image_tag:
+        description: Immutable image tag to deploy
         required: true
         type: string
 
@@ -41,7 +47,7 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          [[ "${IMAGE_TAG}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
+          [[ "${IMAGE_TAG}" =~ ^(v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)|sha-[0-9a-f]{40})$ ]] \
             || { echo "invalid image tag: ${IMAGE_TAG}"; exit 1; }
           [[ "${PROD_SSH_PORT}" =~ ^[0-9]+$ ]] \
             && ((PROD_SSH_PORT >= 1 && PROD_SSH_PORT <= 65535)) \

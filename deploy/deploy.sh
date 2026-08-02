@@ -9,8 +9,8 @@ readonly DEPLOY_PATH="${2:-}"
 readonly HEALTHCHECK_ATTEMPTS="${HEALTHCHECK_ATTEMPTS:-60}"
 readonly HEALTHCHECK_INTERVAL_SECONDS="${HEALTHCHECK_INTERVAL_SECONDS:-5}"
 
-# 镜像标签必须符合 v主版本.次版本.修订版本 的格式，例如 v1.2.3。
-if [[ ! "${TARGET_TAG}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+# 正式发布使用 v主版本.次版本.修订版本，main 持续部署使用不可变的 sha-<40位提交哈希>。
+if [[ ! "${TARGET_TAG}" =~ ^(v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)|sha-[0-9a-f]{40})$ ]]; then
 	echo "invalid image tag: ${TARGET_TAG}" >&2
 	exit 2
 fi

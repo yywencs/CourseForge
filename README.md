@@ -93,6 +93,15 @@ make build-benchmark
 压测工具会准备隔离的高位 ID 测试数据，支持正常选课、幂等重试和候补三种场景。
 完整参数见 [压测工具说明](cmd/benchmark/README.md)。
 
+## 发布与部署
+
+- Pull Request 运行完整 CI，不发布镜像。
+- 代码合并到 `main` 后，完整检查通过即构建 `sha-<commit>` 镜像并自动部署生产环境；
+  部署失败会恢复上一个镜像标签。
+- `v1.2.3` 形式的 Git tag 仅用于里程碑版本，构建对应版本镜像但不自动覆盖线上。
+- 需要回滚或部署里程碑版本时，手动运行 `Deploy production`，输入已有的
+  `v1.2.3` 或完整的 `sha-<40位提交哈希>` 镜像标签。
+
 ## 可观测性与数据同步
 
 - Prometheus 指标使用 `courseforge` namespace，覆盖 HTTP、选课、候补、投影修复、

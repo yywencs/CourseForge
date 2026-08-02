@@ -9,6 +9,7 @@ import type {
   TeachingClassSummary,
   TrackedApplication,
 } from '@/types/enrollment'
+import { createRequestId } from '@/utils/requestId'
 
 const trackedStorageKey = 'courseforge.tracked-applications'
 const pendingStorageKey = 'courseforge.pending-selections'
@@ -51,7 +52,7 @@ export const useEnrollmentTrackerStore = defineStore(
       if (existing) return existing
 
       const pending: PendingSelection = {
-        requestId: crypto.randomUUID(),
+        requestId: createRequestId(),
         teachingClassId: course.id,
         roundId: course.roundId,
         courseName: course.courseName,
@@ -107,7 +108,7 @@ export const useEnrollmentTrackerStore = defineStore(
       if (existing) return existing
 
       const pending: PendingWaitlist = {
-        requestId: crypto.randomUUID(),
+        requestId: createRequestId(),
         teachingClassId: course.id,
         roundId: course.roundId,
         courseName: course.courseName,

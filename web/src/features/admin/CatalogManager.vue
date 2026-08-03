@@ -7,6 +7,7 @@ import { useCatalogAdmin } from '@/composables/useCatalogAdmin'
 import type { Course, CourseDraft, SelectionRound, SelectionRoundDraft, TeachingClass, TeachingClassDraft } from '@/types/catalog'
 import CatalogRecords from './CatalogRecords.vue'
 import CourseForm from './CourseForm.vue'
+import CourseVideoUploader from './CourseVideoUploader.vue'
 import RoundBindingPanel from './RoundBindingPanel.vue'
 import SelectionRoundForm from './SelectionRoundForm.vue'
 import TeachingClassForm from './TeachingClassForm.vue'
@@ -26,6 +27,8 @@ const editingCourse = shallowRef<Course>()
 const editingClass = shallowRef<TeachingClass>()
 const editingRound = shallowRef<SelectionRound>()
 const managedRound = shallowRef<SelectionRound>()
+const managedVideoCourse = shallowRef<Course>()
+const videoOpen = shallowRef(false)
 
 const admin = useCatalogAdmin()
 const normalizedKeyword = computed(() => keyword.value.trim().toLowerCase())
@@ -54,6 +57,7 @@ function openCreate(): void {
 }
 
 function editCourse(item: Course): void { editingCourse.value = item; editorOpen.value = true }
+function manageCourseVideo(item: Course): void { managedVideoCourse.value = item; videoOpen.value = true }
 function editClass(item: TeachingClass): void { editingClass.value = item; editorOpen.value = true }
 function editRound(item: SelectionRound): void { editingRound.value = item; editorOpen.value = true }
 
@@ -114,6 +118,7 @@ async function refresh(): Promise<void> {
     <CatalogRecords
       :mode="section" :courses="visibleCourses" :teaching-classes="visibleClasses" :rounds="visibleRounds"
       @edit-course="editCourse" @edit-class="editClass" @edit-round="editRound" @manage-round="manageRound"
+      @manage-course-video="manageCourseVideo"
       @delete-course="(item) => confirmDelete('课程', item.course_name, () => admin.removeCourse(item.id))"
       @delete-class="(item) => confirmDelete('教学班', item.class_code, () => admin.removeTeachingClass(item.id))"
       @delete-round="(item) => confirmDelete('选课轮次', item.round_name, () => admin.removeRound(item.id))"
@@ -127,6 +132,10 @@ async function refresh(): Promise<void> {
 
     <ElDialog v-model="bindingOpen" width="min(620px, calc(100vw - 28px))" :show-close="false" destroy-on-close align-center>
       <RoundBindingPanel v-if="managedRound" :round="managedRound" :teaching-classes="admin.teachingClasses.value" :bindings="admin.bindings.value" :busy="admin.isLoading.value" @bind="addBinding" @unbind="removeBinding" @close="bindingOpen = false" />
+    </ElDialog>
+
+    <ElDialog v-model="videoOpen" width="min(620px, calc(100vw - 28px))" :show-close="false" destroy-on-close align-center>
+      <CourseVideoUploader v-if="managedVideoCourse" :course="managedVideoCourse" @close="videoOpen = false" />
     </ElDialog>
   </section>
 </template>

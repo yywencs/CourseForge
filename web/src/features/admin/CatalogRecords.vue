@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link2, LockKeyhole, Pencil, Trash2 } from '@lucide/vue'
+import { Link2, LockKeyhole, Pencil, Trash2, Video } from '@lucide/vue'
 
 import type { Course, SelectionRound, TeachingClass } from '@/types/catalog'
 
@@ -12,6 +12,7 @@ defineProps<{
 const emit = defineEmits<{
   editCourse: [item: Course]
   deleteCourse: [item: Course]
+  manageCourseVideo: [item: Course]
   editClass: [item: TeachingClass]
   deleteClass: [item: TeachingClass]
   editRound: [item: SelectionRound]
@@ -36,7 +37,7 @@ function scheduleLabel(item: TeachingClass): string {
         <div class="record-code"><strong>{{ item.course_code }}</strong><span>#{{ item.id }}</span></div>
         <div class="record-main"><h3>{{ item.course_name }}</h3><p>{{ item.introduction || '尚未填写课程简介' }}</p><div><span v-for="tag in item.tags" :key="tag">{{ tag }}</span></div></div>
         <strong class="record-number">{{ item.credits }}<small>学分</small></strong>
-        <div class="record-actions"><button type="button" aria-label="编辑课程" @click="emit('editCourse', item)"><Pencil :size="16" /></button><button type="button" class="danger" aria-label="删除课程" @click="emit('deleteCourse', item)"><Trash2 :size="16" /></button></div>
+        <div class="record-actions"><button type="button" aria-label="管理课程视频" @click="emit('manageCourseVideo', item)"><Video :size="16" /></button><button type="button" aria-label="编辑课程" @click="emit('editCourse', item)"><Pencil :size="16" /></button><button type="button" class="danger" aria-label="删除课程" @click="emit('deleteCourse', item)"><Trash2 :size="16" /></button></div>
       </article>
       <p v-if="!courses.length" class="empty">还没有课程，先新增一门课程。</p>
     </div>

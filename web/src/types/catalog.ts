@@ -9,6 +9,40 @@ export interface Course {
   update_time?: string
 }
 
+export type CourseVideoKind = 'preview' | 'lesson'
+export type CourseVideoStatus = 'uploading' | 'ready' | 'failed'
+
+export interface CourseVideo {
+  id: number
+  course_id: number
+  video_kind: CourseVideoKind
+  title: string
+  status: CourseVideoStatus
+  sort_order: number
+  duration_ms?: number
+  create_time: string
+  update_time: string
+}
+
+export interface PreviewVideo {
+  id: number
+  title: string
+  duration_ms?: number
+}
+
+export interface VideoUploadTicket {
+  video: CourseVideo
+  upload_url: string
+  expires_at: string
+  method: 'PUT'
+  headers: Record<string, string>
+}
+
+export interface VideoPlaybackTicket {
+  play_url: string
+  expires_at: string
+}
+
 export interface ClassSchedule {
   id?: number
   teaching_class_id?: number
@@ -31,6 +65,7 @@ export interface TeachingClass {
   credits: number
   introduction: string
   tags: readonly string[]
+  preview_video?: PreviewVideo
   teacher_name: string
   location: string
   capacity: number

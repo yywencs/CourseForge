@@ -33,6 +33,7 @@ export interface TeachingClassSummary {
   tags: string[]
   introduction: string
   hasVideo: boolean
+  videoId?: number
   videoUrl?: string
   dayOfWeek?: number
   startSection?: number

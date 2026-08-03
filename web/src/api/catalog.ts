@@ -3,11 +3,14 @@ import { http, unwrap } from '@/api/http'
 import type {
   Course,
   CourseDraft,
+  CourseVideo,
   RoundClassBinding,
   SelectionRound,
   SelectionRoundDraft,
   TeachingClass,
   TeachingClassDraft,
+  VideoPlaybackTicket,
+  VideoUploadTicket,
 } from '@/types/catalog'
 
 interface ItemList<T> {
@@ -34,6 +37,31 @@ export function updateCourse(id: number, input: CourseDraft): Promise<Course> {
 
 export function deleteCourse(id: number): Promise<{ deleted: boolean }> {
   return unwrapAdmin(adminHttp.delete(`/admin/v1/courses/${id}`))
+}
+
+export function listCourseVideos(courseId: number): Promise<ItemList<CourseVideo>> {
+  return unwrapAdmin(adminHttp.get(`/admin/v1/courses/${courseId}/videos`))
+}
+
+export function startCourseVideoUpload(courseId: number, input: {
+  video_kind: 'preview' | 'lesson'
+  title: string
+  file_name: string
+  content_type: string
+  file_size: number
+  sort_order: number
+}): Promise<VideoUploadTicket> {
+  return unwrapAdmin(adminHttp.post(`/admin/v1/courses/${courseId}/videos/uploads`, input))
+}
+
+export function completeCourseVideoUpload(videoId: number, durationMs?: number): Promise<CourseVideo> {
+  return unwrapAdmin(adminHttp.post(`/admin/v1/course-videos/${videoId}/complete`, {
+    duration_ms: durationMs,
+  }))
+}
+
+export function getCourseVideoPlayback(videoId: number): Promise<VideoPlaybackTicket> {
+  return unwrap(http.get(`/api/v1/course-videos/${videoId}/playback`))
 }
 
 export function listTeachingClasses(termId?: number, keyword = ''): Promise<ItemList<TeachingClass>> {

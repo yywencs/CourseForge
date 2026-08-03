@@ -64,7 +64,7 @@ function handlePrimaryAction(): void {
       </dl>
     </div>
 
-    <button v-if="course.hasVideo && course.videoUrl" class="course-media" type="button" @click="emit('playVideo', course)">
+    <button v-if="course.hasVideo && course.videoId" class="course-media" type="button" @click="emit('playVideo', course)">
       <span><Play :size="20" fill="currentColor" /></span>
       <strong>课程预览</strong>
       <small>了解课程内容</small>

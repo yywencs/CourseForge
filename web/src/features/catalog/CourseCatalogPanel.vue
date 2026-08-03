@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { Search, SlidersHorizontal } from '@lucide/vue'
 import { useQuery } from '@tanstack/vue-query'
+import { ElMessage } from 'element-plus'
 import { computed, shallowRef } from 'vue'
 
 import { listMyEnrollments, listMyWaitlist } from '@/api/enrollment'
+import { getCourseVideoPlayback } from '@/api/catalog'
 import CourseCard from '@/components/CourseCard.vue'
 import { useCatalogActions } from '@/composables/useCatalogActions'
 import { useStudentCatalog } from '@/composables/useStudentCatalog'
@@ -60,9 +62,16 @@ const filteredCourses = computed(() => {
   )
 })
 
-function openPreview(course: TeachingClassSummary): void {
-  previewCourse.value = course
-  previewOpen.value = true
+async function openPreview(course: TeachingClassSummary): Promise<void> {
+  if (!course.videoId) return
+  try {
+    const playback = await getCourseVideoPlayback(course.videoId)
+    previewCourse.value = { ...course, videoUrl: playback.play_url }
+    previewOpen.value = true
+  } catch (error) {
+    previewCourse.value = undefined
+    ElMessage.error(error instanceof Error ? error.message : '视频播放地址获取失败')
+  }
 }
 
 function submitDirect(course: TeachingClassSummary): void {

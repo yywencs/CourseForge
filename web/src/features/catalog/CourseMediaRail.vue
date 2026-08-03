@@ -19,7 +19,7 @@ const emit = defineEmits<{
 
 const previewCourses = computed(() =>
   props.courses
-    .filter((course) => course.hasVideo && Boolean(course.videoUrl))
+    .filter((course) => course.hasVideo && Boolean(course.videoId))
     .slice(0, 2),
 )
 </script>

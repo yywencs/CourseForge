@@ -70,7 +70,18 @@ data:
     keep_alive: true
   etcd:
     endpoints: ["127.0.0.1:2379"]
-    timeout: 5s                  
+    timeout: 5s
+  object_storage:
+    enabled: true
+    endpoint: "127.0.0.1:9000"
+    access_key: "courseforge"
+    secret_key: "courseforge-local-password"
+    bucket: "courseforge"
+    region: "us-east-1"
+    use_ssl: false
+    upload_url_ttl: 15m
+    playback_url_ttl: 15m
+    max_video_size_bytes: 524288000
 
 asynq:
   redis:

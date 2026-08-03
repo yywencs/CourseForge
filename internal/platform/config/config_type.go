@@ -80,9 +80,45 @@ type HttpConfig struct {
 // --- Data 部分 ---
 
 type DataConfig struct {
-	Database DatabaseConfig `mapstructure:"mysql"`
-	Redis    RedisConfig    `mapstructure:"redis"`
-	Etcd     EtcdConfig     `mapstructure:"etcd"`
+	Database      DatabaseConfig      `mapstructure:"mysql"`
+	Redis         RedisConfig         `mapstructure:"redis"`
+	Etcd          EtcdConfig          `mapstructure:"etcd"`
+	ObjectStorage ObjectStorageConfig `mapstructure:"object_storage"`
+}
+
+type ObjectStorageConfig struct {
+	Enabled           bool          `mapstructure:"enabled"`
+	Endpoint          string        `mapstructure:"endpoint"`
+	AccessKey         string        `mapstructure:"access_key"`
+	SecretKey         string        `mapstructure:"secret_key"`
+	Bucket            string        `mapstructure:"bucket"`
+	Region            string        `mapstructure:"region"`
+	UseSSL            bool          `mapstructure:"use_ssl"`
+	UploadURLTTL      time.Duration `mapstructure:"upload_url_ttl"`
+	PlaybackURLTTL    time.Duration `mapstructure:"playback_url_ttl"`
+	MaxVideoSizeBytes int64         `mapstructure:"max_video_size_bytes"`
+}
+
+func (c ObjectStorageConfig) Validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(c.Endpoint) == "" {
+		return fmt.Errorf("data.object_storage.endpoint is required")
+	}
+	if strings.TrimSpace(c.AccessKey) == "" || strings.TrimSpace(c.SecretKey) == "" {
+		return fmt.Errorf("data.object_storage credentials are required")
+	}
+	if strings.TrimSpace(c.Bucket) == "" {
+		return fmt.Errorf("data.object_storage.bucket is required")
+	}
+	if c.UploadURLTTL <= 0 || c.PlaybackURLTTL <= 0 {
+		return fmt.Errorf("data.object_storage URL TTLs must be positive")
+	}
+	if c.MaxVideoSizeBytes <= 0 {
+		return fmt.Errorf("data.object_storage.max_video_size_bytes must be positive")
+	}
+	return nil
 }
 
 type DatabaseConfig struct {

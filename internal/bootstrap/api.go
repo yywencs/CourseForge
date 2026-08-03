@@ -8,6 +8,7 @@ import (
 
 	applicationcatalog "prizeforge/internal/catalog/application"
 	catalogrepo "prizeforge/internal/catalog/infrastructure/mysql"
+	catalogstorage "prizeforge/internal/catalog/infrastructure/objectstorage"
 	cataloghttp "prizeforge/internal/catalog/transport/http"
 	enrollmentapp "prizeforge/internal/enrollment/application"
 	enrollmentasync "prizeforge/internal/enrollment/async"
@@ -98,7 +99,10 @@ func NewAdminApp() (*HTTPApp, error) {
 		middleware.TokenVerifierFunc(tokenManager.VerifyAdministrator),
 	)
 	administratorLoginLimiter := middleware.NewLoginRateLimiter(cfg.Dcc.RateLimit)
-	catalogService := applicationcatalog.NewService(catalogrepo.NewRepository(courseforgeDB))
+	catalogService, err := newCatalogService(catalogrepo.NewRepository(courseforgeDB), cfg.Data.ObjectStorage)
+	if err != nil {
+		return nil, fmt.Errorf("catalog video storage: %w", err)
+	}
 	roundManagementService := enrollmentapp.NewRoundManagementService(
 		roundrepo.NewRepository(courseforgeDB),
 	)
@@ -157,7 +161,11 @@ func NewAPIApp() (*HTTPApp, error) {
 	ids := identifier.NewOrderIDGenerator()
 	enrollmentObserver := enrollmentobservability.NewPrometheusObserver()
 	enrollmentStores := enrollmentrepo.NewStores(courseforgeDB, redis, ids)
-	catalogService := applicationcatalog.NewService(catalogrepo.NewRepository(courseforgeDB))
+	catalogService, err := newCatalogService(catalogrepo.NewRepository(courseforgeDB), cfg.Data.ObjectStorage)
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("catalog video storage: %w", err)
+	}
 	selectionResultPublisher := enrollmentasync.NewSelectionResultPublisher(enrollmentStores.Selections, publisher)
 	selectionResultRecovery := enrollmentasync.NewSelectionResultRecoveryJob(
 		enrollmentStores.Selections,
@@ -311,6 +319,24 @@ func databaseReadinessCheck(db interface {
 		}
 		return sqlDB.PingContext(ctx)
 	}
+}
+
+func newCatalogService(repository applicationcatalog.Repository, cfg config.ObjectStorageConfig) (*applicationcatalog.Service, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	if !cfg.Enabled {
+		// 对象存储关闭时保留课程目录能力，仅视频上传和播放返回服务不可用。
+		return applicationcatalog.NewService(repository), nil
+	}
+	storage, err := catalogstorage.NewS3Store(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return applicationcatalog.NewService(repository, applicationcatalog.WithVideoStorage(storage, applicationcatalog.VideoPolicy{
+		UploadURLTTL: cfg.UploadURLTTL, PlaybackURLTTL: cfg.PlaybackURLTTL,
+		MaxVideoSizeBytes: cfg.MaxVideoSizeBytes,
+	})), nil
 }
 
 // APIServer returns the API HTTP server.

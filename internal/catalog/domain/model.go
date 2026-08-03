@@ -39,6 +39,80 @@ type Course struct {
 	UpdateTime   time.Time
 }
 
+type CourseVideoKind string
+
+const (
+	CourseVideoKindPreview CourseVideoKind = "preview"
+	CourseVideoKindLesson  CourseVideoKind = "lesson"
+)
+
+type CourseVideoStatus string
+
+const (
+	// 课程视频只在对象校验通过后从 uploading 进入 ready，failed 预留给后续异步转码或审核。
+	CourseVideoStatusUploading CourseVideoStatus = "uploading"
+	CourseVideoStatusReady     CourseVideoStatus = "ready"
+	CourseVideoStatusFailed    CourseVideoStatus = "failed"
+)
+
+type CourseVideo struct {
+	ID         uint64
+	CourseID   uint64
+	Kind       CourseVideoKind
+	Title      string
+	ObjectKey  string
+	Status     CourseVideoStatus
+	SortOrder  uint32
+	DurationMS *uint64
+	CreateTime time.Time
+	UpdateTime time.Time
+}
+
+func NewCourseVideo(courseID uint64, kind CourseVideoKind, title, objectKey string, sortOrder uint32) (*CourseVideo, error) {
+	title = strings.TrimSpace(title)
+	objectKey = strings.TrimSpace(objectKey)
+	// 预览视频固定占第 0 位；正式课时从第 1 位开始，后续扩展多课时时无需修改表结构。
+	if courseID == 0 || title == "" || objectKey == "" ||
+		(kind != CourseVideoKindPreview && kind != CourseVideoKindLesson) ||
+		(kind == CourseVideoKindPreview && sortOrder != 0) ||
+		(kind == CourseVideoKindLesson && sortOrder == 0) {
+		return nil, ErrInvalidCourseVideo
+	}
+	return &CourseVideo{
+		CourseID: courseID, Kind: kind, Title: title, ObjectKey: objectKey,
+		Status: CourseVideoStatusUploading, SortOrder: sortOrder,
+	}, nil
+}
+
+func (v *CourseVideo) CompleteUpload(durationMS *uint64) error {
+	if v.Status != CourseVideoStatusUploading {
+		return ErrCourseVideoNotUploadable
+	}
+	if durationMS != nil && *durationMS == 0 {
+		return ErrInvalidCourseVideo
+	}
+	v.DurationMS = durationMS
+	v.Status = CourseVideoStatusReady
+	return nil
+}
+
+func (v *CourseVideo) RestartUpload(title string) error {
+	title = strings.TrimSpace(title)
+	if title == "" || (v.Status != CourseVideoStatusUploading && v.Status != CourseVideoStatusFailed) {
+		return ErrCourseVideoNotUploadable
+	}
+	v.Title = title
+	v.Status = CourseVideoStatusUploading
+	return nil
+}
+
+func (v CourseVideo) EnsurePreviewPlayable() error {
+	if v.Kind != CourseVideoKindPreview || v.Status != CourseVideoStatusReady {
+		return ErrCourseVideoNotPlayable
+	}
+	return nil
+}
+
 func NewCourse(details CourseDetails) (*Course, error) {
 	details, err := normalizeCourseDetails(details)
 	if err != nil {

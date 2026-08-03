@@ -26,6 +26,19 @@ type courseRequest struct {
 	Tags         []string `json:"tags"`
 }
 
+type startVideoUploadRequest struct {
+	VideoKind   domain.CourseVideoKind `json:"video_kind" binding:"required"`
+	Title       string                 `json:"title" binding:"required"`
+	FileName    string                 `json:"file_name" binding:"required"`
+	ContentType string                 `json:"content_type" binding:"required"`
+	FileSize    int64                  `json:"file_size" binding:"required"`
+	SortOrder   uint32                 `json:"sort_order"`
+}
+
+type completeVideoUploadRequest struct {
+	DurationMS *uint64 `json:"duration_ms"`
+}
+
 func (r courseRequest) input() applicationcatalog.CourseInput {
 	return applicationcatalog.CourseInput{
 		CourseCode: r.CourseCode, CourseName: r.CourseName, Credits: r.Credits,
@@ -88,6 +101,9 @@ func (h *CatalogRoutes) RegisterAdminRoutes(group *gin.RouterGroup) {
 	courses.POST("", h.createCourse)
 	courses.PUT("/:course_id", h.updateCourse)
 	courses.DELETE("/:course_id", h.deleteCourse)
+	courses.GET("/:course_id/videos", h.listCourseVideos)
+	courses.POST("/:course_id/videos/uploads", h.startVideoUpload)
+	group.POST("/course-videos/:video_id/complete", h.completeVideoUpload)
 
 	classes := group.Group("/teaching-classes")
 	classes.GET("", h.listTeachingClasses)
@@ -95,6 +111,62 @@ func (h *CatalogRoutes) RegisterAdminRoutes(group *gin.RouterGroup) {
 	classes.POST("", h.createTeachingClass)
 	classes.PUT("/:teaching_class_id", h.updateTeachingClass)
 	classes.DELETE("/:teaching_class_id", h.deleteTeachingClass)
+}
+
+func (h *CatalogRoutes) listCourseVideos(c *gin.Context) {
+	courseID, ok := catalogID(c, "course_id")
+	if !ok {
+		return
+	}
+	items, err := h.service.ListCourseVideos(c.Request.Context(), courseID)
+	if err != nil {
+		handleCatalogError(c, err)
+		return
+	}
+	common.Success(c, gin.H{"items": catalogdto.CourseVideos(items)})
+}
+
+func (h *CatalogRoutes) startVideoUpload(c *gin.Context) {
+	courseID, ok := catalogID(c, "course_id")
+	if !ok {
+		return
+	}
+	var request startVideoUploadRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.Error(c, http.StatusBadRequest, "视频上传信息格式不正确")
+		return
+	}
+	ticket, err := h.service.StartCourseVideoUpload(c.Request.Context(), courseID, applicationcatalog.StartVideoUploadInput{
+		Kind: request.VideoKind, Title: request.Title, FileName: request.FileName,
+		ContentType: request.ContentType, FileSize: request.FileSize, SortOrder: request.SortOrder,
+	})
+	if err != nil {
+		handleCatalogError(c, err)
+		return
+	}
+	common.Success(c, gin.H{
+		"video": catalogdto.CourseVideo(ticket.Video), "upload_url": ticket.UploadURL,
+		"expires_at": ticket.ExpiresAt, "method": http.MethodPut,
+		"headers": gin.H{"Content-Type": "video/mp4"},
+	})
+}
+
+func (h *CatalogRoutes) completeVideoUpload(c *gin.Context) {
+	videoID, ok := catalogID(c, "video_id")
+	if !ok {
+		return
+	}
+	var request completeVideoUploadRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.Error(c, http.StatusBadRequest, "视频完成信息格式不正确")
+		return
+	}
+	video, err := h.service.CompleteCourseVideoUpload(c.Request.Context(), videoID, request.DurationMS)
+	if err != nil {
+		handleCatalogError(c, err)
+		return
+	}
+	common.Success(c, catalogdto.CourseVideo(*video))
 }
 
 func (h *CatalogRoutes) listCourses(c *gin.Context) {
@@ -260,11 +332,14 @@ func handleCatalogError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrNotFound):
 		common.Error(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrCourseInUse),
-		errors.Is(err, domain.ErrTeachingClassInUse):
+		errors.Is(err, domain.ErrTeachingClassInUse), errors.Is(err, domain.ErrVideoUploadIncomplete):
 		common.Error(c, http.StatusConflict, err.Error())
 	case errors.Is(err, domain.ErrInvalidCourse), errors.Is(err, domain.ErrInvalidSchedule),
-		errors.Is(err, domain.ErrInvalidTeachingClass):
+		errors.Is(err, domain.ErrInvalidTeachingClass), errors.Is(err, domain.ErrInvalidCourseVideo),
+		errors.Is(err, applicationcatalog.ErrVideoObjectInvalid):
 		common.Error(c, http.StatusBadRequest, err.Error())
+	case errors.Is(err, applicationcatalog.ErrVideoStorageUnavailable):
+		common.Error(c, http.StatusServiceUnavailable, err.Error())
 	default:
 		common.Error(c, http.StatusInternalServerError, "课程配置服务暂时不可用")
 	}

@@ -11,12 +11,13 @@ import (
 func TestTeachingClassResponseUsesHTTPFieldNames(t *testing.T) {
 	payload, err := json.Marshal(TeachingClass(applicationcatalog.TeachingClassView{
 		ID: 7, ClassCode: "CS-101-01", CourseName: "程序设计",
+		PreviewVideo: &applicationcatalog.CourseVideoView{ID: 9, Title: "课程预览"},
 	}))
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
 	}
 	body := string(payload)
-	for _, field := range []string{`"class_code"`, `"course_name"`, `"selected_count"`, `"schedules"`} {
+	for _, field := range []string{`"class_code"`, `"course_name"`, `"selected_count"`, `"schedules"`, `"preview_video"`} {
 		if !strings.Contains(body, field) {
 			t.Fatalf("response %s does not contain %s", body, field)
 		}

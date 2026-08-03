@@ -29,11 +29,14 @@ type teachingClassRow struct {
 	CreateTime       time.Time `gorm:"column:create_time"`
 	UpdateTime       time.Time `gorm:"column:update_time"`
 
-	CourseCode   string  `gorm:"column:course_code;->"`
-	CourseName   string  `gorm:"column:course_name;->"`
-	Credits      float64 `gorm:"column:credits;->"`
-	Introduction string  `gorm:"column:introduction;->"`
-	Tags         []byte  `gorm:"column:tags;->"`
+	CourseCode           string  `gorm:"column:course_code;->"`
+	CourseName           string  `gorm:"column:course_name;->"`
+	Credits              float64 `gorm:"column:credits;->"`
+	Introduction         string  `gorm:"column:introduction;->"`
+	Tags                 []byte  `gorm:"column:tags;->"`
+	PreviewVideoID       *uint64 `gorm:"column:preview_video_id;->"`
+	PreviewVideoTitle    *string `gorm:"column:preview_video_title;->"`
+	PreviewVideoDuration *uint64 `gorm:"column:preview_video_duration_ms;->"`
 }
 
 func (teachingClassRow) TableName() string { return "teaching_class" }
@@ -68,7 +71,7 @@ func (r teachingClassRow) aggregate() catalog.TeachingClass {
 }
 
 func (r teachingClassRow) view() applicationcatalog.TeachingClassView {
-	return applicationcatalog.TeachingClassView{
+	view := applicationcatalog.TeachingClassView{
 		ID: r.ID, ClassCode: r.ClassCode, TermID: r.TermID, CourseID: r.CourseID,
 		CourseCode: r.CourseCode, CourseName: r.CourseName, Credits: r.Credits,
 		Introduction: r.Introduction, Tags: decodeTags(r.Tags),
@@ -77,18 +80,29 @@ func (r teachingClassRow) view() applicationcatalog.TeachingClassView {
 		MaximumGradeYear: r.MaximumGradeYear, State: catalog.TeachingClassState(r.State),
 		Schedules: []catalog.Schedule{}, CreateTime: r.CreateTime, UpdateTime: r.UpdateTime,
 	}
+	if r.PreviewVideoID != nil {
+		view.PreviewVideo = &applicationcatalog.CourseVideoView{
+			ID: *r.PreviewVideoID, Title: valueOrEmpty(r.PreviewVideoTitle),
+			DurationMS: r.PreviewVideoDuration,
+		}
+	}
+	return view
 }
 
 const teachingClassSelect = `
 	tc.id, tc.class_code, tc.term_id, tc.course_id, tc.teacher_name, tc.location,
 	tc.capacity, tc.selected_count, tc.minimum_grade_year, tc.maximum_grade_year,
 	tc.state, tc.create_time, tc.update_time,
-	c.course_code, c.course_name, c.credits, c.introduction, c.tags`
+	c.course_code, c.course_name, c.credits, c.introduction, c.tags,
+	cv.id AS preview_video_id, cv.title AS preview_video_title,
+	cv.duration_ms AS preview_video_duration_ms`
 
 func (r *Repository) ListTeachingClasses(ctx context.Context, termID uint64, keyword string) ([]applicationcatalog.TeachingClassView, error) {
+	// 目录列表只投影已就绪的第 0 位预览视频，上传中的对象不会暴露给学生端。
 	query := r.dbFor(ctx).Table("teaching_class AS tc").
 		Select(teachingClassSelect).
-		Joins("JOIN course AS c ON c.id = tc.course_id")
+		Joins("JOIN course AS c ON c.id = tc.course_id").
+		Joins("LEFT JOIN course_video AS cv ON cv.course_id = c.id AND cv.video_kind = ? AND cv.sort_order = 0 AND cv.status = ?", string(catalog.CourseVideoKindPreview), string(catalog.CourseVideoStatusReady))
 	if termID > 0 {
 		query = query.Where("tc.term_id = ?", termID)
 	}
@@ -109,6 +123,7 @@ func (r *Repository) ListStudentCatalog(ctx context.Context, query applicationca
 		Joins("JOIN selection_round AS sr ON sr.id = src.round_id").
 		Joins("JOIN teaching_class AS tc ON tc.id = src.teaching_class_id").
 		Joins("JOIN course AS c ON c.id = tc.course_id").
+		Joins("LEFT JOIN course_video AS cv ON cv.course_id = c.id AND cv.video_kind = ? AND cv.sort_order = 0 AND cv.status = ?", string(catalog.CourseVideoKindPreview), string(catalog.CourseVideoStatusReady)).
 		Where("src.round_id = ? AND src.state = ? AND sr.state = ? AND sr.start_time <= NOW(3) AND sr.end_time > NOW(3) AND tc.state = ?", query.RoundID, "open", "open", string(catalog.TeachingClassStateOpen))
 	if keyword := strings.TrimSpace(query.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
@@ -126,6 +141,7 @@ func (r *Repository) GetTeachingClass(ctx context.Context, id uint64) (*applicat
 	err := r.dbFor(ctx).Table("teaching_class AS tc").
 		Select(teachingClassSelect).
 		Joins("JOIN course AS c ON c.id = tc.course_id").
+		Joins("LEFT JOIN course_video AS cv ON cv.course_id = c.id AND cv.video_kind = ? AND cv.sort_order = 0 AND cv.status = ?", string(catalog.CourseVideoKindPreview), string(catalog.CourseVideoStatusReady)).
 		Where("tc.id = ?", id).Take(&row).Error
 	if err != nil {
 		return nil, normalizeDBError(err)
@@ -135,6 +151,13 @@ func (r *Repository) GetTeachingClass(ctx context.Context, id uint64) (*applicat
 		return nil, err
 	}
 	return &items[0], nil
+}
+
+func valueOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func (r *Repository) GetTeachingClassForUpdate(ctx context.Context, id uint64) (*catalog.TeachingClass, error) {

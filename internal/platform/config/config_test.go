@@ -149,6 +149,25 @@ func TestRateLimitConfigValidate(t *testing.T) {
 	}
 }
 
+func TestObjectStorageConfigValidate(t *testing.T) {
+	disabled := ObjectStorageConfig{}
+	if err := disabled.Validate(); err != nil {
+		t.Fatalf("disabled Validate() error = %v", err)
+	}
+	valid := ObjectStorageConfig{
+		Enabled: true, Endpoint: "127.0.0.1:9000", AccessKey: "courseforge",
+		SecretKey: "secret", Bucket: "courseforge", UploadURLTTL: time.Minute,
+		PlaybackURLTTL: time.Minute, MaxVideoSizeBytes: 1024,
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	valid.Bucket = ""
+	if err := valid.Validate(); err == nil || !strings.Contains(err.Error(), "bucket") {
+		t.Fatalf("missing bucket error = %v", err)
+	}
+}
+
 func validRateLimitPolicy() RateLimitPolicyConfig {
 	return RateLimitPolicyConfig{Requests: 10, Window: time.Second, Burst: 20}
 }

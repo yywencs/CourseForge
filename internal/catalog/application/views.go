@@ -6,6 +6,12 @@ import (
 	domain "prizeforge/internal/catalog/domain"
 )
 
+type CourseVideoView struct {
+	ID         uint64
+	Title      string
+	DurationMS *uint64
+}
+
 // TeachingClassView 是查询侧投影，不参与教学班领域行为。
 type TeachingClassView struct {
 	ID               uint64
@@ -17,6 +23,7 @@ type TeachingClassView struct {
 	Credits          float64
 	Introduction     string
 	Tags             []string
+	PreviewVideo     *CourseVideoView
 	TeacherName      string
 	Location         string
 	Capacity         uint32

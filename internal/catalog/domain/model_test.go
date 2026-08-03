@@ -50,6 +50,23 @@ func TestCourseEnsureDeletableUsesDependencyFacts(t *testing.T) {
 	}
 }
 
+func TestCourseVideoLifecycle(t *testing.T) {
+	video, err := NewCourseVideo(1, CourseVideoKindPreview, " 课程预览 ", "course-videos/1/a.mp4", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := video.EnsurePreviewPlayable(); !errors.Is(err, ErrCourseVideoNotPlayable) {
+		t.Fatalf("uploading EnsurePreviewPlayable() error = %v", err)
+	}
+	duration := uint64(10_000)
+	if err := video.CompleteUpload(&duration); err != nil {
+		t.Fatal(err)
+	}
+	if err := video.EnsurePreviewPlayable(); err != nil {
+		t.Fatalf("ready EnsurePreviewPlayable() error = %v", err)
+	}
+}
+
 func TestTeachingClassChangePlanOwnsStateAndBindingRules(t *testing.T) {
 	class := validTeachingClass()
 	class.State = TeachingClassStateOpen

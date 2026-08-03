@@ -67,6 +67,20 @@ func TestCourseVideoLifecycle(t *testing.T) {
 	}
 }
 
+func TestCourseVideoRestartUploadUsesNewObjectKey(t *testing.T) {
+	video, err := NewCourseVideo(1, CourseVideoKindPreview, "旧预览", "course-videos/1/old.mp4", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := video.RestartUpload("新预览", "course-videos/1/new.mp4"); err != nil {
+		t.Fatal(err)
+	}
+	if video.Title != "新预览" || video.ObjectKey != "course-videos/1/new.mp4" ||
+		video.Status != CourseVideoStatusUploading {
+		t.Fatalf("video = %#v", video)
+	}
+}
+
 func TestTeachingClassChangePlanOwnsStateAndBindingRules(t *testing.T) {
 	class := validTeachingClass()
 	class.State = TeachingClassStateOpen

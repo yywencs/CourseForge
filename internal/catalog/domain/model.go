@@ -55,6 +55,15 @@ const (
 	CourseVideoStatusFailed    CourseVideoStatus = "failed"
 )
 
+type CourseVideoUploadStatus string
+
+const (
+	CourseVideoUploadStatusPending  CourseVideoUploadStatus = "pending"
+	CourseVideoUploadStatusPromoted CourseVideoUploadStatus = "promoted"
+	CourseVideoUploadStatusFailed   CourseVideoUploadStatus = "failed"
+	CourseVideoUploadStatusCleaned  CourseVideoUploadStatus = "cleaned"
+)
+
 type CourseVideo struct {
 	ID         uint64
 	CourseID   uint64
@@ -66,6 +75,31 @@ type CourseVideo struct {
 	DurationMS *uint64
 	CreateTime time.Time
 	UpdateTime time.Time
+}
+
+// CourseVideoUpload 记录逻辑课程视频的一次物理对象上传尝试。
+// 每次尝试拥有独立对象键，避免过期签名地址覆盖更新的上传对象。
+type CourseVideoUpload struct {
+	ID            uint64
+	CourseVideoID uint64
+	ObjectKey     string
+	Status        CourseVideoUploadStatus
+	ExpiresAt     time.Time
+	CreateTime    time.Time
+	UpdateTime    time.Time
+}
+
+func NewCourseVideoUpload(courseVideoID uint64, objectKey string, expiresAt time.Time) (*CourseVideoUpload, error) {
+	objectKey = strings.TrimSpace(objectKey)
+	if courseVideoID == 0 || objectKey == "" || expiresAt.IsZero() {
+		return nil, ErrInvalidCourseVideo
+	}
+	return &CourseVideoUpload{
+		CourseVideoID: courseVideoID,
+		ObjectKey:     objectKey,
+		Status:        CourseVideoUploadStatusPending,
+		ExpiresAt:     expiresAt,
+	}, nil
 }
 
 func NewCourseVideo(courseID uint64, kind CourseVideoKind, title, objectKey string, sortOrder uint32) (*CourseVideo, error) {
@@ -96,12 +130,15 @@ func (v *CourseVideo) CompleteUpload(durationMS *uint64) error {
 	return nil
 }
 
-func (v *CourseVideo) RestartUpload(title string) error {
+func (v *CourseVideo) RestartUpload(title, objectKey string) error {
 	title = strings.TrimSpace(title)
-	if title == "" || (v.Status != CourseVideoStatusUploading && v.Status != CourseVideoStatusFailed) {
+	objectKey = strings.TrimSpace(objectKey)
+	if title == "" || objectKey == "" ||
+		(v.Status != CourseVideoStatusUploading && v.Status != CourseVideoStatusFailed) {
 		return ErrCourseVideoNotUploadable
 	}
 	v.Title = title
+	v.ObjectKey = objectKey
 	v.Status = CourseVideoStatusUploading
 	return nil
 }

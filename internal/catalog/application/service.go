@@ -2,14 +2,14 @@ package catalogapp
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	domain "prizeforge/internal/catalog/domain"
+
+	"github.com/google/uuid"
 )
 
 var (
@@ -132,9 +132,15 @@ func (s *Service) StartCourseVideoUpload(ctx context.Context, courseID uint64, i
 		!strings.HasSuffix(strings.ToLower(strings.TrimSpace(input.FileName)), ".mp4") {
 		return nil, domain.ErrInvalidCourseVideo
 	}
+	// 对象键不依赖数据库生成值，先生成可在失败时避免开启事务和持有课程行锁。
+	objectKey, err := s.newObjectKey(courseID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: generate object key", ErrVideoStorageUnavailable)
+	}
 	var video *domain.CourseVideo
+	expiresAt := s.now().Add(s.videoPolicy.UploadURLTTL)
 	// 同一课程、视频类型和排序号代表同一个视频位。行锁可避免并发申请上传时
-	// 为同一位置创建多条记录；重新上传则复用原对象键，数据库无需保存临时 URL。
+	// 为同一位置创建多条记录；每次尝试使用新对象键，避免旧签名 URL 覆盖新对象。
 	if err := s.repository.WithinTransaction(ctx, func(txCtx context.Context) error {
 		// 锁定课程行既能确认课程存在，也能把同一课程的并发上传申请串行化。
 		if _, err := s.repository.GetCourseForUpdate(txCtx, courseID); err != nil {
@@ -143,30 +149,32 @@ func (s *Service) StartCourseVideoUpload(ctx context.Context, courseID uint64, i
 		// 数据库唯一位置由 course_id、video_kind 和 sort_order 共同确定。
 		existing, err := s.repository.GetCourseVideoByPositionForUpdate(txCtx, courseID, input.Kind, input.SortOrder)
 		if err == nil {
-			// 已有未完成或失败的视频时复用记录和对象键，避免产生无主对象。
+			// 已有未完成或失败的视频时复用逻辑记录，但物理对象键属于本次新尝试。
 			expectedStatus := existing.Status
-			if err := existing.RestartUpload(input.Title); err != nil {
+			if err := existing.RestartUpload(input.Title, objectKey); err != nil {
 				return err
 			}
 			if err := s.repository.SaveCourseVideo(txCtx, existing, expectedStatus); err != nil {
 				return err
 			}
 			video = existing
-			return nil
+		} else if !errors.Is(err, domain.ErrNotFound) {
+			return err
+		} else {
+			// 新视频使用不可预测的随机对象键，不保存用户原始文件名。
+			video, err = domain.NewCourseVideo(courseID, input.Kind, input.Title, objectKey, input.SortOrder)
+			if err != nil {
+				return err
+			}
+			if err := s.repository.InsertCourseVideo(txCtx, video); err != nil {
+				return err
+			}
 		}
-		if !errors.Is(err, domain.ErrNotFound) {
+		upload, err := domain.NewCourseVideoUpload(video.ID, objectKey, expiresAt)
+		if err != nil {
 			return err
 		}
-		// 新视频使用不可预测的随机对象键，不保存用户原始文件名。
-		objectKey, err := s.newObjectKey(courseID)
-		if err != nil {
-			return fmt.Errorf("%w: generate object key", ErrVideoStorageUnavailable)
-		}
-		video, err = domain.NewCourseVideo(courseID, input.Kind, input.Title, objectKey, input.SortOrder)
-		if err != nil {
-			return err
-		}
-		return s.repository.InsertCourseVideo(txCtx, video)
+		return s.repository.InsertCourseVideoUpload(txCtx, upload)
 	}); err != nil {
 		return nil, err
 	}
@@ -176,7 +184,7 @@ func (s *Service) StartCourseVideoUpload(ctx context.Context, courseID uint64, i
 		return nil, fmt.Errorf("%w: %v", ErrVideoStorageUnavailable, err)
 	}
 	return &VideoUploadTicket{
-		Video: *video, UploadURL: uploadURL, ExpiresAt: s.now().Add(s.videoPolicy.UploadURLTTL),
+		Video: *video, UploadURL: uploadURL, ExpiresAt: expiresAt,
 	}, nil
 }
 
@@ -250,12 +258,12 @@ func (s *Service) GetPreviewPlayback(ctx context.Context, videoID uint64) (*Vide
 }
 
 func newVideoObjectKey(courseID uint64) (string, error) {
-	random := make([]byte, 16)
-	if _, err := rand.Read(random); err != nil {
+	id, err := uuid.NewRandom()
+	if err != nil {
 		return "", err
 	}
-	// 随机键既避免同名文件互相覆盖，也不向对象存储暴露用户原始文件名。
-	return fmt.Sprintf("course-videos/%d/%s.mp4", courseID, hex.EncodeToString(random)), nil
+	// UUID v4 既避免同名文件互相覆盖，也不向对象存储暴露用户原始文件名。
+	return fmt.Sprintf("course-videos/%d/%s.mp4", courseID, id.String()), nil
 }
 
 // 查询侧没有业务状态变更，可以直接使用只读端口。

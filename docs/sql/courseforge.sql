@@ -117,6 +117,27 @@ CREATE TABLE `course_video` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='课程视频';
 
+CREATE TABLE `course_video_upload` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '视频上传任务ID',
+  `course_video_id` bigint unsigned NOT NULL COMMENT '目标课程视频ID',
+  `object_key` varchar(512) NOT NULL COMMENT '本次上传使用的对象键',
+  `status` varchar(16) NOT NULL DEFAULT 'pending'
+    COMMENT 'pending/promoted/failed/cleaned',
+  `expires_at` datetime(3) NOT NULL COMMENT '上传任务过期时间',
+  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+    ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_course_video_upload_object_key` (`object_key`),
+  KEY `idx_course_video_upload_video`
+    (`course_video_id`, `id`),
+  KEY `idx_course_video_upload_cleanup`
+    (`status`, `expires_at`, `id`),
+  CONSTRAINT `chk_course_video_upload_status`
+    CHECK (`status` IN ('pending', 'promoted', 'failed', 'cleaned'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='课程视频上传任务及过期对象清理依据';
+
 CREATE TABLE `course_prerequisite` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `course_id` bigint unsigned NOT NULL COMMENT '目标课程ID',

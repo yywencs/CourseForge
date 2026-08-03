@@ -18,8 +18,8 @@ type courseVideoRow struct {
 	Status     string    `gorm:"column:status"`
 	SortOrder  uint32    `gorm:"column:sort_order"`
 	DurationMS *uint64   `gorm:"column:duration_ms"`
-	CreateTime time.Time `gorm:"column:create_time"`
-	UpdateTime time.Time `gorm:"column:update_time"`
+	CreateTime time.Time `gorm:"column:create_time;autoCreateTime"`
+	UpdateTime time.Time `gorm:"column:update_time;autoUpdateTime"`
 }
 
 func (courseVideoRow) TableName() string { return "course_video" }
@@ -97,7 +97,7 @@ func (r *Repository) SaveCourseVideo(ctx context.Context, video *domain.CourseVi
 	result := r.dbFor(ctx).Model(&courseVideoRow{}).
 		Where("id = ? AND status = ?", video.ID, string(expectedStatus)).
 		Updates(map[string]interface{}{
-			"title": video.Title, "status": string(video.Status),
+			"title": video.Title, "object_key": video.ObjectKey, "status": string(video.Status),
 			"sort_order": video.SortOrder, "duration_ms": video.DurationMS,
 		})
 	return requireConditionalWrite(result)

@@ -41,6 +41,7 @@ type Repository interface {
 	GetCourseVideoByPositionForUpdate(context.Context, uint64, domain.CourseVideoKind, uint32) (*domain.CourseVideo, error)
 	InsertCourseVideo(context.Context, *domain.CourseVideo) error
 	SaveCourseVideo(context.Context, *domain.CourseVideo, domain.CourseVideoStatus) error
+	InsertCourseVideoUpload(context.Context, *domain.CourseVideoUpload) error
 
 	ListTeachingClasses(context.Context, uint64, string) ([]TeachingClassView, error)
 	ListStudentCatalog(context.Context, StudentCatalogQuery) ([]TeachingClassView, error)

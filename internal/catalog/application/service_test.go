@@ -3,10 +3,13 @@ package catalogapp
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	domain "prizeforge/internal/catalog/domain"
+
+	"github.com/google/uuid"
 )
 
 func TestCourseVideoUploadCompletesAfterObjectVerification(t *testing.T) {
@@ -17,6 +20,8 @@ func TestCourseVideoUploadCompletesAfterObjectVerification(t *testing.T) {
 	service := NewService(repository, WithVideoStorage(storage, VideoPolicy{
 		UploadURLTTL: time.Minute, PlaybackURLTTL: time.Minute, MaxVideoSizeBytes: 2048,
 	}))
+	now := time.Date(2026, 8, 3, 10, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return now }
 	service.newObjectKey = func(uint64) (string, error) { return "course-videos/1/test.mp4", nil }
 
 	ticket, err := service.StartCourseVideoUpload(context.Background(), 1, StartVideoUploadInput{
@@ -28,6 +33,15 @@ func TestCourseVideoUploadCompletesAfterObjectVerification(t *testing.T) {
 	}
 	if ticket.UploadURL != "https://objects.example/upload" || repository.video == nil {
 		t.Fatalf("ticket = %#v, video = %#v", ticket, repository.video)
+	}
+	if repository.upload == nil || repository.upload.CourseVideoID != ticket.Video.ID ||
+		repository.upload.ObjectKey != ticket.Video.ObjectKey ||
+		repository.upload.Status != domain.CourseVideoUploadStatusPending ||
+		!repository.upload.ExpiresAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("upload = %#v", repository.upload)
+	}
+	if !repository.insertUploadInTransaction {
+		t.Fatal("course video upload was not inserted inside the video transaction")
 	}
 	duration := uint64(12_000)
 	video, err := service.CompleteCourseVideoUpload(context.Background(), ticket.Video.ID, &duration)
@@ -52,6 +66,69 @@ func TestCourseVideoUploadRejectsMissingObject(t *testing.T) {
 	_, err := service.CompleteCourseVideoUpload(context.Background(), 7, nil)
 	if !errors.Is(err, domain.ErrVideoUploadIncomplete) {
 		t.Fatalf("CompleteCourseVideoUpload() error = %v, want %v", err, domain.ErrVideoUploadIncomplete)
+	}
+}
+
+func TestCourseVideoUploadAttemptFailureStopsBeforePresigning(t *testing.T) {
+	wantErr := errors.New("insert upload failed")
+	repository := &videoRepositoryStub{
+		repositoryStub: repositoryStub{
+			course: &domain.Course{ID: 1, CourseCode: "CS-101", CourseName: "程序设计", Credits: 3},
+		},
+		insertUploadErr: wantErr,
+	}
+	storage := &objectStorageStub{}
+	service := NewService(repository, WithVideoStorage(storage, VideoPolicy{
+		UploadURLTTL: time.Minute, PlaybackURLTTL: time.Minute, MaxVideoSizeBytes: 2048,
+	}))
+	service.newObjectKey = func(uint64) (string, error) { return "course-videos/1/test.mp4", nil }
+
+	_, err := service.StartCourseVideoUpload(context.Background(), 1, StartVideoUploadInput{
+		Kind: domain.CourseVideoKindPreview, Title: "课程预览", FileName: "preview.mp4",
+		ContentType: "video/mp4", FileSize: 1024,
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("StartCourseVideoUpload() error = %v, want %v", err, wantErr)
+	}
+	if storage.presignUploadCalls != 0 {
+		t.Fatalf("PresignUpload() calls = %d, want 0", storage.presignUploadCalls)
+	}
+}
+
+func TestCourseVideoObjectKeyFailureStopsBeforeTransaction(t *testing.T) {
+	repository := &videoRepositoryStub{repositoryStub: repositoryStub{
+		course: &domain.Course{ID: 1, CourseCode: "CS-101", CourseName: "程序设计", Credits: 3},
+	}}
+	service := NewService(repository, WithVideoStorage(&objectStorageStub{}, VideoPolicy{
+		UploadURLTTL: time.Minute, PlaybackURLTTL: time.Minute, MaxVideoSizeBytes: 2048,
+	}))
+	service.newObjectKey = func(uint64) (string, error) { return "", errors.New("random source unavailable") }
+
+	_, err := service.StartCourseVideoUpload(context.Background(), 1, StartVideoUploadInput{
+		Kind: domain.CourseVideoKindPreview, Title: "课程预览", FileName: "preview.mp4",
+		ContentType: "video/mp4", FileSize: 1024,
+	})
+	if !errors.Is(err, ErrVideoStorageUnavailable) {
+		t.Fatalf("StartCourseVideoUpload() error = %v, want %v", err, ErrVideoStorageUnavailable)
+	}
+	if repository.transactions != 0 {
+		t.Fatalf("transactions = %d, want 0", repository.transactions)
+	}
+}
+
+func TestNewVideoObjectKeyUsesUUID(t *testing.T) {
+	key, err := newVideoObjectKey(12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const prefix = "course-videos/12/"
+	if !strings.HasPrefix(key, prefix) || !strings.HasSuffix(key, ".mp4") {
+		t.Fatalf("object key = %q", key)
+	}
+	idText := strings.TrimSuffix(strings.TrimPrefix(key, prefix), ".mp4")
+	id, err := uuid.Parse(idText)
+	if err != nil || id.Version() != 4 {
+		t.Fatalf("object key UUID = %q, error = %v", idText, err)
 	}
 }
 
@@ -152,8 +229,9 @@ func equalStrings(left, right []string) bool {
 }
 
 type repositoryStub struct {
-	transactions int
-	events       []string
+	transactions     int
+	transactionDepth int
+	events           []string
 
 	course      *domain.Course
 	class       *domain.TeachingClass
@@ -166,7 +244,10 @@ type repositoryStub struct {
 
 type videoRepositoryStub struct {
 	repositoryStub
-	video *domain.CourseVideo
+	video                     *domain.CourseVideo
+	upload                    *domain.CourseVideoUpload
+	insertUploadInTransaction bool
+	insertUploadErr           error
 }
 
 func (r *videoRepositoryStub) GetCourseVideo(context.Context, uint64) (*domain.CourseVideo, error) {
@@ -202,12 +283,25 @@ func (r *videoRepositoryStub) SaveCourseVideo(_ context.Context, video *domain.C
 	return nil
 }
 
+func (r *videoRepositoryStub) InsertCourseVideoUpload(_ context.Context, upload *domain.CourseVideoUpload) error {
+	if r.insertUploadErr != nil {
+		return r.insertUploadErr
+	}
+	upload.ID = 11
+	copy := *upload
+	r.upload = &copy
+	r.insertUploadInTransaction = r.transactionDepth > 0
+	return nil
+}
+
 type objectStorageStub struct {
-	object  StoredObject
-	statErr error
+	object             StoredObject
+	statErr            error
+	presignUploadCalls int
 }
 
 func (s *objectStorageStub) PresignUpload(context.Context, string, time.Duration) (string, error) {
+	s.presignUploadCalls++
 	return "https://objects.example/upload", nil
 }
 
@@ -221,6 +315,8 @@ func (s *objectStorageStub) PresignPlayback(context.Context, string, time.Durati
 
 func (r *repositoryStub) WithinTransaction(ctx context.Context, fn func(context.Context) error) error {
 	r.transactions++
+	r.transactionDepth++
+	defer func() { r.transactionDepth-- }()
 	return fn(ctx)
 }
 
@@ -261,6 +357,9 @@ func (r *repositoryStub) GetCourseVideoByPositionForUpdate(context.Context, uint
 }
 func (r *repositoryStub) InsertCourseVideo(context.Context, *domain.CourseVideo) error { return nil }
 func (r *repositoryStub) SaveCourseVideo(context.Context, *domain.CourseVideo, domain.CourseVideoStatus) error {
+	return nil
+}
+func (r *repositoryStub) InsertCourseVideoUpload(context.Context, *domain.CourseVideoUpload) error {
 	return nil
 }
 

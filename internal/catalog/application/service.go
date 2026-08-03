@@ -12,13 +12,12 @@ type CourseInput struct {
 	Credits      float64
 	Introduction string
 	Tags         []string
-	VideoURL     string
 }
 
 func (i CourseInput) details() domain.CourseDetails {
 	return domain.CourseDetails{
 		CourseCode: i.CourseCode, CourseName: i.CourseName, Credits: i.Credits,
-		Introduction: i.Introduction, Tags: i.Tags, VideoURL: i.VideoURL,
+		Introduction: i.Introduction, Tags: i.Tags,
 	}
 }
 

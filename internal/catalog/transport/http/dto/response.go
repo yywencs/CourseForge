@@ -16,7 +16,6 @@ type CourseResponse struct {
 	Credits      float64   `json:"credits"`
 	Introduction string    `json:"introduction"`
 	Tags         []string  `json:"tags"`
-	VideoURL     string    `json:"video_url,omitempty"`
 	CreateTime   time.Time `json:"create_time"`
 	UpdateTime   time.Time `json:"update_time"`
 }
@@ -25,7 +24,7 @@ func Course(item domain.Course) CourseResponse {
 	return CourseResponse{
 		ID: item.ID, CourseCode: item.CourseCode, CourseName: item.CourseName,
 		Credits: item.Credits, Introduction: item.Introduction,
-		Tags: item.Tags, VideoURL: item.VideoURL,
+		Tags:       item.Tags,
 		CreateTime: item.CreateTime, UpdateTime: item.UpdateTime,
 	}
 }
@@ -66,7 +65,6 @@ type TeachingClassResponse struct {
 	Credits          float64                   `json:"credits"`
 	Introduction     string                    `json:"introduction"`
 	Tags             []string                  `json:"tags"`
-	VideoURL         string                    `json:"video_url,omitempty"`
 	TeacherName      string                    `json:"teacher_name"`
 	Location         string                    `json:"location"`
 	Capacity         uint32                    `json:"capacity"`
@@ -87,7 +85,7 @@ func TeachingClass(item applicationcatalog.TeachingClassView) TeachingClassRespo
 	return TeachingClassResponse{
 		ID: item.ID, ClassCode: item.ClassCode, TermID: item.TermID, CourseID: item.CourseID,
 		CourseCode: item.CourseCode, CourseName: item.CourseName, Credits: item.Credits,
-		Introduction: item.Introduction, Tags: item.Tags, VideoURL: item.VideoURL,
+		Introduction: item.Introduction, Tags: item.Tags,
 		TeacherName: item.TeacherName, Location: item.Location, Capacity: item.Capacity,
 		SelectedCount: item.SelectedCount, MinimumGradeYear: item.MinimumGradeYear,
 		MaximumGradeYear: item.MaximumGradeYear, State: item.State, Schedules: schedules,

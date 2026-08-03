@@ -11,22 +11,23 @@ type CourseDetails struct {
 	Credits      float64
 	Introduction string
 	Tags         []string
-	VideoURL     string
 }
 
 // CourseUsage 是基础设施提供的客观依赖事实，是否允许操作由领域模型决定。
 type CourseUsage struct {
 	TeachingClassCount           int64
 	NonPlannedTeachingClassCount int64
+	CourseVideoCount             int64
 	PrerequisiteCount            int64
 	StudentHistoryCount          int64
 }
 
 func (u CourseUsage) inUse() bool {
-	return u.TeachingClassCount > 0 || u.PrerequisiteCount > 0 || u.StudentHistoryCount > 0
+	return u.TeachingClassCount > 0 || u.CourseVideoCount > 0 ||
+		u.PrerequisiteCount > 0 || u.StudentHistoryCount > 0
 }
 
-// Course 是跨学期复用的课程资料；视频仅保存可访问地址，上传与转码后续独立实现。
+// Course 是跨学期复用的课程资料；课程视频拥有独立生命周期，不属于该聚合。
 type Course struct {
 	ID           uint64
 	CourseCode   string
@@ -34,7 +35,6 @@ type Course struct {
 	Credits      float64
 	Introduction string
 	Tags         []string
-	VideoURL     string
 	CreateTime   time.Time
 	UpdateTime   time.Time
 }
@@ -47,12 +47,12 @@ func NewCourse(details CourseDetails) (*Course, error) {
 	return &Course{
 		CourseCode: details.CourseCode, CourseName: details.CourseName,
 		Credits: details.Credits, Introduction: details.Introduction,
-		Tags: details.Tags, VideoURL: details.VideoURL,
+		Tags: details.Tags,
 	}, nil
 }
 
 // Change 根据当前使用事实维护课程。课程核心身份和学分一旦进入教学流程即被冻结，
-// 课程简介、标签和视频仍可持续维护。
+// 课程简介和标签仍可持续维护。
 func (c *Course) Change(details CourseDetails, usage CourseUsage) error {
 	details, err := normalizeCourseDetails(details)
 	if err != nil {
@@ -68,7 +68,6 @@ func (c *Course) Change(details CourseDetails, usage CourseUsage) error {
 	c.Credits = details.Credits
 	c.Introduction = details.Introduction
 	c.Tags = details.Tags
-	c.VideoURL = details.VideoURL
 	return nil
 }
 
@@ -83,7 +82,6 @@ func normalizeCourseDetails(details CourseDetails) (CourseDetails, error) {
 	details.CourseCode = strings.TrimSpace(details.CourseCode)
 	details.CourseName = strings.TrimSpace(details.CourseName)
 	details.Introduction = strings.TrimSpace(details.Introduction)
-	details.VideoURL = strings.TrimSpace(details.VideoURL)
 	details.Tags = normalizeTags(details.Tags)
 	if details.CourseCode == "" || details.CourseName == "" || details.Credits <= 0 {
 		return CourseDetails{}, ErrInvalidCourse

@@ -42,7 +42,7 @@ func TestCourseChangeProtectsCoreFieldsAfterTeachingStarts(t *testing.T) {
 
 func TestCourseEnsureDeletableUsesDependencyFacts(t *testing.T) {
 	course := Course{ID: 1}
-	if err := course.EnsureDeletable(CourseUsage{PrerequisiteCount: 1}); !errors.Is(err, ErrCourseInUse) {
+	if err := course.EnsureDeletable(CourseUsage{CourseVideoCount: 1}); !errors.Is(err, ErrCourseInUse) {
 		t.Fatalf("EnsureDeletable() error = %v, want %v", err, ErrCourseInUse)
 	}
 	if err := course.EnsureDeletable(CourseUsage{}); err != nil {

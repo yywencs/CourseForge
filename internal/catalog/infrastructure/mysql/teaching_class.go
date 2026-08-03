@@ -34,7 +34,6 @@ type teachingClassRow struct {
 	Credits      float64 `gorm:"column:credits;->"`
 	Introduction string  `gorm:"column:introduction;->"`
 	Tags         []byte  `gorm:"column:tags;->"`
-	VideoURL     string  `gorm:"column:video_url;->"`
 }
 
 func (teachingClassRow) TableName() string { return "teaching_class" }
@@ -72,7 +71,7 @@ func (r teachingClassRow) view() applicationcatalog.TeachingClassView {
 	return applicationcatalog.TeachingClassView{
 		ID: r.ID, ClassCode: r.ClassCode, TermID: r.TermID, CourseID: r.CourseID,
 		CourseCode: r.CourseCode, CourseName: r.CourseName, Credits: r.Credits,
-		Introduction: r.Introduction, Tags: decodeTags(r.Tags), VideoURL: r.VideoURL,
+		Introduction: r.Introduction, Tags: decodeTags(r.Tags),
 		TeacherName: r.TeacherName, Location: r.Location, Capacity: r.Capacity,
 		SelectedCount: r.SelectedCount, MinimumGradeYear: r.MinimumGradeYear,
 		MaximumGradeYear: r.MaximumGradeYear, State: catalog.TeachingClassState(r.State),
@@ -84,7 +83,7 @@ const teachingClassSelect = `
 	tc.id, tc.class_code, tc.term_id, tc.course_id, tc.teacher_name, tc.location,
 	tc.capacity, tc.selected_count, tc.minimum_grade_year, tc.maximum_grade_year,
 	tc.state, tc.create_time, tc.update_time,
-	c.course_code, c.course_name, c.credits, c.introduction, c.tags, c.video_url`
+	c.course_code, c.course_name, c.credits, c.introduction, c.tags`
 
 func (r *Repository) ListTeachingClasses(ctx context.Context, termID uint64, keyword string) ([]applicationcatalog.TeachingClassView, error) {
 	query := r.dbFor(ctx).Table("teaching_class AS tc").

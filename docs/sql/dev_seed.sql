@@ -107,24 +107,23 @@ ON DUPLICATE KEY UPDATE
 -- --------------------------------------------------------------------------
 
 INSERT INTO `course` (
-  `id`, `course_code`, `course_name`, `credits`, `introduction`, `tags`, `video_url`
+  `id`, `course_code`, `course_name`, `credits`, `introduction`, `tags`
 ) VALUES
   (10001, 'CS-304', '分布式系统设计', 3.5,
    '从一致性协议到消息可靠性，用一次完整工程实践理解分布式系统。',
-   JSON_ARRAY('专业核心', '项目制'), 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4'),
+   JSON_ARRAY('专业核心', '项目制')),
   (10002, 'AI-217', '智能交互产品实践', 2.0,
    '围绕真实校园场景，完成从用户研究、原型到可用产品的完整过程。',
-   JSON_ARRAY('跨专业', '工作坊'), 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4'),
+   JSON_ARRAY('跨专业', '工作坊')),
   (10003, 'HUM-109', '影像叙事与当代文化', 2.0,
    '以经典影像片段为入口，讨论媒介如何改变我们理解世界的方式。',
-   JSON_ARRAY('通识选修', '研讨'), '')
+   JSON_ARRAY('通识选修', '研讨'))
 ON DUPLICATE KEY UPDATE
   `course_code` = VALUES(`course_code`),
   `course_name` = VALUES(`course_name`),
   `credits` = VALUES(`credits`),
   `introduction` = VALUES(`introduction`),
-  `tags` = VALUES(`tags`),
-  `video_url` = VALUES(`video_url`);
+  `tags` = VALUES(`tags`);
 
 -- 开发学期使用稳定 ID 202601；当前开放轮次使用稳定 ID 30001。
 INSERT INTO `selection_round` (

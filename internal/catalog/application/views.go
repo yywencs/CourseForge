@@ -17,7 +17,6 @@ type TeachingClassView struct {
 	Credits          float64
 	Introduction     string
 	Tags             []string
-	VideoURL         string
 	TeacherName      string
 	Location         string
 	Capacity         uint32

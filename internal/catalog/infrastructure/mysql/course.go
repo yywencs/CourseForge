@@ -17,7 +17,6 @@ type courseRow struct {
 	Credits      float64   `gorm:"column:credits"`
 	Introduction string    `gorm:"column:introduction"`
 	Tags         []byte    `gorm:"column:tags"`
-	VideoURL     string    `gorm:"column:video_url"`
 	CreateTime   time.Time `gorm:"column:create_time"`
 	UpdateTime   time.Time `gorm:"column:update_time"`
 }
@@ -28,7 +27,7 @@ func (r courseRow) domain() catalog.Course {
 	return catalog.Course{
 		ID: r.ID, CourseCode: r.CourseCode, CourseName: r.CourseName,
 		Credits: r.Credits, Introduction: r.Introduction, Tags: decodeTags(r.Tags),
-		VideoURL: r.VideoURL, CreateTime: r.CreateTime, UpdateTime: r.UpdateTime,
+		CreateTime: r.CreateTime, UpdateTime: r.UpdateTime,
 	}
 }
 
@@ -77,7 +76,7 @@ func (r *Repository) InsertCourse(ctx context.Context, course *catalog.Course) e
 	}
 	row := courseRow{
 		CourseCode: course.CourseCode, CourseName: course.CourseName, Credits: course.Credits,
-		Introduction: course.Introduction, Tags: tags, VideoURL: course.VideoURL,
+		Introduction: course.Introduction, Tags: tags,
 	}
 	if err := r.dbFor(ctx).Create(&row).Error; err != nil {
 		return normalizeDBError(err)
@@ -94,7 +93,7 @@ func (r *Repository) SaveCourse(ctx context.Context, course *catalog.Course) err
 	return normalizeDBError(r.dbFor(ctx).Model(&courseRow{}).Where("id = ?", course.ID).Updates(map[string]interface{}{
 		"course_code": course.CourseCode, "course_name": course.CourseName,
 		"credits": course.Credits, "introduction": course.Introduction,
-		"tags": tags, "video_url": course.VideoURL,
+		"tags": tags,
 	}).Error)
 }
 
@@ -120,6 +119,7 @@ func (r *Repository) InspectCourseUsage(ctx context.Context, id uint64) (catalog
 	}{
 		{table: "teaching_class", where: "course_id = ?", args: []interface{}{id}, target: &usage.TeachingClassCount},
 		{table: "teaching_class", where: "course_id = ? AND state <> ?", args: []interface{}{id, string(catalog.TeachingClassStatePlanned)}, target: &usage.NonPlannedTeachingClassCount},
+		{table: "course_video", where: "course_id = ?", args: []interface{}{id}, target: &usage.CourseVideoCount},
 		{table: "course_prerequisite", where: "course_id = ? OR prerequisite_course_id = ?", args: []interface{}{id, id}, target: &usage.PrerequisiteCount},
 		{table: "student_course_history", where: "course_id = ?", args: []interface{}{id}, target: &usage.StudentHistoryCount},
 	}

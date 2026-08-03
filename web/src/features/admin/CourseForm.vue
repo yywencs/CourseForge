@@ -7,7 +7,7 @@ const props = defineProps<{ course?: Course }>()
 const emit = defineEmits<{ save: [draft: CourseDraft]; cancel: [] }>()
 
 const form = reactive({
-  course_code: '', course_name: '', credits: 1, introduction: '', tags: '', video_url: '',
+  course_code: '', course_name: '', credits: 1, introduction: '', tags: '',
 })
 const title = computed(() => props.course ? '编辑课程' : '新增课程')
 
@@ -19,7 +19,6 @@ watch(
     credits: course?.credits ?? 1,
     introduction: course?.introduction ?? '',
     tags: course?.tags.join('，') ?? '',
-    video_url: course?.video_url ?? '',
   }),
   { immediate: true },
 )
@@ -31,7 +30,6 @@ function submit(): void {
     credits: Number(form.credits),
     introduction: form.introduction.trim(),
     tags: form.tags.split(/[，,]/).map((item) => item.trim()).filter(Boolean),
-    video_url: form.video_url.trim(),
   })
 }
 </script>
@@ -45,7 +43,6 @@ function submit(): void {
       <label><span>学分</span><input v-model.number="form.credits" type="number" min="0.5" step="0.5" required /></label>
       <label class="is-wide"><span>课程标签</span><input v-model="form.tags" placeholder="用逗号分隔，例如：专业核心，项目制" /></label>
       <label class="is-wide"><span>课程简介</span><textarea v-model="form.introduction" rows="4" maxlength="1000" /></label>
-      <label class="is-wide"><span>课程视频地址</span><input v-model="form.video_url" type="url" placeholder="https://" /></label>
     </div>
     <footer><button type="button" class="quiet" @click="emit('cancel')">取消</button><button type="submit" class="primary">保存课程</button></footer>
   </form>

@@ -24,13 +24,12 @@ type courseRequest struct {
 	Credits      float64  `json:"credits" binding:"required"`
 	Introduction string   `json:"introduction"`
 	Tags         []string `json:"tags"`
-	VideoURL     string   `json:"video_url"`
 }
 
 func (r courseRequest) input() applicationcatalog.CourseInput {
 	return applicationcatalog.CourseInput{
 		CourseCode: r.CourseCode, CourseName: r.CourseName, Credits: r.Credits,
-		Introduction: r.Introduction, Tags: r.Tags, VideoURL: r.VideoURL,
+		Introduction: r.Introduction, Tags: r.Tags,
 	}
 }
 

@@ -5,7 +5,6 @@ export interface Course {
   credits: number
   introduction: string
   tags: readonly string[]
-  video_url?: string
   create_time?: string
   update_time?: string
 }
@@ -32,7 +31,6 @@ export interface TeachingClass {
   credits: number
   introduction: string
   tags: readonly string[]
-  video_url?: string
   teacher_name: string
   location: string
   capacity: number

@@ -1,15 +1,6 @@
 -- CourseForge core schema
 -- Target: MySQL 8.0+
 --
--- Design notes:
--- 1. Redis is responsible for the hot-path reservation. MySQL is the durable
---    source of record and repeats the quota/capacity checks during persistence.
--- 2. Business IDs and auto-increment primary keys coexist. Business IDs are
---    used in APIs, Redis and messages; numeric primary keys keep indexes small.
--- 3. Physical foreign keys are intentionally omitted so student-owned tables
---    can be sharded later. All logical foreign keys have supporting indexes.
--- 4. This script creates a new database and must not be used as a migration.
-
 SET NAMES utf8mb4;
 SET time_zone = '+08:00';
 
@@ -88,7 +79,6 @@ CREATE TABLE `course` (
   `credits` decimal(5,1) unsigned NOT NULL COMMENT '课程学分',
   `introduction` varchar(1000) NOT NULL DEFAULT '' COMMENT '课程简介',
   `tags` json DEFAULT NULL COMMENT '课程标签JSON数组',
-  `video_url` varchar(512) NOT NULL DEFAULT '' COMMENT '课程介绍视频地址',
   `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     ON UPDATE CURRENT_TIMESTAMP(3),
@@ -98,6 +88,34 @@ CREATE TABLE `course` (
     CHECK (`credits` > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='课程目录';
+
+CREATE TABLE `course_video` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '课程视频ID',
+  `course_id` bigint unsigned NOT NULL COMMENT '课程ID',
+  `video_kind` varchar(16) NOT NULL COMMENT 'preview/lesson',
+  `title` varchar(128) NOT NULL DEFAULT '' COMMENT '视频标题',
+  `object_key` varchar(512) NOT NULL COMMENT '对象存储中的对象键',
+  `status` varchar(16) NOT NULL DEFAULT 'uploading'
+    COMMENT 'uploading/ready/failed',
+  `sort_order` int unsigned NOT NULL DEFAULT 0 COMMENT '课程内排序',
+  `duration_ms` bigint unsigned DEFAULT NULL COMMENT '视频时长，毫秒',
+  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+    ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_course_video_object_key` (`object_key`),
+  UNIQUE KEY `uq_course_video_position`
+    (`course_id`, `video_kind`, `sort_order`),
+  KEY `idx_course_video_list`
+    (`course_id`, `status`, `sort_order`),
+  CONSTRAINT `chk_course_video_kind`
+    CHECK (`video_kind` IN ('preview', 'lesson')),
+  CONSTRAINT `chk_course_video_status`
+    CHECK (`status` IN ('uploading', 'ready', 'failed')),
+  CONSTRAINT `chk_course_video_preview_order`
+    CHECK (`video_kind` <> 'preview' OR `sort_order` = 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='课程视频';
 
 CREATE TABLE `course_prerequisite` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,

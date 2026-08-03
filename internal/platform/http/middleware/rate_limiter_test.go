@@ -143,7 +143,7 @@ func TestSelectionRateLimiterUsesAuthenticatedStudent(t *testing.T) {
 
 	second := httptest.NewRecorder()
 	engine.ServeHTTP(second, httptest.NewRequest(http.MethodPost, "/enrollments", nil))
-	if second.Code != http.StatusOK ||
+	if second.Code != http.StatusTooManyRequests ||
 		!strings.Contains(second.Body.String(), `"code":429`) {
 		t.Fatalf("limited response = status:%d body:%s", second.Code, second.Body.String())
 	}

@@ -198,8 +198,7 @@ func (l *SelectionRateLimiter) Handle(c *gin.Context) {
 }
 
 func abortRateLimit(c *gin.Context) {
-	// 与项目现有响应契约保持一致：HTTP 200，业务 code 为 429。
-	c.AbortWithStatusJSON(http.StatusOK, gin.H{
+	c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 		"code": http.StatusTooManyRequests,
 		"info": "请求过于频繁，请稍后重试",
 		"data": nil,

@@ -96,7 +96,7 @@ func assertAuthenticationRejected(t *testing.T, header string, verifier TokenVer
 	recorder := httptest.NewRecorder()
 	engine.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK || recorder.Body.String() !=
+	if recorder.Code != http.StatusUnauthorized || recorder.Body.String() !=
 		`{"code":401,"data":null,"info":"authentication required"}` {
 		t.Fatalf("response = status:%d body:%s", recorder.Code, recorder.Body.String())
 	}

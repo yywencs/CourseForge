@@ -19,8 +19,8 @@ type DegradeConfig interface {
 func Degrade(dcc DegradeConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if dcc != nil && dcc.IsDegraded() {
-			c.AbortWithStatusJSON(http.StatusOK, gin.H{
-				"code": 503,
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"code": http.StatusServiceUnavailable,
 				"info": "service degraded",
 				"data": nil,
 			})

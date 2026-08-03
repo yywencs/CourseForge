@@ -18,10 +18,17 @@ func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) 
 }
 
 func jsonResponseClient(handler func(*http.Request) string) *http.Client {
+	return statusResponseClient(http.StatusOK, handler)
+}
+
+func statusResponseClient(
+	statusCode int,
+	handler func(*http.Request) string,
+) *http.Client {
 	return &http.Client{
 		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			return &http.Response{
-				StatusCode: http.StatusOK,
+				StatusCode: statusCode,
 				Header:     http.Header{"Content-Type": []string{"application/json"}},
 				Body:       io.NopCloser(strings.NewReader(handler(request))),
 				Request:    request,
@@ -80,10 +87,6 @@ func TestBenchmarkRunnerExecuteBuildsDynamicSelectionRequest(t *testing.T) {
 }
 
 func TestBenchmarkRunnerExecuteClassifiesBusinessError(t *testing.T) {
-	client := jsonResponseClient(func(*http.Request) string {
-		return `{"code":409,"info":"teaching class is full","data":null}`
-	})
-
 	config := benchmarkConfig{
 		BaseURL:         "http://example.test",
 		RoundID:         defaultBenchmarkRoundID,
@@ -98,9 +101,41 @@ func TestBenchmarkRunnerExecuteClassifiesBusinessError(t *testing.T) {
 		JWTAudience:     "courseforge-student",
 		JWTTokenTTL:     time.Hour,
 	}
+	for _, statusCode := range []int{http.StatusOK, http.StatusConflict} {
+		t.Run(http.StatusText(statusCode), func(t *testing.T) {
+			client := statusResponseClient(statusCode, func(*http.Request) string {
+				return `{"code":409,"info":"teaching class is full","data":null}`
+			})
+			result := newBenchmarkRunner(config, client).execute(context.Background(), 1)
+			if result.outcome != outcomeBusinessError || result.businessCode != 409 {
+				t.Fatalf("result = %+v, want business error code 409", result)
+			}
+		})
+	}
+}
+
+func TestBenchmarkRunnerClassifiesUnstructuredNon2xxAsHTTPError(t *testing.T) {
+	client := statusResponseClient(http.StatusBadGateway, func(*http.Request) string {
+		return `<html>Bad Gateway</html>`
+	})
+	config := benchmarkConfig{
+		BaseURL:         "http://example.test",
+		RoundID:         defaultBenchmarkRoundID,
+		TeachingClassID: defaultBenchmarkClassID,
+		StudentIDStart:  defaultBenchmarkStudentIDStart,
+		Users:           1,
+		Concurrency:     1,
+		Duration:        time.Second,
+		Timeout:         time.Second,
+		JWTSigningKey:   "benchmark-test-signing-key-at-least-32-bytes",
+		JWTIssuer:       "courseforge",
+		JWTAudience:     "courseforge-student",
+		JWTTokenTTL:     time.Hour,
+	}
+
 	result := newBenchmarkRunner(config, client).execute(context.Background(), 1)
-	if result.outcome != outcomeBusinessError || result.businessCode != 409 {
-		t.Fatalf("result = %+v, want business error code 409", result)
+	if result.outcome != outcomeHTTPError {
+		t.Fatalf("result = %+v, want HTTP error", result)
 	}
 }
 

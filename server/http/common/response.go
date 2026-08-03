@@ -20,9 +20,9 @@ func Success(ctx *gin.Context, data interface{}) {
 	})
 }
 
-func Error(ctx *gin.Context, code int, info string) {
-	ctx.JSON(http.StatusOK, Response{
-		Code: code,
+func Error(ctx *gin.Context, status int, info string) {
+	ctx.AbortWithStatusJSON(status, Response{
+		Code: status,
 		Info: info,
 		Data: nil,
 	})

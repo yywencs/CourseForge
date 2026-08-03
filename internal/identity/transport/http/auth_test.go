@@ -124,7 +124,7 @@ func TestStudentLoginAppliesRateLimiter(t *testing.T) {
 
 	server.Engine().ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK ||
+	if recorder.Code != http.StatusTooManyRequests ||
 		!strings.Contains(recorder.Body.String(), `"code":429`) ||
 		strings.Contains(recorder.Body.String(), `"access_token"`) {
 		t.Fatalf("response = status:%d body:%s", recorder.Code, recorder.Body.String())

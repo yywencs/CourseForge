@@ -43,6 +43,10 @@ type waitlistResponse struct {
 	} `json:"data"`
 }
 
+type apiEnvelope struct {
+	Code int `json:"code"`
+}
+
 type benchmarkRunner struct {
 	config   benchmarkConfig
 	client   *http.Client
@@ -167,6 +171,19 @@ func (r *benchmarkRunner) executeOnce(
 	if err != nil || len(responseBody) > maxResponseBytes {
 		return requestResult{latency: latency, outcome: outcomeDecodeError}, ""
 	}
+
+	var envelope apiEnvelope
+	if err := json.Unmarshal(responseBody, &envelope); err != nil {
+		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+			return requestResult{latency: latency, outcome: outcomeHTTPError}, ""
+		}
+		return requestResult{latency: latency, outcome: outcomeDecodeError}, ""
+	}
+	if envelope.Code != 0 {
+		return requestResult{
+			latency: latency, outcome: outcomeBusinessError, businessCode: envelope.Code,
+		}, ""
+	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return requestResult{latency: latency, outcome: outcomeHTTPError}, ""
 	}
@@ -175,11 +192,6 @@ func (r *benchmarkRunner) executeOnce(
 		var result waitlistResponse
 		if err := json.Unmarshal(responseBody, &result); err != nil {
 			return requestResult{latency: latency, outcome: outcomeDecodeError}, ""
-		}
-		if result.Code != 0 {
-			return requestResult{
-				latency: latency, outcome: outcomeBusinessError, businessCode: result.Code,
-			}, ""
 		}
 		if result.Data.WaitlistID == "" || result.Data.State != "waiting" {
 			return requestResult{latency: latency, outcome: outcomeDecodeError}, ""
@@ -190,13 +202,6 @@ func (r *benchmarkRunner) executeOnce(
 	var result selectionResponse
 	if err := json.Unmarshal(responseBody, &result); err != nil {
 		return requestResult{latency: latency, outcome: outcomeDecodeError}, ""
-	}
-	if result.Code != 0 {
-		return requestResult{
-			latency:      latency,
-			outcome:      outcomeBusinessError,
-			businessCode: result.Code,
-		}, ""
 	}
 	if result.Data.ApplicationID == "" ||
 		result.Data.State != "selected" ||

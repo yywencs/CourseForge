@@ -36,7 +36,7 @@ func TestSelectionRouteAppliesDedicatedRateLimiter(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	rejected := func(c *gin.Context) {
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 			"code": http.StatusTooManyRequests,
 			"info": "limited",
 			"data": nil,
@@ -51,7 +51,7 @@ func TestSelectionRouteAppliesDedicatedRateLimiter(t *testing.T) {
 		httptest.NewRequest(http.MethodPost, "/api/v1/enrollments", nil),
 	)
 
-	if recorder.Code != http.StatusOK ||
+	if recorder.Code != http.StatusTooManyRequests ||
 		!strings.Contains(recorder.Body.String(), `"code":429`) {
 		t.Fatalf("response = status:%d body:%s", recorder.Code, recorder.Body.String())
 	}

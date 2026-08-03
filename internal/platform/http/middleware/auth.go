@@ -57,8 +57,8 @@ func bearerToken(header string) (string, bool) {
 }
 
 func abortAuthentication(c *gin.Context) {
-	c.AbortWithStatusJSON(http.StatusOK, gin.H{
-		"code": 401,
+	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+		"code": http.StatusUnauthorized,
 		"info": "authentication required",
 		"data": nil,
 	})

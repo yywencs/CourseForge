@@ -84,21 +84,22 @@ func TestAuthenticatedServerKeepsLoginPublicAndProtectsManagementRoutes(t *testi
 		method        string
 		path          string
 		authorization string
+		wantStatus    int
 		wantBodyPart  string
 	}{
-		{method: http.MethodGet, path: "/admin/v1/status", wantBodyPart: `"code":0`},
-		{method: http.MethodPost, path: "/admin/v1/auth/login", wantBodyPart: `"code":0`},
-		{method: http.MethodGet, path: "/admin/v1/courses", wantBodyPart: `"code":401`},
+		{method: http.MethodGet, path: "/admin/v1/status", wantStatus: http.StatusOK, wantBodyPart: `"code":0`},
+		{method: http.MethodPost, path: "/admin/v1/auth/login", wantStatus: http.StatusOK, wantBodyPart: `"code":0`},
+		{method: http.MethodGet, path: "/admin/v1/courses", wantStatus: http.StatusUnauthorized, wantBodyPart: `"code":401`},
 		{
 			method: http.MethodGet, path: "/admin/v1/courses",
-			authorization: "Bearer administrator-token", wantBodyPart: `"code":0`,
+			authorization: "Bearer administrator-token", wantStatus: http.StatusOK, wantBodyPart: `"code":0`,
 		},
 	} {
 		response := httptest.NewRecorder()
 		request := httptest.NewRequest(testCase.method, testCase.path, nil)
 		request.Header.Set("Authorization", testCase.authorization)
 		server.Engine().ServeHTTP(response, request)
-		if response.Code != http.StatusOK ||
+		if response.Code != testCase.wantStatus ||
 			!strings.Contains(response.Body.String(), testCase.wantBodyPart) {
 			t.Errorf("%s %s response = status:%d body:%s", testCase.method, testCase.path, response.Code, response.Body.String())
 		}

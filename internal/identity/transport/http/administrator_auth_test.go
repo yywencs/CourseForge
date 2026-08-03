@@ -108,7 +108,7 @@ func TestAdministratorLoginRejectsWrongPassword(t *testing.T) {
 
 	server.Engine().ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK ||
+	if recorder.Code != http.StatusUnauthorized ||
 		!strings.Contains(recorder.Body.String(), `"code":401`) ||
 		!strings.Contains(recorder.Body.String(), `"info":"用户名或密码错误"`) {
 		t.Fatalf("response = status:%d body:%s", recorder.Code, recorder.Body.String())
@@ -145,7 +145,7 @@ func TestAdministratorLoginAppliesRateLimiter(t *testing.T) {
 
 	server.Engine().ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK ||
+	if recorder.Code != http.StatusTooManyRequests ||
 		!strings.Contains(recorder.Body.String(), `"code":429`) ||
 		strings.Contains(recorder.Body.String(), `"access_token"`) {
 		t.Fatalf("response = status:%d body:%s", recorder.Code, recorder.Body.String())

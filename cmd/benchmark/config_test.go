@@ -18,6 +18,7 @@ func TestParseConfig(t *testing.T) {
 		"--timeout", "3s",
 		"--scenario", "idempotency",
 		"--jwt-signing-key", "benchmark-test-signing-key-at-least-32-bytes",
+		"--verify=false",
 	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseConfig() error = %v, want nil", err)
@@ -60,10 +61,31 @@ func TestParseConfigRejectsInvalidValues(t *testing.T) {
 			args := append([]string{
 				"--jwt-signing-key",
 				"benchmark-test-signing-key-at-least-32-bytes",
+				"--verify=false",
 			}, testCase.args...)
 			if _, err := parseConfig(args, io.Discard); err == nil {
 				t.Fatal("parseConfig() error = nil, want validation error")
 			}
 		})
+	}
+}
+
+func TestParseConfigValidatesFinalVerificationConnections(t *testing.T) {
+	t.Setenv(
+		"COURSEFORGE_BENCHMARK_MYSQL_DSN",
+		"root:password@tcp(localhost:3306)/courseforge?parseTime=true",
+	)
+	t.Setenv("COURSEFORGE_BENCHMARK_REDIS_ADDR", "localhost:6379")
+
+	config, err := parseConfig([]string{
+		"--jwt-signing-key", "benchmark-test-signing-key-at-least-32-bytes",
+		"--verify-timeout", "10s",
+		"--verify-interval", "100ms",
+	}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseConfig() error = %v", err)
+	}
+	if !config.Verify || config.MySQLDSN == "" || config.RedisAddr != "localhost:6379" {
+		t.Fatalf("verification config = %+v", config)
 	}
 }

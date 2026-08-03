@@ -79,7 +79,7 @@ integration-test: ## 启动临时 MySQL、Redis、RabbitMQ，运行集成测试�
 	PRIZEFORGE_INTEGRATION_RABBITMQ_ADDR='127.0.0.1:$(INTEGRATION_RABBITMQ_PORT)' \
 	PRIZEFORGE_INTEGRATION_RABBITMQ_USER='$(INTEGRATION_RABBITMQ_USER)' \
 	PRIZEFORGE_INTEGRATION_RABBITMQ_PASSWORD='$(INTEGRATION_RABBITMQ_PASSWORD)' \
-		$(GO) test -tags=integration ./tests/integration/... -count=1
+		$(GO) test -tags=integration ./tests/integration/... ./cmd/benchmark -count=1
 
 .PHONY: check
 check: fmt-check vet test test-deploy ## 执行格式、静态检查和测试

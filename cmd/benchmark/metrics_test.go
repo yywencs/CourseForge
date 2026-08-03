@@ -14,7 +14,10 @@ func TestSummarizeCalculatesRatesAndLatencyPercentiles(t *testing.T) {
 			result.outcome = outcomeBusinessError
 			result.businessCode = 500
 		}
-		stats.record(result)
+		stats.record(operationResult{
+			requests: []requestResult{result},
+			success:  result.outcome == outcomeSuccess,
+		})
 	}
 
 	summary := summarize(stats, 2*time.Second)
@@ -35,5 +38,46 @@ func TestSummarizeCalculatesRatesAndLatencyPercentiles(t *testing.T) {
 	}
 	if stats.businessCodes[500] != 20 {
 		t.Fatalf("business code 500 count = %d, want 20", stats.businessCodes[500])
+	}
+}
+
+func TestBenchmarkSummaryValidatesOperationAndRequestCounts(t *testing.T) {
+	config := benchmarkConfig{Users: 3, Scenario: scenarioIdempotency}
+	summary := benchmarkSummary{Stats: benchmarkStats{
+		operations:         3,
+		successfulOps:      3,
+		requests:           6,
+		successfulRequests: 6,
+	}}
+	if err := summary.validateExecution(config); err != nil {
+		t.Fatalf("validateExecution() error = %v", err)
+	}
+	summary.Stats.requests = 5
+	if err := summary.validateExecution(config); err == nil {
+		t.Fatal("validateExecution() error = nil, want incomplete request error")
+	}
+}
+
+func TestBenchmarkSummaryRejectsInfrastructureAndUnexpectedBusinessErrors(t *testing.T) {
+	config := benchmarkConfig{Users: 1}
+	summary := benchmarkSummary{Stats: benchmarkStats{
+		operations:     1,
+		failedOps:      1,
+		requests:       1,
+		businessErrors: 1,
+		businessCodes:  map[int]int64{409: 1},
+	}}
+	if err := summary.validateExecution(config); err != nil {
+		t.Fatalf("capacity conflict should be accepted: %v", err)
+	}
+
+	summary.Stats.businessCodes = map[int]int64{503: 1}
+	if err := summary.validateExecution(config); err == nil {
+		t.Fatal("validateExecution() error = nil, want service error")
+	}
+	summary.Stats.businessCodes = map[int]int64{409: 1}
+	summary.Stats.transportErrors = 1
+	if err := summary.validateExecution(config); err == nil {
+		t.Fatal("validateExecution() error = nil, want transport error")
 	}
 }

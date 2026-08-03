@@ -49,6 +49,24 @@ func main() {
 	fmt.Printf("  duration:          %s\n", config.Duration)
 	fmt.Printf("  timeout:           %s\n", config.Timeout)
 
-	runner := newBenchmarkRunner(config, nil)
-	printSummary(runner.run(ctx))
+	runner, err := newBenchmarkRunner(config, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "benchmark 请求准备失败: %v\n", err)
+		os.Exit(1)
+	}
+	summary := runner.run(ctx)
+	printSummary(summary)
+	executionErr := summary.validateExecution(config)
+	if config.Verify {
+		report, err := verifyBenchmark(ctx, config, summary)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "benchmark 最终校验失败: %v\n", err)
+			os.Exit(1)
+		}
+		printVerificationReport(report)
+	}
+	if executionErr != nil {
+		fmt.Fprintf(os.Stderr, "benchmark 执行校验失败: %v\n", executionErr)
+		os.Exit(1)
+	}
 }

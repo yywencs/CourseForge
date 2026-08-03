@@ -47,15 +47,23 @@ type apiEnvelope struct {
 	Code int `json:"code"`
 }
 
+type benchmarkRequest struct {
+	sequence  uint64
+	requestID string
+	body      []byte
+	token     string
+}
+
 type benchmarkRunner struct {
 	config   benchmarkConfig
 	client   *http.Client
 	endpoint string
 	runID    string
+	requests []benchmarkRequest
 	sequence atomic.Uint64
 }
 
-func newBenchmarkRunner(config benchmarkConfig, client *http.Client) *benchmarkRunner {
+func newBenchmarkRunner(config benchmarkConfig, client *http.Client) (*benchmarkRunner, error) {
 	if client == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxIdleConns = config.Concurrency * 2
@@ -67,12 +75,47 @@ func newBenchmarkRunner(config benchmarkConfig, client *http.Client) *benchmarkR
 		}
 	}
 
-	return &benchmarkRunner{
+	runner := &benchmarkRunner{
 		config:   config,
 		client:   client,
 		endpoint: config.endpoint(),
 		runID:    strconv.FormatInt(time.Now().UnixNano(), 36),
 	}
+	if err := runner.prepareRequests(time.Now()); err != nil {
+		return nil, err
+	}
+	return runner, nil
+}
+
+func (r *benchmarkRunner) prepareRequests(issuedAt time.Time) error {
+	r.requests = make([]benchmarkRequest, r.config.Users)
+	for index := range r.config.Users {
+		sequence := uint64(index + 1)
+		requestID := fmt.Sprintf(
+			"benchmark-%s-%s",
+			r.runID,
+			strconv.FormatUint(sequence, 36),
+		)
+		body, err := json.Marshal(selectionRequest{
+			RequestID:       requestID,
+			RoundID:         r.config.RoundID,
+			TeachingClassID: r.config.TeachingClassID,
+		})
+		if err != nil {
+			return fmt.Errorf("序列化学生 %d 压测请求: %w", r.config.studentID(sequence), err)
+		}
+		token, err := r.studentToken(r.config.studentID(sequence), issuedAt)
+		if err != nil {
+			return fmt.Errorf("生成学生 %d 压测令牌: %w", r.config.studentID(sequence), err)
+		}
+		r.requests[index] = benchmarkRequest{
+			sequence:  sequence,
+			requestID: requestID,
+			body:      body,
+			token:     token,
+		}
+	}
+	return nil
 }
 
 func (r *benchmarkRunner) run(ctx context.Context) benchmarkSummary {
@@ -97,7 +140,7 @@ func (r *benchmarkRunner) run(ctx context.Context) benchmarkSummary {
 				if sequence > uint64(r.config.Users) {
 					break
 				}
-				stats.record(r.execute(ctx, sequence))
+				stats.record(r.execute(ctx, r.requests[sequence-1]))
 			}
 			workerStats <- stats
 		}()
@@ -114,101 +157,111 @@ func (r *benchmarkRunner) run(ctx context.Context) benchmarkSummary {
 	return summarize(combined, time.Since(startedAt))
 }
 
-func (r *benchmarkRunner) execute(ctx context.Context, sequence uint64) requestResult {
-	requestID := fmt.Sprintf(
-		"benchmark-%s-%s",
-		r.runID,
-		strconv.FormatUint(sequence, 36),
-	)
-	first, identity := r.executeOnce(ctx, sequence, requestID)
-	if first.outcome != outcomeSuccess || r.config.normalizedScenario() != scenarioIdempotency {
-		return first
+func (r *benchmarkRunner) execute(ctx context.Context, request benchmarkRequest) operationResult {
+	if r.config.normalizedScenario() != scenarioIdempotency {
+		result := r.executeOnce(ctx, request)
+		return operationResult{
+			requests: []requestResult{result},
+			success:  result.outcome == outcomeSuccess,
+		}
 	}
-	second, secondIdentity := r.executeOnce(ctx, sequence, requestID)
-	second.latency += first.latency
-	if second.outcome == outcomeSuccess && identity != secondIdentity {
-		second.outcome = outcomeDecodeError
+
+	start := make(chan struct{})
+	results := make(chan requestResult, 2)
+	for range 2 {
+		go func() {
+			<-start
+			results <- r.executeOnce(ctx, request)
+		}()
 	}
-	return second
+	close(start)
+	first := <-results
+	second := <-results
+	close(results)
+
+	success := first.outcome == outcomeSuccess &&
+		second.outcome == outcomeSuccess &&
+		first.identity == second.identity
+	return operationResult{
+		requests: []requestResult{first, second},
+		success:  success,
+		validationError: first.outcome == outcomeSuccess &&
+			second.outcome == outcomeSuccess &&
+			first.identity != second.identity,
+	}
 }
 
 func (r *benchmarkRunner) executeOnce(
 	ctx context.Context,
-	sequence uint64,
-	requestID string,
-) (requestResult, string) {
+	benchmarkRequest benchmarkRequest,
+) requestResult {
 	startedAt := time.Now()
-	payload := selectionRequest{
-		RequestID:       requestID,
-		RoundID:         r.config.RoundID,
-		TeachingClassID: r.config.TeachingClassID,
-	}
-	body, err := json.Marshal(payload)
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		r.endpoint,
+		bytes.NewReader(benchmarkRequest.body),
+	)
 	if err != nil {
-		return requestResult{latency: time.Since(startedAt), outcome: outcomeDecodeError}, ""
-	}
-
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, r.endpoint, bytes.NewReader(body))
-	if err != nil {
-		return requestResult{latency: time.Since(startedAt), outcome: outcomeTransportError}, ""
+		return requestResult{latency: time.Since(startedAt), outcome: outcomeTransportError}
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	token, err := r.studentToken(r.config.studentID(sequence), startedAt)
-	if err != nil {
-		return requestResult{latency: time.Since(startedAt), outcome: outcomeDecodeError}, ""
-	}
-	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Authorization", "Bearer "+benchmarkRequest.token)
 
 	response, err := r.client.Do(request)
 	if err != nil {
-		return requestResult{latency: time.Since(startedAt), outcome: outcomeTransportError}, ""
+		return requestResult{latency: time.Since(startedAt), outcome: outcomeTransportError}
 	}
 	defer response.Body.Close()
 
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	latency := time.Since(startedAt)
 	if err != nil || len(responseBody) > maxResponseBytes {
-		return requestResult{latency: latency, outcome: outcomeDecodeError}, ""
+		return requestResult{latency: latency, outcome: outcomeDecodeError}
 	}
 
 	var envelope apiEnvelope
 	if err := json.Unmarshal(responseBody, &envelope); err != nil {
 		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-			return requestResult{latency: latency, outcome: outcomeHTTPError}, ""
+			return requestResult{latency: latency, outcome: outcomeHTTPError}
 		}
-		return requestResult{latency: latency, outcome: outcomeDecodeError}, ""
+		return requestResult{latency: latency, outcome: outcomeDecodeError}
 	}
 	if envelope.Code != 0 {
 		return requestResult{
 			latency: latency, outcome: outcomeBusinessError, businessCode: envelope.Code,
-		}, ""
+		}
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return requestResult{latency: latency, outcome: outcomeHTTPError}, ""
+		return requestResult{latency: latency, outcome: outcomeHTTPError}
 	}
 
 	if r.config.normalizedScenario() == scenarioWaitlist {
 		var result waitlistResponse
 		if err := json.Unmarshal(responseBody, &result); err != nil {
-			return requestResult{latency: latency, outcome: outcomeDecodeError}, ""
+			return requestResult{latency: latency, outcome: outcomeDecodeError}
 		}
 		if result.Data.WaitlistID == "" || result.Data.State != "waiting" {
-			return requestResult{latency: latency, outcome: outcomeDecodeError}, ""
+			return requestResult{latency: latency, outcome: outcomeDecodeError}
 		}
-		return requestResult{latency: latency, outcome: outcomeSuccess}, result.Data.WaitlistID
+		return requestResult{
+			latency: latency, outcome: outcomeSuccess, identity: result.Data.WaitlistID,
+		}
 	}
 
 	var result selectionResponse
 	if err := json.Unmarshal(responseBody, &result); err != nil {
-		return requestResult{latency: latency, outcome: outcomeDecodeError}, ""
+		return requestResult{latency: latency, outcome: outcomeDecodeError}
 	}
 	if result.Data.ApplicationID == "" ||
 		result.Data.State != "selected" ||
 		!result.Data.BrokerConfirmed {
-		return requestResult{latency: latency, outcome: outcomeDecodeError}, ""
+		return requestResult{latency: latency, outcome: outcomeDecodeError}
 	}
-	return requestResult{latency: latency, outcome: outcomeSuccess}, result.Data.ApplicationID
+	return requestResult{
+		latency: latency, outcome: outcomeSuccess, identity: result.Data.ApplicationID,
+	}
 }
 
 func (r *benchmarkRunner) studentToken(studentID uint64, issuedAt time.Time) (string, error) {

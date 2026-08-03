@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestInitViperConfigEnvironmentOverrides(t *testing.T) {
@@ -39,6 +40,9 @@ rabbitmq:
       default_concurrency: 1
       concurrency:
         selection_result_queue: 8
+dcc:
+  rate_limit:
+    enabled: true
 `)
 	if err := os.WriteFile(filepath.Join(tempDir, "config.yaml"), configBody, 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -70,6 +74,7 @@ rabbitmq:
 	t.Setenv("PRIZEFORGE_RABBITMQ_TOPIC_SELECTION_RESULT", "env-selection-result")
 	t.Setenv("PRIZEFORGE_RABBITMQ_LISTENER_SIMPLE_DEFAULT_CONCURRENCY", "2")
 	t.Setenv("PRIZEFORGE_RABBITMQ_LISTENER_SIMPLE_CONCURRENCY_SELECTION_RESULT_QUEUE", "6")
+	t.Setenv("PRIZEFORGE_DCC_RATE_LIMIT_ENABLED", "false")
 
 	InitViperConfig()
 
@@ -109,6 +114,43 @@ rabbitmq:
 		t.Fatalf("rabbitmq listener config = %#v, want prefetch=1 default=2 selection=6",
 			Conf.RabbitMQ.Listener.Simple)
 	}
+	if Conf.Dcc.RateLimit.Enabled {
+		t.Fatal("rate limit enabled flag was not overridden by environment")
+	}
+}
+
+func TestRateLimitConfigValidate(t *testing.T) {
+	valid := RateLimitConfig{
+		Enabled: true, EntryTTL: 10 * time.Minute, MaxEntries: 100,
+		Login: LoginRateLimitConfig{
+			Global:  validRateLimitPolicy(),
+			IP:      validRateLimitPolicy(),
+			Account: validRateLimitPolicy(),
+		},
+		Selection: SelectionRateLimitConfig{
+			Global:  validRateLimitPolicy(),
+			Student: validRateLimitPolicy(),
+		},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+
+	disabled := RateLimitConfig{}
+	if err := disabled.Validate(); err != nil {
+		t.Fatalf("disabled Validate() error = %v, want nil", err)
+	}
+
+	invalid := valid
+	invalid.Login.Account.Window = 0
+	if err := invalid.Validate(); err == nil ||
+		!strings.Contains(err.Error(), "login.account.window") {
+		t.Fatalf("invalid policy error = %v, want login.account.window", err)
+	}
+}
+
+func validRateLimitPolicy() RateLimitPolicyConfig {
+	return RateLimitPolicyConfig{Requests: 10, Window: time.Second, Burst: 20}
 }
 
 func TestRabbitMQTopicConfigValidate(t *testing.T) {

@@ -114,3 +114,40 @@ func TestAdministratorLoginRejectsWrongPassword(t *testing.T) {
 		t.Fatalf("response = status:%d body:%s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestAdministratorLoginAppliesRateLimiter(t *testing.T) {
+	passwordHash, err := bcrypt.GenerateFromPassword(
+		[]byte("correct-password"),
+		bcrypt.MinCost,
+	)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	usecase := identityapp.NewAdministratorAuthenticationUsecase(
+		authdomain.NewAdministratorAuthenticator(
+			handlerAdministratorRepository{passwordHash: string(passwordHash)},
+			authinfra.BcryptPasswordVerifier{},
+		),
+		handlerAdministratorTokenIssuer{},
+	)
+	server := adminhttp.NewServer(
+		":0",
+		nil,
+		NewAdministratorRoutes(usecase, sourceRejectingLoginLimiter{}),
+	)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/admin/v1/auth/login",
+		bytes.NewBufferString(`{"username":"admin","password":"correct-password"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	server.Engine().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK ||
+		!strings.Contains(recorder.Body.String(), `"code":429`) ||
+		strings.Contains(recorder.Body.String(), `"access_token"`) {
+		t.Fatalf("response = status:%d body:%s", recorder.Code, recorder.Body.String())
+	}
+}

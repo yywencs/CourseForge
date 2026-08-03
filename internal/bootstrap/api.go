@@ -72,6 +72,9 @@ func NewAdminApp() (*HTTPApp, error) {
 	if err := cfg.Auth.JWT.Validate(); err != nil {
 		return nil, fmt.Errorf("auth config: %w", err)
 	}
+	if err := cfg.Dcc.RateLimit.Validate(); err != nil {
+		return nil, fmt.Errorf("rate limit config: %w", err)
+	}
 	courseforgeDB := database.NewCourseforgeDB(&cfg.Data.Database)
 	tokenManager, err := identitysecurity.NewTokenManager(
 		cfg.Auth.JWT.SigningKey,
@@ -94,6 +97,7 @@ func NewAdminApp() (*HTTPApp, error) {
 	administratorAuth := middleware.NewJWTAuth(
 		middleware.TokenVerifierFunc(tokenManager.VerifyAdministrator),
 	)
+	administratorLoginLimiter := middleware.NewLoginRateLimiter(cfg.Dcc.RateLimit)
 	catalogService := applicationcatalog.NewService(catalogrepo.NewRepository(courseforgeDB))
 	roundManagementService := enrollmentapp.NewRoundManagementService(
 		roundrepo.NewRepository(courseforgeDB),
@@ -101,17 +105,24 @@ func NewAdminApp() (*HTTPApp, error) {
 	readinessChecks := common.ReadinessChecks{
 		"courseforge_mysql": databaseReadinessCheck(courseforgeDB),
 	}
+	adminServer := adminhttp.NewAuthenticatedServer(
+		resolveAdminAddr(cfg),
+		readinessChecks,
+		administratorAuth,
+		identityhttp.NewAdministratorRoutes(
+			administratorAuthentication,
+			administratorLoginLimiter,
+		),
+		cataloghttp.NewCatalogRoutes(catalogService),
+		enrollmenthttp.NewRoundAdminRoutes(roundManagementService),
+	)
+	if err := adminServer.Engine().SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		return nil, fmt.Errorf("configure admin trusted proxies: %w", err)
+	}
 
 	return &HTTPApp{
-		Config: cfg,
-		adminServer: adminhttp.NewAuthenticatedServer(
-			resolveAdminAddr(cfg),
-			readinessChecks,
-			administratorAuth,
-			identityhttp.NewAdministratorRoutes(administratorAuthentication),
-			cataloghttp.NewCatalogRoutes(catalogService),
-			enrollmenthttp.NewRoundAdminRoutes(roundManagementService),
-		),
+		Config:      cfg,
+		adminServer: adminServer,
 	}, nil
 }
 
@@ -120,6 +131,9 @@ func NewAPIApp() (*HTTPApp, error) {
 	cfg := loadRuntimeConfig()
 	if err := cfg.Auth.JWT.Validate(); err != nil {
 		return nil, fmt.Errorf("auth config: %w", err)
+	}
+	if err := cfg.Dcc.RateLimit.Validate(); err != nil {
+		return nil, fmt.Errorf("rate limit config: %w", err)
 	}
 	if err := cfg.RabbitMQ.Topic.Validate(); err != nil {
 		return nil, fmt.Errorf("rabbitmq topic config: %w", err)
@@ -234,6 +248,8 @@ func NewAPIApp() (*HTTPApp, error) {
 		return nil, fmt.Errorf("student auth: %w", err)
 	}
 	studentAuth := middleware.NewJWTAuth(tokenManager)
+	studentLoginLimiter := middleware.NewLoginRateLimiter(cfg.Dcc.RateLimit)
+	selectionLimiter := middleware.NewSelectionRateLimiter(cfg.Dcc.RateLimit)
 	authenticator := authdomain.NewAuthenticator(
 		identitymysql.NewAccountRepository(courseforgeDB),
 		identitysecurity.BcryptPasswordVerifier{},
@@ -256,21 +272,30 @@ func NewAPIApp() (*HTTPApp, error) {
 			return nil
 		},
 	}
+	apiServer := apihttp.NewServer(
+		resolveAPIAddr(cfg),
+		readinessChecks,
+		identityhttp.NewRoutes(
+			authenticationUsecase,
+			studentAuth,
+			studentLoginLimiter,
+		),
+		enrollmenthttp.NewRoutes(
+			enrollmentUsecase,
+			dropEnrollmentUsecase,
+			waitlistUsecase,
+			studentAuth,
+			selectionLimiter.Handle,
+		),
+		cataloghttp.NewCatalogRoutes(catalogService, studentAuth),
+	)
+	if err := apiServer.Engine().SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		return nil, fmt.Errorf("configure API trusted proxies: %w", err)
+	}
 
 	return &HTTPApp{
-		Config: cfg,
-		apiServer: apihttp.NewServer(
-			resolveAPIAddr(cfg),
-			readinessChecks,
-			identityhttp.NewRoutes(authenticationUsecase, studentAuth),
-			enrollmenthttp.NewRoutes(
-				enrollmentUsecase,
-				dropEnrollmentUsecase,
-				waitlistUsecase,
-				studentAuth,
-			),
-			cataloghttp.NewCatalogRoutes(catalogService, studentAuth),
-		),
+		Config:           cfg,
+		apiServer:        apiServer,
 		asynqWorker:      asynqWorker,
 		rabbitMQConsumer: rabbitMQConsumer,
 	}, nil

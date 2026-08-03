@@ -47,9 +47,17 @@ func (s *Routes) Login(c *gin.Context) {
 		common.Error(c, 503, "authentication service is not configured")
 		return
 	}
+	if s.loginLimiter != nil && !s.loginLimiter.AllowSource(c.ClientIP()) {
+		common.Error(c, 429, "请求过于频繁，请稍后重试")
+		return
+	}
 	var request loginRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		common.Error(c, 400, "invalid login request")
+		return
+	}
+	if s.loginLimiter != nil && !s.loginLimiter.AllowAccount(request.StudentNo) {
+		common.Error(c, 429, "请求过于频繁，请稍后重试")
 		return
 	}
 	session, err := s.authUsecase.Login(c.Request.Context(), applicationapi.LoginCommand{

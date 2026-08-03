@@ -10,13 +10,25 @@ import (
 type Routes struct {
 	authUsecase    *identityapp.AuthenticationUsecase
 	authMiddleware gin.HandlerFunc
+	loginLimiter   LoginRateLimiter
+}
+
+// LoginRateLimiter 是 HTTP 登录入口需要的多维限流端口。
+type LoginRateLimiter interface {
+	AllowSource(clientIP string) bool
+	AllowAccount(account string) bool
 }
 
 func NewRoutes(
 	authUsecase *identityapp.AuthenticationUsecase,
 	authMiddleware gin.HandlerFunc,
+	loginLimiters ...LoginRateLimiter,
 ) *Routes {
-	return &Routes{authUsecase: authUsecase, authMiddleware: authMiddleware}
+	routes := &Routes{authUsecase: authUsecase, authMiddleware: authMiddleware}
+	if len(loginLimiters) > 0 {
+		routes.loginLimiter = loginLimiters[0]
+	}
+	return routes
 }
 
 func (s *Routes) RegisterAPIRoutes(root *gin.RouterGroup) {

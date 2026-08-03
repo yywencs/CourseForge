@@ -65,10 +65,11 @@ func (c JWTAuthConfig) Validate() error {
 // --- Server 部分 ---
 
 type ServerConfig struct {
-	API   HttpConfig `mapstructure:"api"`
-	Admin HttpConfig `mapstructure:"admin"`
-	Http  HttpConfig `mapstructure:"http"`
-	GRPC  HttpConfig `mapstructure:"grpc"`
+	API            HttpConfig `mapstructure:"api"`
+	Admin          HttpConfig `mapstructure:"admin"`
+	Http           HttpConfig `mapstructure:"http"`
+	GRPC           HttpConfig `mapstructure:"grpc"`
+	TrustedProxies []string   `mapstructure:"trusted_proxies"`
 }
 
 type HttpConfig struct {
@@ -162,9 +163,75 @@ type AsynqConfig struct {
 // --- DCC 部分 ---
 
 type DccConfig struct {
-	RateLimit     int    `mapstructure:"rate_limit"`
-	EnableDegrade bool   `mapstructure:"enable_degrade"`
-	BlackList     string `mapstructure:"black_list"`
+	RateLimit     RateLimitConfig `mapstructure:"rate_limit"`
+	EnableDegrade bool            `mapstructure:"enable_degrade"`
+	BlackList     string          `mapstructure:"black_list"`
+}
+
+type RateLimitConfig struct {
+	Enabled    bool                     `mapstructure:"enabled"`
+	EntryTTL   time.Duration            `mapstructure:"entry_ttl"`
+	MaxEntries int                      `mapstructure:"max_entries"`
+	Login      LoginRateLimitConfig     `mapstructure:"login"`
+	Selection  SelectionRateLimitConfig `mapstructure:"selection"`
+}
+
+type LoginRateLimitConfig struct {
+	Global  RateLimitPolicyConfig `mapstructure:"global"`
+	IP      RateLimitPolicyConfig `mapstructure:"ip"`
+	Account RateLimitPolicyConfig `mapstructure:"account"`
+}
+
+type SelectionRateLimitConfig struct {
+	Global  RateLimitPolicyConfig `mapstructure:"global"`
+	Student RateLimitPolicyConfig `mapstructure:"student"`
+}
+
+type RateLimitPolicyConfig struct {
+	Requests int           `mapstructure:"requests"`
+	Window   time.Duration `mapstructure:"window"`
+	Burst    int           `mapstructure:"burst"`
+}
+
+func (c RateLimitConfig) Validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	if c.EntryTTL <= 0 {
+		return fmt.Errorf("dcc.rate_limit.entry_ttl must be positive")
+	}
+	if c.MaxEntries <= 0 {
+		return fmt.Errorf("dcc.rate_limit.max_entries must be positive")
+	}
+	policies := []struct {
+		name   string
+		policy RateLimitPolicyConfig
+	}{
+		{name: "login.global", policy: c.Login.Global},
+		{name: "login.ip", policy: c.Login.IP},
+		{name: "login.account", policy: c.Login.Account},
+		{name: "selection.global", policy: c.Selection.Global},
+		{name: "selection.student", policy: c.Selection.Student},
+	}
+	for _, item := range policies {
+		if err := item.policy.validate(item.name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c RateLimitPolicyConfig) validate(name string) error {
+	if c.Requests <= 0 {
+		return fmt.Errorf("dcc.rate_limit.%s.requests must be positive", name)
+	}
+	if c.Window <= 0 {
+		return fmt.Errorf("dcc.rate_limit.%s.window must be positive", name)
+	}
+	if c.Burst <= 0 {
+		return fmt.Errorf("dcc.rate_limit.%s.burst must be positive", name)
+	}
+	return nil
 }
 
 // --- Log 部分 ---

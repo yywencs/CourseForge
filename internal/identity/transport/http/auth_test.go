@@ -92,3 +92,41 @@ func TestLoginReturnsStudentSessionWithoutPasswordHash(t *testing.T) {
 		t.Fatalf("response leaked password hash: %s", recorder.Body.String())
 	}
 }
+
+func TestStudentLoginAppliesRateLimiter(t *testing.T) {
+	passwordHash, err := bcrypt.GenerateFromPassword(
+		[]byte("correct-password"),
+		bcrypt.MinCost,
+	)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	usecase := applicationapi.NewAuthenticationUsecase(
+		authdomain.NewAuthenticator(
+			handlerAuthRepository{passwordHash: string(passwordHash)},
+			authinfra.BcryptPasswordVerifier{},
+		),
+		handlerSelectionContextQuery{},
+		handlerTokenIssuer{},
+	)
+	server := apihttp.NewServer(
+		":0",
+		nil,
+		NewRoutes(usecase, nil, accountRejectingLoginLimiter{}),
+	)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/auth/login",
+		bytes.NewBufferString(`{"student_no":"2026001001","password":"correct-password"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	server.Engine().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK ||
+		!strings.Contains(recorder.Body.String(), `"code":429`) ||
+		strings.Contains(recorder.Body.String(), `"access_token"`) {
+		t.Fatalf("response = status:%d body:%s", recorder.Code, recorder.Body.String())
+	}
+}

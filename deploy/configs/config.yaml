@@ -1,4 +1,10 @@
 server:
+  trusted_proxies:
+    - 127.0.0.1/8
+    - ::1/128
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
   api:
     addr: 0.0.0.0:8080
     timeout: 60s
@@ -79,6 +85,31 @@ log:
   compress: true
 
 dcc:
-  rate_limit: 5
+  rate_limit:
+    enabled: true
+    entry_ttl: 10m
+    max_entries: 50000
+    login:
+      global:
+        requests: 200
+        window: 1s
+        burst: 300
+      ip:
+        requests: 60
+        window: 1m
+        burst: 20
+      account:
+        requests: 5
+        window: 1m
+        burst: 5
+    selection:
+      global:
+        requests: 1000
+        window: 1s
+        burst: 1500
+      student:
+        requests: 10
+        window: 1s
+        burst: 20
   enable_degrade: false
   black_list: ""

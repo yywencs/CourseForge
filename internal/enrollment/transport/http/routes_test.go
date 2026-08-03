@@ -2,6 +2,8 @@ package enrollmenthttp
 
 import (
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -27,6 +29,31 @@ func TestEnrollmentRoutesPreserveAPIContract(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing enrollment routes: %v", want)
+	}
+}
+
+func TestSelectionRouteAppliesDedicatedRateLimiter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	rejected := func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			"code": http.StatusTooManyRequests,
+			"info": "limited",
+			"data": nil,
+		})
+	}
+	NewRoutes(nil, nil, nil, nil, rejected).
+		RegisterAPIRoutes(engine.Group("/api/v1"))
+
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPost, "/api/v1/enrollments", nil),
+	)
+
+	if recorder.Code != http.StatusOK ||
+		!strings.Contains(recorder.Body.String(), `"code":429`) {
+		t.Fatalf("response = status:%d body:%s", recorder.Code, recorder.Body.String())
 	}
 }
 

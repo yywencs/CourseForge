@@ -7,6 +7,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type sourceRejectingLoginLimiter struct{}
+
+func (sourceRejectingLoginLimiter) AllowSource(string) bool { return false }
+
+func (sourceRejectingLoginLimiter) AllowAccount(string) bool { return true }
+
+type accountRejectingLoginLimiter struct{}
+
+func (accountRejectingLoginLimiter) AllowSource(string) bool { return true }
+
+func (accountRejectingLoginLimiter) AllowAccount(string) bool { return false }
+
 func TestIdentityRoutesPreservePublicAndProtectedContracts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()

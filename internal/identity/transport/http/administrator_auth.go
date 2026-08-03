@@ -37,13 +37,19 @@ type administratorCurrentSessionResponse struct {
 // AdministratorRoutes 暴露管理员登录和当前会话接口。
 // 登录注册在公开路由组，当前会话接口由 Admin Server 统一施加管理员鉴权。
 type AdministratorRoutes struct {
-	authUsecase *identityapp.AdministratorAuthenticationUsecase
+	authUsecase  *identityapp.AdministratorAuthenticationUsecase
+	loginLimiter LoginRateLimiter
 }
 
 func NewAdministratorRoutes(
 	authUsecase *identityapp.AdministratorAuthenticationUsecase,
+	loginLimiters ...LoginRateLimiter,
 ) *AdministratorRoutes {
-	return &AdministratorRoutes{authUsecase: authUsecase}
+	routes := &AdministratorRoutes{authUsecase: authUsecase}
+	if len(loginLimiters) > 0 {
+		routes.loginLimiter = loginLimiters[0]
+	}
+	return routes
 }
 
 func (r *AdministratorRoutes) RegisterPublicAdminRoutes(group *gin.RouterGroup) {
@@ -59,9 +65,17 @@ func (r *AdministratorRoutes) login(c *gin.Context) {
 		common.Error(c, 503, "管理员登录服务未配置")
 		return
 	}
+	if r.loginLimiter != nil && !r.loginLimiter.AllowSource(c.ClientIP()) {
+		common.Error(c, 429, "请求过于频繁，请稍后重试")
+		return
+	}
 	var request administratorLoginRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		common.Error(c, 400, "管理员登录信息格式不正确")
+		return
+	}
+	if r.loginLimiter != nil && !r.loginLimiter.AllowAccount(request.Username) {
+		common.Error(c, 429, "请求过于频繁，请稍后重试")
 		return
 	}
 	session, err := r.authUsecase.Login(c.Request.Context(), identityapp.AdministratorLoginCommand{

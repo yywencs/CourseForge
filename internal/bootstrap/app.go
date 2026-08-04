@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	danmakuws "github.com/yywencs/courseforge/internal/danmaku/transport/websocket"
 	"github.com/yywencs/courseforge/internal/platform/config"
 	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
 	"github.com/yywencs/courseforge/internal/platform/taskqueue"
@@ -18,6 +19,7 @@ type HTTPApp struct {
 	adminServer      httpserver.Server
 	asynqWorker      *taskqueue.AsynqWorker
 	rabbitMQConsumer *rabbitmq.RabbitMQConsumer
+	danmakuHub       *danmakuws.Hub
 }
 
 // APIServer returns the API HTTP server.
@@ -31,3 +33,6 @@ func (a *HTTPApp) AsynqWorker() *taskqueue.AsynqWorker { return a.asynqWorker }
 
 // RabbitMQConsumer returns the API consumer.
 func (a *HTTPApp) RabbitMQConsumer() *rabbitmq.RabbitMQConsumer { return a.rabbitMQConsumer }
+
+// DanmakuHub returns the API process-local realtime danmaku connection hub.
+func (a *HTTPApp) DanmakuHub() *danmakuws.Hub { return a.danmakuHub }

@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"github.com/yywencs/courseforge/internal/bootstrap"
-	"github.com/yywencs/courseforge/internal/platform/observability/logger"
 	"log"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/yywencs/courseforge/internal/bootstrap"
+	"github.com/yywencs/courseforge/internal/platform/observability/logger"
 )
 
 func main() {
@@ -27,6 +28,9 @@ func main() {
 	if err := app.RabbitMQConsumer().Start(ctx); err != nil {
 		log.Fatalf("start RabbitMQ consumer: %v", err)
 	}
+
+	logger.Info("starting realtime danmaku hub")
+	app.DanmakuHub().Start()
 
 	// 启动 API HTTP 服务
 	go func() {
@@ -55,6 +59,11 @@ func main() {
 		logger.Error("API server shutdown error", "error", err)
 	} else {
 		logger.Info("API server shut down gracefully")
+	}
+	if err := app.DanmakuHub().Stop(shutdownCtx); err != nil {
+		logger.Error("realtime danmaku hub shutdown error", "error", err)
+	} else {
+		logger.Info("realtime danmaku hub shut down gracefully")
 	}
 
 	app.AsynqWorker().Shutdown()

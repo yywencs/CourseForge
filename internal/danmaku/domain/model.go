@@ -156,10 +156,7 @@ func (d Danmaku) SameRequest(other Danmaku) bool {
 
 // EnsureAccepts 判断视频是否允许接收指定播放位置的弹幕。
 func (v VideoTarget) EnsureAccepts(item Danmaku) error {
-	if v.ID != item.VideoID {
-		return ErrVideoNotPlayable
-	}
-	if err := v.ensurePlayable(); err != nil {
+	if err := v.EnsurePlayable(item.VideoID); err != nil {
 		return err
 	}
 	if v.DurationMS == nil {
@@ -173,10 +170,7 @@ func (v VideoTarget) EnsureAccepts(item Danmaku) error {
 
 // EnsureReadableHistory 判断视频是否允许读取指定历史弹幕分段。
 func (v VideoTarget) EnsureReadableHistory(videoID uint64, segment HistorySegment) error {
-	if v.ID != videoID {
-		return ErrVideoNotPlayable
-	}
-	if err := v.ensurePlayable(); err != nil {
+	if err := v.EnsurePlayable(videoID); err != nil {
 		return err
 	}
 	if v.DurationMS == nil {
@@ -186,6 +180,14 @@ func (v VideoTarget) EnsureReadableHistory(videoID uint64, segment HistorySegmen
 		return ErrInvalidHistorySegment
 	}
 	return nil
+}
+
+// EnsurePlayable 判断目标是否为指定编号且当前允许学生观看的课程预览视频。
+func (v VideoTarget) EnsurePlayable(videoID uint64) error {
+	if v.ID != videoID {
+		return ErrVideoNotPlayable
+	}
+	return v.ensurePlayable()
 }
 
 func (v VideoTarget) ensurePlayable() error {

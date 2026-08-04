@@ -12,6 +12,7 @@ import (
 	danmakurepo "github.com/yywencs/courseforge/internal/danmaku/infrastructure/mysql"
 	danmakucache "github.com/yywencs/courseforge/internal/danmaku/infrastructure/redis"
 	danmakuhttp "github.com/yywencs/courseforge/internal/danmaku/transport/http"
+	danmakuws "github.com/yywencs/courseforge/internal/danmaku/transport/websocket"
 	identityapp "github.com/yywencs/courseforge/internal/identity/application"
 	authdomain "github.com/yywencs/courseforge/internal/identity/domain"
 	identitymysql "github.com/yywencs/courseforge/internal/identity/infrastructure/mysql"
@@ -69,7 +70,7 @@ func NewAPIApp() (*HTTPApp, error) {
 	if err != nil {
 		return nil, fmt.Errorf("catalog video storage: %w", err)
 	}
-	identityRoutes, studentAuth, err := newStudentIdentity(runtime.db, cfg)
+	identityRoutes, studentAuth, studentTokens, err := newStudentIdentity(runtime.db, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +83,7 @@ func NewAPIApp() (*HTTPApp, error) {
 			danmakucache.NewSegmentCache(runtime.redis, danmakucache.DefaultSegmentTTL),
 		),
 	)
+	danmakuHub := danmakuws.NewHub(0)
 
 	scheduledHandlers := append(
 		enrollmentModule.scheduledHandlers,
@@ -96,6 +98,7 @@ func NewAPIApp() (*HTTPApp, error) {
 		enrollmentModule.routes,
 		cataloghttp.NewCatalogRoutes(catalogService, studentAuth),
 		danmakuhttp.NewRoutes(danmakuService, studentAuth),
+		danmakuws.NewRoutes(danmakuHub, studentTokens, danmakuRepository),
 	)
 	if err := apiServer.Engine().SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
 		return nil, fmt.Errorf("configure API trusted proxies: %w", err)
@@ -107,6 +110,7 @@ func NewAPIApp() (*HTTPApp, error) {
 		apiServer:        apiServer,
 		asynqWorker:      asynqWorker,
 		rabbitMQConsumer: runtime.consumer,
+		danmakuHub:       danmakuHub,
 	}, nil
 }
 
@@ -144,7 +148,7 @@ func newAPIRuntime(cfg *config.Config) (*apiRuntime, error) {
 func newStudentIdentity(
 	db *gorm.DB,
 	cfg *config.Config,
-) (*identityhttp.Routes, gin.HandlerFunc, error) {
+) (*identityhttp.Routes, gin.HandlerFunc, middleware.TokenVerifier, error) {
 	tokenManager, err := identitysecurity.NewTokenManager(
 		cfg.Auth.JWT.SigningKey,
 		cfg.Auth.JWT.Issuer,
@@ -153,7 +157,7 @@ func newStudentIdentity(
 		cfg.Auth.JWT.ClockSkew,
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("student auth: %w", err)
+		return nil, nil, nil, fmt.Errorf("student auth: %w", err)
 	}
 	authMiddleware := middleware.NewJWTAuth(tokenManager)
 	loginLimiter := middleware.NewLoginRateLimiter(cfg.Dcc.RateLimit)
@@ -166,7 +170,10 @@ func newStudentIdentity(
 		identityquery.NewSelectionContextQuery(db),
 		tokenManager,
 	)
-	return identityhttp.NewRoutes(authenticationUsecase, authMiddleware, loginLimiter), authMiddleware, nil
+	return identityhttp.NewRoutes(authenticationUsecase, authMiddleware, loginLimiter),
+		authMiddleware,
+		tokenManager,
+		nil
 }
 
 func (r *apiRuntime) readinessChecks() common.ReadinessChecks {

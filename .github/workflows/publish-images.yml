@@ -60,6 +60,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Check generated Protobuf code
+        run: npm run proto:check
+
       - name: Run frontend type checks
         run: npm run typecheck
 

@@ -7,7 +7,7 @@ CourseForge 是一个使用 Go 实现的高并发选课系统。后端采用限�
 
 ## 快速开始
 
-环境要求：Go 1.25+、Docker、Docker Compose。
+环境要求：Go 1.25+、Node.js 22+、Docker、Docker Compose。
 
 复制本地环境变量示例，并启动本地基础设施：
 
@@ -51,6 +51,16 @@ cp configs/config.example.yaml configs/config.yaml
 make run-api
 make run-admin
 ```
+
+修改 `api/proto` 下的 Protobuf 协议后，生成后端 Go 与前端 TypeScript 代码：
+
+```bash
+cd web && npm install && cd ..
+make proto
+```
+
+生成器版本由前端依赖和 `buf.gen.yaml` 固定；生成结果分别位于 `gen` 和
+`web/src/gen`。CI 会运行 `make proto-check`，防止协议与已提交的生成代码不一致。
 
 默认接口：
 

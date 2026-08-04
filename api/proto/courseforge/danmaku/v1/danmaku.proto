@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package courseforge.danmaku.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/yywencs/courseforge/gen/courseforge/danmaku/v1;danmakuv1";
+
+// ClientFrame 是浏览器发往服务端的 WebSocket 二进制帧。
+// 建立连接后，客户端必须先发送 authenticate，鉴权成功前不能发送其他消息。
+message ClientFrame {
+  // request_id 由客户端生成，用于关联请求与服务端响应。
+  string request_id = 1;
+
+  oneof payload {
+    AuthenticateRequest authenticate = 10;
+  }
+}
+
+// ServerFrame 是服务端发往浏览器的 WebSocket 二进制帧。
+// connection_ready 和 error 会回传对应请求的 request_id；服务端主动推送的
+// danmaku_published 不携带 request_id。
+message ServerFrame {
+  string request_id = 1;
+
+  oneof payload {
+    ConnectionReady connection_ready = 10;
+    DanmakuPublished danmaku_published = 11;
+    RealtimeError error = 12;
+  }
+}
+
+// AuthenticateRequest 使用现有学生 JWT 完成 WebSocket 连接鉴权。
+// access_token 只允许通过 TLS WebSocket 二进制帧传输，不能放入 URL 查询参数。
+message AuthenticateRequest {
+  string access_token = 1;
+}
+
+// ConnectionReady 表示鉴权和视频访问校验均已通过，连接已加入视频房间。
+message ConnectionReady {
+  uint64 video_id = 1;
+  google.protobuf.Timestamp connected_at = 2;
+}
+
+// DanmakuPublished 表示一条已经成功持久化、可以实时展示的弹幕。
+// 数据库生成的 id 是客户端跨 HTTP 响应、历史查询和实时推送去重的依据。
+message DanmakuPublished {
+  uint64 id = 1;
+  uint64 video_id = 2;
+  string client_message_id = 3;
+  uint64 video_time_ms = 4;
+  string content = 5;
+  google.protobuf.Timestamp create_time = 6;
+}
+
+// RealtimeError 返回协议、鉴权或视频访问错误。
+message RealtimeError {
+  RealtimeErrorCode code = 1;
+  string message = 2;
+  bool retryable = 3;
+}
+
+// RealtimeErrorCode 是前端可以稳定判断的机器可读错误码。
+enum RealtimeErrorCode {
+  REALTIME_ERROR_CODE_UNSPECIFIED = 0;
+  REALTIME_ERROR_CODE_INVALID_MESSAGE = 1;
+  REALTIME_ERROR_CODE_UNAUTHENTICATED = 2;
+  REALTIME_ERROR_CODE_FORBIDDEN = 3;
+  REALTIME_ERROR_CODE_VIDEO_NOT_PLAYABLE = 4;
+  REALTIME_ERROR_CODE_INTERNAL = 5;
+}

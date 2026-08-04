@@ -70,6 +70,20 @@ func TestVideoTargetEnsureAcceptsDanmaku(t *testing.T) {
 	}
 }
 
+func TestVideoTargetEnsurePlayable(t *testing.T) {
+	target := VideoTarget{ID: 7, Kind: VideoKindPreview, Status: VideoStatusReady}
+	if err := target.EnsurePlayable(7); err != nil {
+		t.Fatalf("EnsurePlayable() error = %v", err)
+	}
+	if err := target.EnsurePlayable(8); err != ErrVideoNotPlayable {
+		t.Fatalf("EnsurePlayable(other video) error = %v, want ErrVideoNotPlayable", err)
+	}
+	target.Status = "uploading"
+	if err := target.EnsurePlayable(7); err != ErrVideoNotPlayable {
+		t.Fatalf("EnsurePlayable(uploading) error = %v, want ErrVideoNotPlayable", err)
+	}
+}
+
 func TestVideoTargetRejectsInvalidPublishingFacts(t *testing.T) {
 	item, err := New(7, 1001, testClientMessageID, 1200, "内容")
 	if err != nil {

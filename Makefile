@@ -1,4 +1,6 @@
 GO ?= go
+BUF ?= ./web/node_modules/.bin/buf
+BUF_CACHE_DIR ?= /tmp/courseforge-buf-cache
 DOCKER ?= docker
 COMPOSE ?= docker compose
 LOCAL_COMPOSE_FILE ?= $(if $(wildcard docker-compose-my.yaml),docker-compose-my.yaml,docker-compose.yaml)
@@ -34,6 +36,24 @@ help: ## 显示可用命令
 .PHONY: fmt
 fmt: ## 格式化 Go 代码
 	$(GO) fmt ./...
+
+.PHONY: proto
+proto: ## 校验协议并生成 Go、TypeScript Protobuf 代码
+	BUF_CACHE_DIR=$(BUF_CACHE_DIR) $(BUF) lint
+	BUF_CACHE_DIR=$(BUF_CACHE_DIR) $(BUF) generate
+
+.PHONY: proto-format
+proto-format: ## 格式化 Protobuf 协议文件
+	BUF_CACHE_DIR=$(BUF_CACHE_DIR) $(BUF) format -w
+
+.PHONY: proto-check
+proto-check: proto ## 检查已提交的 Protobuf 生成代码是否为最新
+	BUF_CACHE_DIR=$(BUF_CACHE_DIR) $(BUF) format -d --exit-code
+	@changed="$$(git status --porcelain -- gen web/src/gen)"; \
+	if [ -n "$$changed" ]; then \
+		printf '%s\n' "Protobuf 生成代码不是最新，请执行 make proto 并提交变更：" "$$changed"; \
+		exit 1; \
+	fi
 
 .PHONY: fmt-check
 fmt-check:

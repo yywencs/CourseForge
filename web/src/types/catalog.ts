@@ -32,6 +32,7 @@ export interface PreviewVideo {
 
 export interface VideoUploadTicket {
   video: CourseVideo
+  upload_id: number
   upload_url: string
   expires_at: string
   method: 'PUT'

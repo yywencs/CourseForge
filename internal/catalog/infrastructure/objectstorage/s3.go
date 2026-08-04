@@ -66,6 +66,19 @@ func (s *S3Store) PresignPlayback(ctx context.Context, objectKey string, expiry 
 	return value.String(), nil
 }
 
+// DeleteObject 幂等删除精确对象键；对象已经不存在时同样视为成功。
+func (s *S3Store) DeleteObject(ctx context.Context, objectKey string) error {
+	err := s.client.RemoveObject(ctx, s.bucket, objectKey, minio.RemoveObjectOptions{})
+	if err == nil {
+		return nil
+	}
+	response := minio.ToErrorResponse(err)
+	if response.Code == "NoSuchKey" || response.Code == "NoSuchObject" || response.StatusCode == 404 {
+		return nil
+	}
+	return err
+}
+
 func resolveEndpoint(value string, configuredSecure bool) (string, bool, error) {
 	value = strings.TrimSpace(value)
 	// MinIO SDK 需要不带协议的 host；若配置显式携带协议，则以协议决定是否启用 TLS。

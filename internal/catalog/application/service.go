@@ -108,6 +108,7 @@ type StartVideoUploadInput struct {
 
 type VideoUploadTicket struct {
 	Video     domain.CourseVideo
+	UploadID  uint64
 	UploadURL string
 	ExpiresAt time.Time
 }
@@ -138,6 +139,7 @@ func (s *Service) StartCourseVideoUpload(ctx context.Context, courseID uint64, i
 		return nil, fmt.Errorf("%w: generate object key", ErrVideoStorageUnavailable)
 	}
 	var video *domain.CourseVideo
+	var upload *domain.CourseVideoUpload
 	expiresAt := s.now().Add(s.videoPolicy.UploadURLTTL)
 	// 同一课程、视频类型和排序号代表同一个视频位。行锁可避免并发申请上传时
 	// 为同一位置创建多条记录；每次尝试使用新对象键，避免旧签名 URL 覆盖新对象。
@@ -170,7 +172,12 @@ func (s *Service) StartCourseVideoUpload(ctx context.Context, courseID uint64, i
 				return err
 			}
 		}
-		upload, err := domain.NewCourseVideoUpload(video.ID, objectKey, expiresAt)
+		// 新尝试取代该逻辑视频尚未完成的旧尝试；与新任务插入一起提交，
+		// 避免出现旧任务已失败但新任务没有创建成功的中间状态。
+		if err := s.repository.FailPendingCourseVideoUploads(txCtx, video.ID); err != nil {
+			return err
+		}
+		upload, err = domain.NewCourseVideoUpload(video.ID, objectKey, expiresAt)
 		if err != nil {
 			return err
 		}
@@ -184,24 +191,30 @@ func (s *Service) StartCourseVideoUpload(ctx context.Context, courseID uint64, i
 		return nil, fmt.Errorf("%w: %v", ErrVideoStorageUnavailable, err)
 	}
 	return &VideoUploadTicket{
-		Video: *video, UploadURL: uploadURL, ExpiresAt: expiresAt,
+		Video: *video, UploadID: upload.ID, UploadURL: uploadURL, ExpiresAt: expiresAt,
 	}, nil
 }
 
-// CompleteCourseVideoUpload 核验已上传的对象，并将视频状态从 uploading 更新为 ready。
-func (s *Service) CompleteCourseVideoUpload(ctx context.Context, videoID uint64, durationMS *uint64) (*domain.CourseVideo, error) {
+// CompleteCourseVideoUpload 根据上传任务核验对象，并原子地将上传任务更新为 promoted、
+// 课程视频更新为 ready。已经 promoted 的任务直接返回当前视频，实现完成请求幂等。
+func (s *Service) CompleteCourseVideoUpload(ctx context.Context, uploadID uint64, durationMS *uint64) (*domain.CourseVideo, error) {
 	if s.objectStorage == nil {
 		return nil, ErrVideoStorageUnavailable
 	}
-	video, err := s.repository.GetCourseVideo(ctx, videoID)
+	upload, err := s.repository.GetCourseVideoUpload(ctx, uploadID)
 	if err != nil {
 		return nil, err
 	}
-	if video.Status != domain.CourseVideoStatusUploading {
-		return nil, domain.ErrCourseVideoNotUploadable
+	switch upload.Status {
+	case domain.CourseVideoUploadStatusPromoted:
+		return s.repository.GetCourseVideo(ctx, upload.CourseVideoID)
+	case domain.CourseVideoUploadStatusPending:
+		// 只有 pending 任务需要访问对象存储；failed/cleaned 任务不会触碰 OSS。
+	default:
+		return nil, domain.ErrCourseVideoUploadNotCompletable
 	}
 	// 以对象存储中的实际元数据为准，不直接信任客户端的完成声明。
-	object, err := s.objectStorage.StatObject(ctx, video.ObjectKey)
+	object, err := s.objectStorage.StatObject(ctx, upload.ObjectKey)
 	if errors.Is(err, ErrStoredObjectNotFound) {
 		return nil, domain.ErrVideoUploadIncomplete
 	}
@@ -212,20 +225,47 @@ func (s *Service) CompleteCourseVideoUpload(ctx context.Context, videoID uint64,
 		!strings.EqualFold(strings.TrimSpace(object.ContentType), "video/mp4") {
 		return nil, ErrVideoObjectInvalid
 	}
-	// 锁定记录并按旧状态更新，防止重复完成或并发覆盖。
+	var video *domain.CourseVideo
+	// OSS 校验期间任务可能被另一次上传取代，因此事务内锁定并重新检查状态。
 	err = s.repository.WithinTransaction(ctx, func(txCtx context.Context) error {
-		current, err := s.repository.GetCourseVideoForUpdate(txCtx, videoID)
+		// 与申请上传保持一致的 video → upload 加锁顺序，避免并发申请和完成互相等待。
+		currentVideo, err := s.repository.GetCourseVideoForUpdate(txCtx, upload.CourseVideoID)
 		if err != nil {
 			return err
 		}
-		expectedStatus := current.Status
-		if err := current.CompleteUpload(durationMS); err != nil {
+		currentUpload, err := s.repository.GetCourseVideoUploadForUpdate(txCtx, uploadID)
+		if err != nil {
 			return err
 		}
-		if err := s.repository.SaveCourseVideo(txCtx, current, expectedStatus); err != nil {
+		if currentUpload.CourseVideoID != currentVideo.ID {
+			return domain.ErrCourseVideoUploadNotCompletable
+		}
+		if currentUpload.Status == domain.CourseVideoUploadStatusPromoted {
+			video = currentVideo
+			return nil
+		}
+		if currentUpload.Status != domain.CourseVideoUploadStatusPending {
+			return domain.ErrCourseVideoUploadNotCompletable
+		}
+		// pending 任务必须仍是逻辑视频当前指向的上传尝试。
+		if currentVideo.ObjectKey != currentUpload.ObjectKey {
+			return domain.ErrCourseVideoUploadNotCompletable
+		}
+		expectedVideoStatus := currentVideo.Status
+		if err := currentVideo.CompleteUpload(durationMS); err != nil {
 			return err
 		}
-		video = current
+		if err := s.repository.SaveCourseVideo(txCtx, currentVideo, expectedVideoStatus); err != nil {
+			return err
+		}
+		expectedUploadStatus := currentUpload.Status
+		if err := currentUpload.Promote(); err != nil {
+			return err
+		}
+		if err := s.repository.SaveCourseVideoUpload(txCtx, currentUpload, expectedUploadStatus); err != nil {
+			return err
+		}
+		video = currentVideo
 		return nil
 	})
 	return video, err

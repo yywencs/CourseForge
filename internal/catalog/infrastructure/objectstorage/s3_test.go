@@ -3,6 +3,7 @@ package objectstorage
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -10,9 +11,8 @@ import (
 	"testing"
 	"time"
 
+	catalogapp "prizeforge/internal/catalog/application"
 	"prizeforge/internal/platform/config"
-
-	"github.com/minio/minio-go/v7"
 )
 
 func TestResolveEndpoint(t *testing.T) {
@@ -47,7 +47,7 @@ func TestS3StorePresignedRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	objectKey := "integration-tests/" + time.Now().Format("20060102150405.000000000") + ".mp4"
 	t.Cleanup(func() {
-		_ = store.client.RemoveObject(context.Background(), store.bucket, objectKey, minio.RemoveObjectOptions{})
+		_ = store.DeleteObject(context.Background(), objectKey)
 	})
 
 	uploadURL, err := store.PresignUpload(ctx, objectKey, time.Minute)
@@ -84,5 +84,14 @@ func TestS3StorePresignedRoundTrip(t *testing.T) {
 	_ = playResponse.Body.Close()
 	if readErr != nil || playResponse.StatusCode != http.StatusOK || strings.TrimSpace(string(body)) != "video-data" {
 		t.Fatalf("playback status = %d, body = %q, error = %v", playResponse.StatusCode, body, readErr)
+	}
+	if err := store.DeleteObject(ctx, objectKey); err != nil {
+		t.Fatalf("DeleteObject() error = %v", err)
+	}
+	if _, err := store.StatObject(ctx, objectKey); !errors.Is(err, catalogapp.ErrStoredObjectNotFound) {
+		t.Fatalf("StatObject() after delete error = %v, want %v", err, catalogapp.ErrStoredObjectNotFound)
+	}
+	if err := store.DeleteObject(ctx, objectKey); err != nil {
+		t.Fatalf("second DeleteObject() error = %v", err)
 	}
 }

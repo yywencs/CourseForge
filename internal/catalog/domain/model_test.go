@@ -3,6 +3,7 @@ package catalog
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestNewCourseNormalizesDetails(t *testing.T) {
@@ -78,6 +79,44 @@ func TestCourseVideoRestartUploadUsesNewObjectKey(t *testing.T) {
 	if video.Title != "新预览" || video.ObjectKey != "course-videos/1/new.mp4" ||
 		video.Status != CourseVideoStatusUploading {
 		t.Fatalf("video = %#v", video)
+	}
+}
+
+func TestCourseVideoUploadPromoteRequiresPending(t *testing.T) {
+	upload, err := NewCourseVideoUpload(7, "course-videos/1/upload.mp4", time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := upload.Promote(); err != nil {
+		t.Fatal(err)
+	}
+	if upload.Status != CourseVideoUploadStatusPromoted {
+		t.Fatalf("status = %q, want promoted", upload.Status)
+	}
+	if err := upload.Promote(); !errors.Is(err, ErrCourseVideoUploadNotCompletable) {
+		t.Fatalf("second Promote() error = %v, want %v", err, ErrCourseVideoUploadNotCompletable)
+	}
+}
+
+func TestCourseVideoUploadCleanupLifecycleIsIdempotent(t *testing.T) {
+	upload, err := NewCourseVideoUpload(7, "course-videos/1/upload.mp4", time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := upload.Fail(); err != nil {
+		t.Fatal(err)
+	}
+	if err := upload.Fail(); err != nil {
+		t.Fatalf("repeated Fail() error = %v", err)
+	}
+	if err := upload.Clean(); err != nil {
+		t.Fatal(err)
+	}
+	if err := upload.Clean(); err != nil {
+		t.Fatalf("repeated Clean() error = %v", err)
+	}
+	if upload.Status != CourseVideoUploadStatusCleaned {
+		t.Fatalf("status = %q, want cleaned", upload.Status)
 	}
 }
 

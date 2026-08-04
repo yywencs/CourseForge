@@ -56,7 +56,7 @@ async function upload(): Promise<void> {
       body: selected,
     })
     if (!response.ok) throw new Error(`对象存储上传失败（${response.status}）`)
-    await completeCourseVideoUpload(ticket.video.id, durationMs)
+    await completeCourseVideoUpload(ticket.upload_id, durationMs)
     await loadVideos()
     file.value = undefined
     emit('uploaded')

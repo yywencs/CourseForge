@@ -54,8 +54,8 @@ export function startCourseVideoUpload(courseId: number, input: {
   return unwrapAdmin(adminHttp.post(`/admin/v1/courses/${courseId}/videos/uploads`, input))
 }
 
-export function completeCourseVideoUpload(videoId: number, durationMs?: number): Promise<CourseVideo> {
-  return unwrapAdmin(adminHttp.post(`/admin/v1/course-videos/${videoId}/complete`, {
+export function completeCourseVideoUpload(uploadId: number, durationMs?: number): Promise<CourseVideo> {
+  return unwrapAdmin(adminHttp.post(`/admin/v1/course-video-uploads/${uploadId}/complete`, {
     duration_ms: durationMs,
   }))
 }

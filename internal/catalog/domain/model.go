@@ -102,6 +102,36 @@ func NewCourseVideoUpload(courseVideoID uint64, objectKey string, expiresAt time
 	}, nil
 }
 
+func (u *CourseVideoUpload) Promote() error {
+	if u.Status != CourseVideoUploadStatusPending {
+		return ErrCourseVideoUploadNotCompletable
+	}
+	u.Status = CourseVideoUploadStatusPromoted
+	return nil
+}
+
+func (u *CourseVideoUpload) Fail() error {
+	if u.Status == CourseVideoUploadStatusFailed {
+		return nil
+	}
+	if u.Status != CourseVideoUploadStatusPending {
+		return ErrCourseVideoUploadNotCompletable
+	}
+	u.Status = CourseVideoUploadStatusFailed
+	return nil
+}
+
+func (u *CourseVideoUpload) Clean() error {
+	if u.Status == CourseVideoUploadStatusCleaned {
+		return nil
+	}
+	if u.Status != CourseVideoUploadStatusFailed {
+		return ErrCourseVideoUploadNotCompletable
+	}
+	u.Status = CourseVideoUploadStatusCleaned
+	return nil
+}
+
 func NewCourseVideo(courseID uint64, kind CourseVideoKind, title, objectKey string, sortOrder uint32) (*CourseVideo, error) {
 	title = strings.TrimSpace(title)
 	objectKey = strings.TrimSpace(objectKey)
@@ -127,6 +157,17 @@ func (v *CourseVideo) CompleteUpload(durationMS *uint64) error {
 	}
 	v.DurationMS = durationMS
 	v.Status = CourseVideoStatusReady
+	return nil
+}
+
+func (v *CourseVideo) FailUpload() error {
+	if v.Status == CourseVideoStatusFailed {
+		return nil
+	}
+	if v.Status != CourseVideoStatusUploading {
+		return ErrCourseVideoNotUploadable
+	}
+	v.Status = CourseVideoStatusFailed
 	return nil
 }
 

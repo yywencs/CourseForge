@@ -21,6 +21,7 @@ type ObjectStorage interface {
 	PresignUpload(context.Context, string, time.Duration) (string, error)
 	StatObject(context.Context, string) (StoredObject, error)
 	PresignPlayback(context.Context, string, time.Duration) (string, error)
+	DeleteObject(context.Context, string) error
 }
 
 // Repository 是 Catalog 用例所消费的端口。事务、锁和 SQL 由基础设施实现，
@@ -41,7 +42,12 @@ type Repository interface {
 	GetCourseVideoByPositionForUpdate(context.Context, uint64, domain.CourseVideoKind, uint32) (*domain.CourseVideo, error)
 	InsertCourseVideo(context.Context, *domain.CourseVideo) error
 	SaveCourseVideo(context.Context, *domain.CourseVideo, domain.CourseVideoStatus) error
+	FailPendingCourseVideoUploads(context.Context, uint64) error
 	InsertCourseVideoUpload(context.Context, *domain.CourseVideoUpload) error
+	GetCourseVideoUpload(context.Context, uint64) (*domain.CourseVideoUpload, error)
+	GetCourseVideoUploadForUpdate(context.Context, uint64) (*domain.CourseVideoUpload, error)
+	SaveCourseVideoUpload(context.Context, *domain.CourseVideoUpload, domain.CourseVideoUploadStatus) error
+	ListExpiredCourseVideoUploads(context.Context, time.Time, int) ([]domain.CourseVideoUpload, error)
 
 	ListTeachingClasses(context.Context, uint64, string) ([]TeachingClassView, error)
 	ListStudentCatalog(context.Context, StudentCatalogQuery) ([]TeachingClassView, error)

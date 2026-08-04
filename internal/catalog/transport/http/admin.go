@@ -103,7 +103,7 @@ func (h *CatalogRoutes) RegisterAdminRoutes(group *gin.RouterGroup) {
 	courses.DELETE("/:course_id", h.deleteCourse)
 	courses.GET("/:course_id/videos", h.listCourseVideos)
 	courses.POST("/:course_id/videos/uploads", h.startVideoUpload)
-	group.POST("/course-videos/:video_id/complete", h.completeVideoUpload)
+	group.POST("/course-video-uploads/:upload_id/complete", h.completeVideoUpload)
 
 	classes := group.Group("/teaching-classes")
 	classes.GET("", h.listTeachingClasses)
@@ -145,14 +145,15 @@ func (h *CatalogRoutes) startVideoUpload(c *gin.Context) {
 		return
 	}
 	common.Success(c, gin.H{
-		"video": catalogdto.CourseVideo(ticket.Video), "upload_url": ticket.UploadURL,
+		"video": catalogdto.CourseVideo(ticket.Video), "upload_id": ticket.UploadID,
+		"upload_url": ticket.UploadURL,
 		"expires_at": ticket.ExpiresAt, "method": http.MethodPut,
 		"headers": gin.H{"Content-Type": "video/mp4"},
 	})
 }
 
 func (h *CatalogRoutes) completeVideoUpload(c *gin.Context) {
-	videoID, ok := catalogID(c, "video_id")
+	uploadID, ok := catalogID(c, "upload_id")
 	if !ok {
 		return
 	}
@@ -161,7 +162,7 @@ func (h *CatalogRoutes) completeVideoUpload(c *gin.Context) {
 		common.Error(c, http.StatusBadRequest, "视频完成信息格式不正确")
 		return
 	}
-	video, err := h.service.CompleteCourseVideoUpload(c.Request.Context(), videoID, request.DurationMS)
+	video, err := h.service.CompleteCourseVideoUpload(c.Request.Context(), uploadID, request.DurationMS)
 	if err != nil {
 		handleCatalogError(c, err)
 		return

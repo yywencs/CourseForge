@@ -8,6 +8,8 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+const TaskTypeProjectionRepair = "enrollment:projection_repair"
+
 // ProjectionReconciliationJob 周期触发 MySQL 到 Redis 的投影修复。
 type ProjectionReconciliationJob struct {
 	usecase   *api.ProjectionReconciliationUsecase

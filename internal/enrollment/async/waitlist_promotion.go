@@ -8,6 +8,8 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+const TaskTypeWaitlistPromotion = "enrollment:waitlist_promotion"
+
 // WaitlistPromotionJob 触发一批候补晋级；业务编排仍由 application 层负责。
 type WaitlistPromotionJob struct {
 	usecase   *api.WaitlistUsecase

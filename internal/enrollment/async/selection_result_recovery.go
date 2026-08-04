@@ -10,6 +10,8 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+const TaskTypeSelectionResultPublish = "enrollment:selection_result_publish"
+
 type pendingSelectionResultSource interface {
 	QueryPendingSelectionResults(
 		context.Context,

@@ -8,6 +8,9 @@ import (
 
 	catalogrepo "prizeforge/internal/catalog/infrastructure/mysql"
 	cataloghttp "prizeforge/internal/catalog/transport/http"
+	danmakuapp "prizeforge/internal/danmaku/application"
+	danmakurepo "prizeforge/internal/danmaku/infrastructure/mysql"
+	danmakuhttp "prizeforge/internal/danmaku/transport/http"
 	identityapp "prizeforge/internal/identity/application"
 	authdomain "prizeforge/internal/identity/domain"
 	identitymysql "prizeforge/internal/identity/infrastructure/mysql"
@@ -70,6 +73,8 @@ func NewAPIApp() (*HTTPApp, error) {
 		return nil, err
 	}
 	enrollmentModule := newEnrollmentModule(runtime, studentAuth)
+	danmakuRepository := danmakurepo.NewRepository(runtime.db)
+	danmakuService := danmakuapp.NewService(danmakuRepository, danmakuRepository)
 
 	scheduledHandlers := append(
 		enrollmentModule.scheduledHandlers,
@@ -83,6 +88,7 @@ func NewAPIApp() (*HTTPApp, error) {
 		identityRoutes,
 		enrollmentModule.routes,
 		cataloghttp.NewCatalogRoutes(catalogService, studentAuth),
+		danmakuhttp.NewRoutes(danmakuService, studentAuth),
 	)
 	if err := apiServer.Engine().SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
 		return nil, fmt.Errorf("configure API trusted proxies: %w", err)

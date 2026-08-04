@@ -9,16 +9,27 @@ import (
 )
 
 var ErrStoredObjectNotFound = errors.New("stored object not found")
+var ErrMultipartUploadNotFound = errors.New("multipart upload not found")
 
 type StoredObject struct {
 	Size        int64
 	ContentType string
 }
 
+type UploadedPart struct {
+	PartNumber int
+	ETag       string
+	Size       int64
+}
+
 // ObjectStorage 只暴露课程视频用例需要的能力，避免应用层依赖具体的 MinIO 或云 OSS SDK。
 // 上传和播放均使用短期签名 URL，视频内容不经过 API 服务中转。
 type ObjectStorage interface {
-	PresignUpload(context.Context, string, time.Duration) (string, error)
+	CreateMultipartUpload(context.Context, string, string) (string, error)
+	PresignUploadPart(context.Context, string, string, int, time.Duration) (string, error)
+	ListUploadedParts(context.Context, string, string) ([]UploadedPart, error)
+	CompleteMultipartUpload(context.Context, string, string, []UploadedPart) error
+	AbortMultipartUpload(context.Context, string, string) error
 	StatObject(context.Context, string) (StoredObject, error)
 	PresignPlayback(context.Context, string, time.Duration) (string, error)
 	DeleteObject(context.Context, string) error
@@ -42,7 +53,7 @@ type Repository interface {
 	GetCourseVideoByPositionForUpdate(context.Context, uint64, domain.CourseVideoKind, uint32) (*domain.CourseVideo, error)
 	InsertCourseVideo(context.Context, *domain.CourseVideo) error
 	SaveCourseVideo(context.Context, *domain.CourseVideo, domain.CourseVideoStatus) error
-	FailPendingCourseVideoUploads(context.Context, uint64) error
+	ListPendingCourseVideoUploadsForUpdate(context.Context, uint64) ([]domain.CourseVideoUpload, error)
 	InsertCourseVideoUpload(context.Context, *domain.CourseVideoUpload) error
 	GetCourseVideoUpload(context.Context, uint64) (*domain.CourseVideoUpload, error)
 	GetCourseVideoUploadForUpdate(context.Context, uint64) (*domain.CourseVideoUpload, error)

@@ -83,7 +83,9 @@ func TestCourseVideoRestartUploadUsesNewObjectKey(t *testing.T) {
 }
 
 func TestCourseVideoUploadPromoteRequiresPending(t *testing.T) {
-	upload, err := NewCourseVideoUpload(7, "course-videos/1/upload.mp4", time.Now().Add(time.Minute))
+	upload, err := NewCourseVideoUpload(
+		7, "course-videos/1/upload.mp4", "multipart-1", 1024, time.Now().Add(time.Minute),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +101,9 @@ func TestCourseVideoUploadPromoteRequiresPending(t *testing.T) {
 }
 
 func TestCourseVideoUploadCleanupLifecycleIsIdempotent(t *testing.T) {
-	upload, err := NewCourseVideoUpload(7, "course-videos/1/upload.mp4", time.Now().Add(time.Minute))
+	upload, err := NewCourseVideoUpload(
+		7, "course-videos/1/upload.mp4", "multipart-1", 1024, time.Now().Add(time.Minute),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,6 +121,77 @@ func TestCourseVideoUploadCleanupLifecycleIsIdempotent(t *testing.T) {
 	}
 	if upload.Status != CourseVideoUploadStatusCleaned {
 		t.Fatalf("status = %q, want cleaned", upload.Status)
+	}
+}
+
+func TestVideoUploadPolicyValidatesDeclaredAndStoredMetadata(t *testing.T) {
+	policy := VideoUploadPolicy{MaxSizeBytes: 2048}
+	if err := policy.ValidateDeclared(VideoFileMetadata{
+		FileName: " preview.MP4 ", ContentType: "video/mp4", Size: 1024,
+	}); err != nil {
+		t.Fatalf("ValidateDeclared() error = %v", err)
+	}
+	if err := policy.ValidateDeclared(VideoFileMetadata{
+		FileName: "preview.mov", ContentType: "video/mp4", Size: 1024,
+	}); !errors.Is(err, ErrInvalidCourseVideo) {
+		t.Fatalf("ValidateDeclared() error = %v, want %v", err, ErrInvalidCourseVideo)
+	}
+	if err := policy.ValidateStored(VideoFileMetadata{
+		ContentType: "application/octet-stream", Size: 1024,
+	}); !errors.Is(err, ErrVideoObjectInvalid) {
+		t.Fatalf("ValidateStored() error = %v, want %v", err, ErrVideoObjectInvalid)
+	}
+}
+
+func TestCourseVideoUploadActiveSessionAndCompletionOwnership(t *testing.T) {
+	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+	upload, err := NewCourseVideoUpload(
+		7, "course-videos/1/upload.mp4", "multipart-1", 1024, now.Add(time.Minute),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := upload.EnsureActiveSession(" multipart-1 ", now); err != nil {
+		t.Fatalf("EnsureActiveSession() error = %v", err)
+	}
+	if err := upload.EnsureActive(now.Add(time.Minute)); !errors.Is(err, ErrCourseVideoUploadNotCompletable) {
+		t.Fatalf("expired EnsureActive() error = %v", err)
+	}
+	video := CourseVideo{ID: 7, ObjectKey: upload.ObjectKey}
+	if err := upload.EnsureCompletes(video); err != nil {
+		t.Fatalf("EnsureCompletes() error = %v", err)
+	}
+	video.ObjectKey = "course-videos/1/new.mp4"
+	if err := upload.EnsureCompletes(video); !errors.Is(err, ErrCourseVideoUploadNotCompletable) {
+		t.Fatalf("stale EnsureCompletes() error = %v", err)
+	}
+}
+
+func TestPrepareCourseVideoUploadCleanupProtectsReadyObject(t *testing.T) {
+	cutoff := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+	upload := &CourseVideoUpload{
+		CourseVideoID: 7, ObjectKey: "course-videos/1/upload.mp4",
+		Status: CourseVideoUploadStatusPending, ExpiresAt: cutoff,
+	}
+	ready := &CourseVideo{
+		ID: 7, ObjectKey: upload.ObjectKey, Status: CourseVideoStatusReady,
+	}
+	if _, err := PrepareCourseVideoUploadCleanup(upload, ready, cutoff); !errors.Is(err, ErrVideoObjectStillInUse) {
+		t.Fatalf("PrepareCourseVideoUploadCleanup() error = %v, want %v", err, ErrVideoObjectStillInUse)
+	}
+	if upload.Status != CourseVideoUploadStatusPending {
+		t.Fatalf("upload status = %q, want pending", upload.Status)
+	}
+
+	uploading := &CourseVideo{
+		ID: 7, ObjectKey: upload.ObjectKey, Status: CourseVideoStatusUploading,
+	}
+	shouldClean, err := PrepareCourseVideoUploadCleanup(upload, uploading, cutoff)
+	if err != nil || !shouldClean {
+		t.Fatalf("PrepareCourseVideoUploadCleanup() = %v, %v", shouldClean, err)
+	}
+	if upload.Status != CourseVideoUploadStatusFailed || uploading.Status != CourseVideoStatusFailed {
+		t.Fatalf("upload status = %q, video status = %q", upload.Status, uploading.Status)
 	}
 }
 

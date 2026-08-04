@@ -110,6 +110,16 @@ func TestEligibilityPolicyEvaluate(t *testing.T) {
 	}
 }
 
+func TestEligibilityPolicyRejectsExistingEnrollment(t *testing.T) {
+	policy := EligibilityPolicy{}
+	if err := policy.EnsureNoExistingEnrollment(false); err != nil {
+		t.Fatalf("EnsureNoExistingEnrollment(false) error = %v", err)
+	}
+	if err := policy.EnsureNoExistingEnrollment(true); !errors.Is(err, ErrDuplicateSelection) {
+		t.Fatalf("EnsureNoExistingEnrollment(true) error = %v, want %v", err, ErrDuplicateSelection)
+	}
+}
+
 func TestScheduleSlotConflictsRequiresOverlappingWeeksAndSections(t *testing.T) {
 	base := ScheduleSlot{
 		DayOfWeek: 3, StartWeek: 2, EndWeek: 10, StartSection: 3, EndSection: 4,

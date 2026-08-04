@@ -81,8 +81,11 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .preview-dialog {
+  position: fixed;
+  inset: 0;
   width: min(850px, calc(100% - 32px));
   max-height: calc(100vh - 32px);
+  margin: auto;
   overflow: auto;
   padding: 0;
   border: 1px solid var(--ink);

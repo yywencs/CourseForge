@@ -80,6 +80,15 @@ type EligibilitySnapshot struct {
 
 type EligibilityPolicy struct{}
 
+// EnsureNoExistingEnrollment 判断学生是否已经在同一学期修读目标课程。
+// 查询事实由应用层提供，是否允许再次选择由领域策略决定。
+func (EligibilityPolicy) EnsureNoExistingEnrollment(exists bool) error {
+	if exists {
+		return ErrDuplicateSelection
+	}
+	return nil
+}
+
 func (EligibilityPolicy) Evaluate(snapshot *EligibilitySnapshot) error {
 	if snapshot == nil || snapshot.Student == nil || snapshot.Student.ID == 0 {
 		return ErrInvalidParams

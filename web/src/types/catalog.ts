@@ -33,10 +33,22 @@ export interface PreviewVideo {
 export interface VideoUploadTicket {
   video: CourseVideo
   upload_id: number
-  upload_url: string
+  multipart_upload_id: string
+  part_size_bytes: number
+  parts: VideoUploadPartTicket[]
   expires_at: string
+}
+
+export interface VideoUploadPartTicket {
+  part_number: number
+  upload_url: string
   method: 'PUT'
-  headers: Record<string, string>
+}
+
+export interface UploadedVideoPart {
+  part_number: number
+  etag: string
+  size: number
 }
 
 export interface VideoPlaybackTicket {

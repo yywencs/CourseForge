@@ -121,6 +121,8 @@ CREATE TABLE `course_video_upload` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '视频上传任务ID',
   `course_video_id` bigint unsigned NOT NULL COMMENT '目标课程视频ID',
   `object_key` varchar(512) NOT NULL COMMENT '本次上传使用的对象键',
+  `multipart_upload_id` varchar(512) NOT NULL DEFAULT '' COMMENT '对象存储分片上传会话ID',
+  `file_size` bigint unsigned NOT NULL DEFAULT 0 COMMENT '客户端声明的视频文件大小（字节）',
   `status` varchar(16) NOT NULL DEFAULT 'pending'
     COMMENT 'pending/promoted/failed/cleaned',
   `expires_at` datetime(3) NOT NULL COMMENT '上传任务过期时间',
@@ -137,6 +139,35 @@ CREATE TABLE `course_video_upload` (
     CHECK (`status` IN ('pending', 'promoted', 'failed', 'cleaned'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='课程视频上传任务及过期对象清理依据';
+
+CREATE TABLE `video_danmaku` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT
+    COMMENT '弹幕ID，同时作为历史查询稳定游标',
+  `video_id` bigint unsigned NOT NULL COMMENT '课程视频ID',
+  `student_id` bigint unsigned NOT NULL COMMENT '发送学生ID',
+  `client_msg_id` varchar(64) NOT NULL COMMENT '客户端生成的幂等请求ID',
+  `video_time_ms` bigint unsigned NOT NULL COMMENT '弹幕对应的视频播放位置，毫秒',
+  `content` varchar(200) NOT NULL COMMENT '弹幕内容',
+  `status` varchar(16) NOT NULL DEFAULT 'visible'
+    COMMENT 'visible/hidden/deleted',
+  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `update_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+    ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_danmaku_client_message`
+    (`video_id`, `student_id`, `client_msg_id`),
+  KEY `idx_danmaku_video_window`
+    (`video_id`, `status`, `video_time_ms`, `id`),
+  KEY `idx_danmaku_student`
+    (`student_id`, `status`, `id`),
+  KEY `idx_danmaku_moderation`
+    (`status`, `create_time`, `id`),
+  CONSTRAINT `chk_danmaku_status`
+    CHECK (`status` IN ('visible', 'hidden', 'deleted')),
+  CONSTRAINT `chk_danmaku_content`
+    CHECK (CHAR_LENGTH(TRIM(`content`)) > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='课程视频弹幕';
 
 CREATE TABLE `course_prerequisite` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,

@@ -10,7 +10,7 @@ import (
 	domain "prizeforge/internal/catalog/domain"
 )
 
-var ErrVideoObjectStillInUse = errors.New("视频对象仍被可播放记录引用")
+var ErrVideoObjectStillInUse = domain.ErrVideoObjectStillInUse
 
 const managedVideoObjectPrefix = "course-videos/"
 
@@ -45,14 +45,14 @@ func (s *Service) CleanupCourseVideoUpload(ctx context.Context, uploadID uint64,
 	if err != nil {
 		return err
 	}
-	if !courseVideoUploadCanBeCleaned(*upload, cleanupBefore) {
+	if !upload.EligibleForCleanup(cleanupBefore) {
 		return nil
 	}
 	if !isManagedVideoObjectKey(upload.ObjectKey) {
 		return fmt.Errorf("refuse to delete unmanaged object key %q", upload.ObjectKey)
 	}
 
-	var objectKey string
+	var objectKey, multipartUploadID string
 	shouldDelete := false
 	err = s.repository.WithinTransaction(ctx, func(txCtx context.Context) error {
 		// 与申请、完成上传保持 video → upload 的加锁顺序。
@@ -64,36 +64,36 @@ func (s *Service) CleanupCourseVideoUpload(ctx context.Context, uploadID uint64,
 		if err != nil {
 			return err
 		}
-		if !courseVideoUploadCanBeCleaned(*current, cleanupBefore) {
+		if !current.EligibleForCleanup(cleanupBefore) {
 			return nil
 		}
 		if !isManagedVideoObjectKey(current.ObjectKey) {
 			return fmt.Errorf("refuse to delete unmanaged object key %q", current.ObjectKey)
 		}
-		if videoErr == nil && video.ObjectKey == current.ObjectKey {
-			switch video.Status {
-			case domain.CourseVideoStatusUploading:
-				expectedStatus := video.Status
-				if err := video.FailUpload(); err != nil {
-					return err
-				}
-				if err := s.repository.SaveCourseVideo(txCtx, video, expectedStatus); err != nil {
-					return err
-				}
-			case domain.CourseVideoStatusReady:
-				return ErrVideoObjectStillInUse
-			}
+		expectedUploadStatus := current.Status
+		var expectedVideoStatus domain.CourseVideoStatus
+		if videoErr == nil {
+			expectedVideoStatus = video.Status
 		}
-		expectedStatus := current.Status
-		if err := current.Fail(); err != nil {
+		shouldClean, err := domain.PrepareCourseVideoUploadCleanup(current, video, cleanupBefore)
+		if err != nil {
 			return err
 		}
-		if current.Status != expectedStatus {
-			if err := s.repository.SaveCourseVideoUpload(txCtx, current, expectedStatus); err != nil {
+		if !shouldClean {
+			return nil
+		}
+		if videoErr == nil && video.Status != expectedVideoStatus {
+			if err := s.repository.SaveCourseVideo(txCtx, video, expectedVideoStatus); err != nil {
+				return err
+			}
+		}
+		if current.Status != expectedUploadStatus {
+			if err := s.repository.SaveCourseVideoUpload(txCtx, current, expectedUploadStatus); err != nil {
 				return err
 			}
 		}
 		objectKey = current.ObjectKey
+		multipartUploadID = current.MultipartUploadID
 		shouldDelete = true
 		return nil
 	})
@@ -101,6 +101,11 @@ func (s *Service) CleanupCourseVideoUpload(ctx context.Context, uploadID uint64,
 		return err
 	}
 
+	if multipartUploadID != "" {
+		if err := s.objectStorage.AbortMultipartUpload(ctx, objectKey, multipartUploadID); err != nil {
+			return fmt.Errorf("abort multipart upload for object %q: %w", objectKey, err)
+		}
+	}
 	if err := s.objectStorage.DeleteObject(ctx, objectKey); err != nil {
 		return fmt.Errorf("delete object %q: %w", objectKey, err)
 	}
@@ -109,26 +114,15 @@ func (s *Service) CleanupCourseVideoUpload(ctx context.Context, uploadID uint64,
 		if err != nil {
 			return err
 		}
-		if current.Status == domain.CourseVideoUploadStatusCleaned {
-			return nil
-		}
-		if current.Status != domain.CourseVideoUploadStatusFailed || current.ObjectKey != objectKey {
-			return domain.ErrCourseVideoUploadNotCompletable
-		}
 		expectedStatus := current.Status
-		if err := current.Clean(); err != nil {
+		if err := current.FinalizeCleanup(objectKey); err != nil {
 			return err
+		}
+		if current.Status == expectedStatus {
+			return nil
 		}
 		return s.repository.SaveCourseVideoUpload(txCtx, current, expectedStatus)
 	})
-}
-
-func courseVideoUploadCanBeCleaned(upload domain.CourseVideoUpload, cleanupBefore time.Time) bool {
-	if upload.ExpiresAt.After(cleanupBefore) {
-		return false
-	}
-	return upload.Status == domain.CourseVideoUploadStatusPending ||
-		upload.Status == domain.CourseVideoUploadStatusFailed
 }
 
 func isManagedVideoObjectKey(objectKey string) bool {

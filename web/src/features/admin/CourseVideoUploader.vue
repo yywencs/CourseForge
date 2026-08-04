@@ -4,10 +4,13 @@ import { computed, onMounted, shallowRef } from 'vue'
 
 import {
   completeCourseVideoUpload,
+  listCourseVideoUploadParts,
   listCourseVideos,
+  presignCourseVideoUploadParts,
   startCourseVideoUpload,
 } from '@/api/catalog'
-import type { Course, CourseVideo } from '@/types/catalog'
+import type { Course, CourseVideo, VideoUploadTicket } from '@/types/catalog'
+import { missingPartNumbers, uploadVideoParts } from '@/features/admin/videoMultipartUpload'
 
 const props = defineProps<{ course: Course }>()
 const emit = defineEmits<{ close: []; uploaded: [] }>()
@@ -16,6 +19,14 @@ const videos = shallowRef<CourseVideo[]>([])
 const file = shallowRef<File>()
 const title = shallowRef('课程预览')
 const busy = shallowRef(false)
+const activeUpload = shallowRef<{
+  ticket: VideoUploadTicket
+  durationMs?: number
+  fileName: string
+  fileSize: number
+  lastModified: number
+  partsUploaded: boolean
+}>()
 const readyPreview = computed(() => videos.value.find((video) =>
   video.video_kind === 'preview' && video.status === 'ready'))
 
@@ -26,7 +37,11 @@ async function loadVideos(): Promise<void> {
 }
 
 function selectFile(event: Event): void {
-  file.value = (event.target as HTMLInputElement).files?.[0]
+  const selected = (event.target as HTMLInputElement).files?.[0]
+  file.value = selected
+  if (selected && activeUpload.value && !isSameFile(selected, activeUpload.value)) {
+    activeUpload.value = undefined
+  }
 }
 
 async function upload(): Promise<void> {
@@ -41,24 +56,33 @@ async function upload(): Promise<void> {
   }
   busy.value = true
   try {
-    const durationMs = await readDuration(selected)
-    const ticket = await startCourseVideoUpload(props.course.id, {
-      video_kind: 'preview',
-      title: title.value.trim() || '课程预览',
-      file_name: selected.name,
-      content_type: 'video/mp4',
-      file_size: selected.size,
-      sort_order: 0,
-    })
-    const response = await fetch(ticket.upload_url, {
-      method: ticket.method,
-      headers: ticket.headers,
-      body: selected,
-    })
-    if (!response.ok) throw new Error(`对象存储上传失败（${response.status}）`)
-    await completeCourseVideoUpload(ticket.upload_id, durationMs)
+    let current = activeUpload.value
+    if (!current) {
+      const durationMs = await readDuration(selected)
+      const ticket = await startCourseVideoUpload(props.course.id, {
+        video_kind: 'preview',
+        title: title.value.trim() || '课程预览',
+        file_name: selected.name,
+        content_type: 'video/mp4',
+        file_size: selected.size,
+        sort_order: 0,
+      })
+      current = {
+        ticket, durationMs, fileName: selected.name,
+        fileSize: selected.size, lastModified: selected.lastModified,
+        partsUploaded: false,
+      }
+      activeUpload.value = current
+      await uploadPartsWithRetry(selected, ticket, ticket.parts)
+      current.partsUploaded = true
+    } else if (!current.partsUploaded) {
+      await resumeUpload(selected, current.ticket)
+      current.partsUploaded = true
+    }
+    await completeCourseVideoUpload(current.ticket.upload_id, current.durationMs)
     await loadVideos()
     file.value = undefined
+    activeUpload.value = undefined
     emit('uploaded')
     ElMessage.success('课程预览视频已上传')
   } catch (error) {
@@ -66,6 +90,45 @@ async function upload(): Promise<void> {
   } finally {
     busy.value = false
   }
+}
+
+async function resumeUpload(selected: File, ticket: VideoUploadTicket): Promise<void> {
+  const uploaded = await listCourseVideoUploadParts(ticket.upload_id)
+  const missing = missingPartNumbers(
+    ticket.parts,
+    new Set(uploaded.parts.map((part) => part.part_number)),
+  )
+  if (missing.length === 0) return
+  const refreshed = await presignCourseVideoUploadParts(
+    ticket.upload_id,
+    ticket.multipart_upload_id,
+    missing,
+  )
+  await uploadPartsWithRetry(selected, ticket, refreshed.parts)
+}
+
+async function uploadPartsWithRetry(
+  selected: File,
+  ticket: VideoUploadTicket,
+  parts: VideoUploadTicket['parts'],
+): Promise<void> {
+  await uploadVideoParts(selected, ticket.part_size_bytes, parts, {
+    refreshPartURL: async (partNumber) => {
+      const refreshed = await presignCourseVideoUploadParts(
+        ticket.upload_id,
+        ticket.multipart_upload_id,
+        [partNumber],
+      )
+      const part = refreshed.parts[0]
+      if (!part) throw new Error(`无法刷新第 ${partNumber} 个分片的上传地址`)
+      return part
+    },
+  })
+}
+
+function isSameFile(selected: File, upload: NonNullable<typeof activeUpload.value>): boolean {
+  return selected.name === upload.fileName && selected.size === upload.fileSize &&
+    selected.lastModified === upload.lastModified
 }
 
 function readDuration(selected: File): Promise<number | undefined> {
@@ -103,7 +166,9 @@ function readDuration(selected: File): Promise<number | undefined> {
       <label><span>视频标题</span><input v-model="title" maxlength="128" required /></label>
       <label><span>MP4 文件</span><input type="file" accept="video/mp4,.mp4" required @change="selectFile" /></label>
       <p>文件会由浏览器直接上传到对象存储，不经过 CourseForge API。</p>
-      <button type="submit" class="primary" :disabled="busy">{{ busy ? '正在上传…' : '上传预览视频' }}</button>
+      <button type="submit" class="primary" :disabled="busy">
+        {{ busy ? '正在上传…' : activeUpload ? '继续上传' : '上传预览视频' }}
+      </button>
     </form>
   </section>
 </template>

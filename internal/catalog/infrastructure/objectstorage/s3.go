@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +20,7 @@ import (
 
 type S3Store struct {
 	client *minio.Client
+	core   minio.Core
 	bucket string
 }
 
@@ -35,15 +39,99 @@ func NewS3Store(cfg config.ObjectStorageConfig) (*S3Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create S3 client: %w", err)
 	}
-	return &S3Store{client: client, bucket: strings.TrimSpace(cfg.Bucket)}, nil
+	return &S3Store{
+		client: client,
+		core:   minio.Core{Client: client},
+		bucket: strings.TrimSpace(cfg.Bucket),
+	}, nil
 }
 
-func (s *S3Store) PresignUpload(ctx context.Context, objectKey string, expiry time.Duration) (string, error) {
-	value, err := s.client.PresignedPutObject(ctx, s.bucket, objectKey, expiry)
+func (s *S3Store) CreateMultipartUpload(ctx context.Context, objectKey, contentType string) (string, error) {
+	return s.core.NewMultipartUpload(ctx, s.bucket, objectKey, minio.PutObjectOptions{
+		ContentType: contentType,
+	})
+}
+
+func (s *S3Store) PresignUploadPart(
+	ctx context.Context,
+	objectKey string,
+	multipartUploadID string,
+	partNumber int,
+	expiry time.Duration,
+) (string, error) {
+	query := url.Values{
+		"uploadId":   []string{multipartUploadID},
+		"partNumber": []string{strconv.Itoa(partNumber)},
+	}
+	value, err := s.client.Presign(ctx, http.MethodPut, s.bucket, objectKey, expiry, query)
 	if err != nil {
 		return "", err
 	}
 	return value.String(), nil
+}
+
+func (s *S3Store) ListUploadedParts(
+	ctx context.Context,
+	objectKey string,
+	multipartUploadID string,
+) ([]catalogapp.UploadedPart, error) {
+	parts := make([]catalogapp.UploadedPart, 0)
+	marker := 0
+	for {
+		result, err := s.core.ListObjectParts(
+			ctx, s.bucket, objectKey, multipartUploadID, marker, 1000,
+		)
+		if err != nil {
+			if isMissingMultipartUpload(err) {
+				return nil, catalogapp.ErrMultipartUploadNotFound
+			}
+			return nil, err
+		}
+		for _, part := range result.ObjectParts {
+			parts = append(parts, catalogapp.UploadedPart{
+				PartNumber: part.PartNumber,
+				ETag:       part.ETag,
+				Size:       part.Size,
+			})
+		}
+		if !result.IsTruncated {
+			break
+		}
+		marker = result.NextPartNumberMarker
+	}
+	sort.Slice(parts, func(i, j int) bool { return parts[i].PartNumber < parts[j].PartNumber })
+	return parts, nil
+}
+
+func (s *S3Store) CompleteMultipartUpload(
+	ctx context.Context,
+	objectKey string,
+	multipartUploadID string,
+	parts []catalogapp.UploadedPart,
+) error {
+	completeParts := make([]minio.CompletePart, 0, len(parts))
+	for _, part := range parts {
+		completeParts = append(completeParts, minio.CompletePart{
+			PartNumber: part.PartNumber,
+			ETag:       part.ETag,
+		})
+	}
+	_, err := s.core.CompleteMultipartUpload(
+		ctx, s.bucket, objectKey, multipartUploadID, completeParts, minio.PutObjectOptions{},
+	)
+	if isMissingMultipartUpload(err) {
+		return catalogapp.ErrMultipartUploadNotFound
+	}
+	return err
+}
+
+// AbortMultipartUpload 幂等终止尚未合并的分片上传会话。
+func (s *S3Store) AbortMultipartUpload(ctx context.Context, objectKey, multipartUploadID string) error {
+	err := s.core.AbortMultipartUpload(ctx, s.bucket, objectKey, multipartUploadID)
+	if isMissingMultipartUpload(err) {
+		return nil
+	}
+	return err
 }
 
 func (s *S3Store) StatObject(ctx context.Context, objectKey string) (catalogapp.StoredObject, error) {
@@ -77,6 +165,14 @@ func (s *S3Store) DeleteObject(ctx context.Context, objectKey string) error {
 		return nil
 	}
 	return err
+}
+
+func isMissingMultipartUpload(err error) bool {
+	if err == nil {
+		return false
+	}
+	response := minio.ToErrorResponse(err)
+	return response.Code == "NoSuchUpload"
 }
 
 func resolveEndpoint(value string, configuredSecure bool) (string, bool, error) {

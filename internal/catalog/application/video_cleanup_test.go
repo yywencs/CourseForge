@@ -57,6 +57,32 @@ func TestCleanupDeleteFailureLeavesRecoverableFailedState(t *testing.T) {
 	}
 }
 
+func TestCleanupAbortFailureLeavesRecoverableFailedState(t *testing.T) {
+	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+	repository := cleanupRepository(now, domain.CourseVideoUploadStatusPending)
+	wantErr := errors.New("abort temporarily unavailable")
+	storage := &objectStorageStub{abortMultipartErr: wantErr}
+	service := NewService(repository, WithVideoStorage(storage, VideoPolicy{}))
+
+	err := service.CleanupCourseVideoUpload(context.Background(), 11, now.Add(-time.Hour))
+	if !errors.Is(err, wantErr) || repository.upload.Status != domain.CourseVideoUploadStatusFailed {
+		t.Fatalf("first cleanup error = %v, upload = %#v", err, repository.upload)
+	}
+	if storage.deleteObjectCalls != 0 {
+		t.Fatalf("DeleteObject() calls = %d, want 0", storage.deleteObjectCalls)
+	}
+
+	storage.abortMultipartErr = nil
+	if err := service.CleanupCourseVideoUpload(context.Background(), 11, now.Add(-time.Hour)); err != nil {
+		t.Fatalf("recovered cleanup error = %v", err)
+	}
+	if repository.upload.Status != domain.CourseVideoUploadStatusCleaned ||
+		storage.abortMultipartCalls != 2 || storage.deleteObjectCalls != 1 {
+		t.Fatalf("upload = %#v, abort calls = %d, delete calls = %d",
+			repository.upload, storage.abortMultipartCalls, storage.deleteObjectCalls)
+	}
+}
+
 func TestCleanupRecoversAfterDeleteBeforeDatabaseCommit(t *testing.T) {
 	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
 	repository := cleanupRepository(now, domain.CourseVideoUploadStatusFailed)
@@ -82,10 +108,11 @@ func TestCompletionAndCleanupRaceCleanupWins(t *testing.T) {
 	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
 	repository := cleanupRepository(now, domain.CourseVideoUploadStatusPending)
 	storage := &objectStorageStub{
-		object:       StoredObject{Size: 1024, ContentType: "video/mp4"},
-		objectExists: true,
-		statStarted:  make(chan struct{}),
-		statContinue: make(chan struct{}),
+		object:        StoredObject{Size: 1024, ContentType: "video/mp4"},
+		uploadedParts: []UploadedPart{{PartNumber: 1, ETag: "etag-1", Size: 1024}},
+		objectExists:  true,
+		statStarted:   make(chan struct{}),
+		statContinue:  make(chan struct{}),
 	}
 	service := NewService(repository, WithVideoStorage(storage, VideoPolicy{MaxVideoSizeBytes: 2048}))
 	completeResult := make(chan error, 1)
@@ -152,6 +179,7 @@ func cleanupRepository(now time.Time, uploadStatus domain.CourseVideoUploadStatu
 		},
 		upload: &domain.CourseVideoUpload{
 			ID: 11, CourseVideoID: 7, ObjectKey: objectKey,
+			MultipartUploadID: "multipart-cleanup", FileSize: 1024,
 			Status: uploadStatus, ExpiresAt: now.Add(-2 * time.Hour),
 		},
 	}

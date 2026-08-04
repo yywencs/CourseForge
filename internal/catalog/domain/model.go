@@ -80,25 +80,72 @@ type CourseVideo struct {
 // CourseVideoUpload 记录逻辑课程视频的一次物理对象上传尝试。
 // 每次尝试拥有独立对象键，避免过期签名地址覆盖更新的上传对象。
 type CourseVideoUpload struct {
-	ID            uint64
-	CourseVideoID uint64
-	ObjectKey     string
-	Status        CourseVideoUploadStatus
-	ExpiresAt     time.Time
-	CreateTime    time.Time
-	UpdateTime    time.Time
+	ID                uint64
+	CourseVideoID     uint64
+	ObjectKey         string
+	MultipartUploadID string
+	FileSize          int64
+	Status            CourseVideoUploadStatus
+	ExpiresAt         time.Time
+	CreateTime        time.Time
+	UpdateTime        time.Time
 }
 
-func NewCourseVideoUpload(courseVideoID uint64, objectKey string, expiresAt time.Time) (*CourseVideoUpload, error) {
+// VideoUploadPolicy 定义课程视频在业务上允许的文件范围。
+type VideoUploadPolicy struct {
+	MaxSizeBytes int64
+}
+
+// VideoFileMetadata 是校验课程视频所需的最小文件元数据。
+type VideoFileMetadata struct {
+	FileName    string
+	ContentType string
+	Size        int64
+}
+
+// ValidateDeclared 校验客户端申请上传时声明的文件元数据。
+func (p VideoUploadPolicy) ValidateDeclared(file VideoFileMetadata) error {
+	if !p.validSize(file.Size) ||
+		!strings.EqualFold(strings.TrimSpace(file.ContentType), "video/mp4") ||
+		!strings.HasSuffix(strings.ToLower(strings.TrimSpace(file.FileName)), ".mp4") {
+		return ErrInvalidCourseVideo
+	}
+	return nil
+}
+
+// ValidateStored 校验对象存储返回的实际文件元数据。
+func (p VideoUploadPolicy) ValidateStored(file VideoFileMetadata) error {
+	if !p.validSize(file.Size) ||
+		!strings.EqualFold(strings.TrimSpace(file.ContentType), "video/mp4") {
+		return ErrVideoObjectInvalid
+	}
+	return nil
+}
+
+func (p VideoUploadPolicy) validSize(size int64) bool {
+	return p.MaxSizeBytes > 0 && size > 0 && size <= p.MaxSizeBytes
+}
+
+func NewCourseVideoUpload(
+	courseVideoID uint64,
+	objectKey string,
+	multipartUploadID string,
+	fileSize int64,
+	expiresAt time.Time,
+) (*CourseVideoUpload, error) {
 	objectKey = strings.TrimSpace(objectKey)
-	if courseVideoID == 0 || objectKey == "" || expiresAt.IsZero() {
+	multipartUploadID = strings.TrimSpace(multipartUploadID)
+	if courseVideoID == 0 || objectKey == "" || multipartUploadID == "" ||
+		fileSize <= 0 || expiresAt.IsZero() {
 		return nil, ErrInvalidCourseVideo
 	}
 	return &CourseVideoUpload{
-		CourseVideoID: courseVideoID,
-		ObjectKey:     objectKey,
-		Status:        CourseVideoUploadStatusPending,
-		ExpiresAt:     expiresAt,
+		CourseVideoID:     courseVideoID,
+		ObjectKey:         objectKey,
+		MultipartUploadID: multipartUploadID,
+		FileSize:          fileSize,
+		Status:            CourseVideoUploadStatusPending,
+		ExpiresAt:         expiresAt,
 	}, nil
 }
 
@@ -107,6 +154,46 @@ func (u *CourseVideoUpload) Promote() error {
 		return ErrCourseVideoUploadNotCompletable
 	}
 	u.Status = CourseVideoUploadStatusPromoted
+	return nil
+}
+
+// IsPromoted 判断本次上传是否已经完成业务晋升，用于完成接口幂等返回。
+func (u CourseVideoUpload) IsPromoted() bool {
+	return u.Status == CourseVideoUploadStatusPromoted
+}
+
+// EnsurePending 确认上传仍具备完成资格。
+func (u CourseVideoUpload) EnsurePending() error {
+	if u.Status != CourseVideoUploadStatusPending {
+		return ErrCourseVideoUploadNotCompletable
+	}
+	return nil
+}
+
+// EnsureActive 确认 Multipart 上传仍处于可续传且未过期的状态。
+func (u CourseVideoUpload) EnsureActive(now time.Time) error {
+	if err := u.EnsurePending(); err != nil ||
+		strings.TrimSpace(u.MultipartUploadID) == "" || !now.Before(u.ExpiresAt) {
+		return ErrCourseVideoUploadNotCompletable
+	}
+	return nil
+}
+
+// EnsureActiveSession 确认客户端操作的是当前上传对应的 Multipart 会话。
+func (u CourseVideoUpload) EnsureActiveSession(multipartUploadID string, now time.Time) error {
+	if err := u.EnsureActive(now); err != nil ||
+		strings.TrimSpace(multipartUploadID) != u.MultipartUploadID {
+		return ErrCourseVideoUploadNotCompletable
+	}
+	return nil
+}
+
+// EnsureCompletes 确认上传任务仍属于逻辑视频当前指向的物理对象。
+func (u CourseVideoUpload) EnsureCompletes(video CourseVideo) error {
+	if err := u.EnsurePending(); err != nil ||
+		u.CourseVideoID != video.ID || u.ObjectKey != video.ObjectKey {
+		return ErrCourseVideoUploadNotCompletable
+	}
 	return nil
 }
 
@@ -130,6 +217,49 @@ func (u *CourseVideoUpload) Clean() error {
 	}
 	u.Status = CourseVideoUploadStatusCleaned
 	return nil
+}
+
+// EligibleForCleanup 判断上传任务是否已到达清理时间且尚未被晋升或清理。
+func (u CourseVideoUpload) EligibleForCleanup(cleanupBefore time.Time) bool {
+	return !u.ExpiresAt.After(cleanupBefore) &&
+		(u.Status == CourseVideoUploadStatusPending || u.Status == CourseVideoUploadStatusFailed)
+}
+
+// PrepareCourseVideoUploadCleanup 撤销过期上传的完成资格，并在该对象仍被逻辑视频
+// 引用时同步维护视频状态。ready 视频引用的对象永远不能作为孤儿删除。
+func PrepareCourseVideoUploadCleanup(
+	upload *CourseVideoUpload,
+	video *CourseVideo,
+	cleanupBefore time.Time,
+) (bool, error) {
+	if upload == nil || !upload.EligibleForCleanup(cleanupBefore) {
+		return false, nil
+	}
+	if video != nil && video.ObjectKey == upload.ObjectKey {
+		switch video.Status {
+		case CourseVideoStatusUploading:
+			if err := video.FailUpload(); err != nil {
+				return false, err
+			}
+		case CourseVideoStatusReady:
+			return false, ErrVideoObjectStillInUse
+		}
+	}
+	if err := upload.Fail(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// FinalizeCleanup 在对象删除成功后将对应的 failed 上传标记为 cleaned。
+func (u *CourseVideoUpload) FinalizeCleanup(objectKey string) error {
+	if u.Status == CourseVideoUploadStatusCleaned {
+		return nil
+	}
+	if u.ObjectKey != objectKey {
+		return ErrCourseVideoUploadNotCompletable
+	}
+	return u.Clean()
 }
 
 func NewCourseVideo(courseID uint64, kind CourseVideoKind, title, objectKey string, sortOrder uint32) (*CourseVideo, error) {

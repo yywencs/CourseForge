@@ -144,8 +144,8 @@ func (s *SelectionAdmissionService) evaluateStudent(
 	if err != nil {
 		return nil, err
 	}
-	if exists {
-		return nil, enrollment.ErrDuplicateSelection
+	if err := s.policy.EnsureNoExistingEnrollment(exists); err != nil {
+		return nil, err
 	}
 
 	// 使用当前轮次的额度快照进行快速失败，原子预占阶段还会再次校验。

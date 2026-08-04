@@ -50,7 +50,14 @@ func TestS3StorePresignedRoundTrip(t *testing.T) {
 		_ = store.DeleteObject(context.Background(), objectKey)
 	})
 
-	uploadURL, err := store.PresignUpload(ctx, objectKey, time.Minute)
+	multipartUploadID, err := store.CreateMultipartUpload(ctx, objectKey, "video/mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = store.AbortMultipartUpload(context.Background(), objectKey, multipartUploadID)
+	})
+	uploadURL, err := store.PresignUploadPart(ctx, objectKey, multipartUploadID, 1, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,6 +73,13 @@ func TestS3StorePresignedRoundTrip(t *testing.T) {
 	_ = response.Body.Close()
 	if response.StatusCode/100 != 2 {
 		t.Fatalf("upload status = %d", response.StatusCode)
+	}
+	parts, err := store.ListUploadedParts(ctx, objectKey, multipartUploadID)
+	if err != nil || len(parts) != 1 || parts[0].Size != int64(len("video-data")) {
+		t.Fatalf("ListUploadedParts() = %#v, %v", parts, err)
+	}
+	if err := store.CompleteMultipartUpload(ctx, objectKey, multipartUploadID, parts); err != nil {
+		t.Fatalf("CompleteMultipartUpload() error = %v", err)
 	}
 
 	info, err := store.StatObject(ctx, objectKey)

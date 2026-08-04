@@ -14,7 +14,13 @@ import (
 
 var (
 	ErrVideoStorageUnavailable = errors.New("视频存储服务暂时不可用")
-	ErrVideoObjectInvalid      = errors.New("上传的视频文件校验失败")
+	ErrVideoObjectInvalid      = domain.ErrVideoObjectInvalid
+)
+
+const (
+	VideoUploadPartSizeBytes = int64(8 * 1024 * 1024)
+	maxPresignedPartsPerCall = 100
+	maxMultipartPartNumber   = 10_000
 )
 
 type VideoPolicy struct {
@@ -107,10 +113,22 @@ type StartVideoUploadInput struct {
 }
 
 type VideoUploadTicket struct {
-	Video     domain.CourseVideo
-	UploadID  uint64
-	UploadURL string
-	ExpiresAt time.Time
+	Video             domain.CourseVideo
+	UploadID          uint64
+	MultipartUploadID string
+	PartSizeBytes     int64
+	Parts             []VideoUploadPartTicket
+	ExpiresAt         time.Time
+}
+
+type PresignVideoUploadPartsInput struct {
+	MultipartUploadID string
+	PartNumbers       []int
+}
+
+type VideoUploadPartTicket struct {
+	PartNumber int
+	UploadURL  string
 }
 
 type VideoPlaybackTicket struct {
@@ -118,9 +136,8 @@ type VideoPlaybackTicket struct {
 	ExpiresAt time.Time
 }
 
-// StartCourseVideoUpload 创建或重置课程视频记录，并返回供前端直传对象存储的临时 URL。
-// 该方法不接收视频二进制；前端 PUT 上传成功后，还需要调用 CompleteCourseVideoUpload
-// 让后端核验对象并将视频状态从 uploading 更新为 ready。
+// StartCourseVideoUpload 创建 OSS Multipart Upload 和对应的业务上传记录。
+// Multipart 会话先于数据库事务创建；事务失败时立即补偿终止该会话。
 func (s *Service) StartCourseVideoUpload(ctx context.Context, courseID uint64, input StartVideoUploadInput) (*VideoUploadTicket, error) {
 	// 对象存储关闭时，课程目录仍可使用，但不能申请视频上传。
 	if s.objectStorage == nil {
@@ -128,15 +145,29 @@ func (s *Service) StartCourseVideoUpload(ctx context.Context, courseID uint64, i
 	}
 	// 这里只对客户端声明的元数据做前置校验；上传完成后还会以对象存储中的
 	// 实际文件大小和 Content-Type 为准再次校验。
-	if input.FileSize <= 0 || input.FileSize > s.videoPolicy.MaxVideoSizeBytes ||
-		!strings.EqualFold(strings.TrimSpace(input.ContentType), "video/mp4") ||
-		!strings.HasSuffix(strings.ToLower(strings.TrimSpace(input.FileName)), ".mp4") {
-		return nil, domain.ErrInvalidCourseVideo
+	if err := s.domainVideoPolicy().ValidateDeclared(domain.VideoFileMetadata{
+		FileName: input.FileName, ContentType: input.ContentType, Size: input.FileSize,
+	}); err != nil {
+		return nil, err
 	}
 	// 对象键不依赖数据库生成值，先生成可在失败时避免开启事务和持有课程行锁。
 	objectKey, err := s.newObjectKey(courseID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: generate object key", ErrVideoStorageUnavailable)
+	}
+	multipartUploadID, err := s.objectStorage.CreateMultipartUpload(ctx, objectKey, "video/mp4")
+	if err != nil {
+		return nil, fmt.Errorf("%w: create multipart upload: %v", ErrVideoStorageUnavailable, err)
+	}
+	partNumbers, err := allVideoPartNumbers(input.FileSize)
+	if err != nil {
+		s.abortMultipartUploadBestEffort(ctx, objectKey, multipartUploadID)
+		return nil, err
+	}
+	parts, err := s.presignUploadParts(ctx, objectKey, multipartUploadID, partNumbers)
+	if err != nil {
+		s.abortMultipartUploadBestEffort(ctx, objectKey, multipartUploadID)
+		return nil, err
 	}
 	var video *domain.CourseVideo
 	var upload *domain.CourseVideoUpload
@@ -174,25 +205,141 @@ func (s *Service) StartCourseVideoUpload(ctx context.Context, courseID uint64, i
 		}
 		// 新尝试取代该逻辑视频尚未完成的旧尝试；与新任务插入一起提交，
 		// 避免出现旧任务已失败但新任务没有创建成功的中间状态。
-		if err := s.repository.FailPendingCourseVideoUploads(txCtx, video.ID); err != nil {
+		previousUploads, err := s.repository.ListPendingCourseVideoUploadsForUpdate(txCtx, video.ID)
+		if err != nil {
 			return err
 		}
-		upload, err = domain.NewCourseVideoUpload(video.ID, objectKey, expiresAt)
+		for index := range previousUploads {
+			expectedStatus := previousUploads[index].Status
+			if err := previousUploads[index].Fail(); err != nil {
+				return err
+			}
+			if err := s.repository.SaveCourseVideoUpload(txCtx, &previousUploads[index], expectedStatus); err != nil {
+				return err
+			}
+		}
+		upload, err = domain.NewCourseVideoUpload(
+			video.ID, objectKey, multipartUploadID, input.FileSize, expiresAt,
+		)
 		if err != nil {
 			return err
 		}
 		return s.repository.InsertCourseVideoUpload(txCtx, upload)
 	}); err != nil {
+		s.abortMultipartUploadBestEffort(ctx, objectKey, multipartUploadID)
 		return nil, err
 	}
-	// 预签名只依赖已提交的视频记录，放在事务外可避免对象存储调用延长数据库事务和行锁时间。
-	uploadURL, err := s.objectStorage.PresignUpload(ctx, video.ObjectKey, s.videoPolicy.UploadURLTTL)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrVideoStorageUnavailable, err)
-	}
 	return &VideoUploadTicket{
-		Video: *video, UploadID: upload.ID, UploadURL: uploadURL, ExpiresAt: expiresAt,
+		Video: *video, UploadID: upload.ID, MultipartUploadID: multipartUploadID,
+		PartSizeBytes: VideoUploadPartSizeBytes, Parts: parts, ExpiresAt: expiresAt,
 	}, nil
+}
+
+// PresignCourseVideoUploadParts 为当前 pending 上传批量签发指定分片的 PUT URL。
+func (s *Service) PresignCourseVideoUploadParts(
+	ctx context.Context,
+	uploadID uint64,
+	input PresignVideoUploadPartsInput,
+) ([]VideoUploadPartTicket, error) {
+	if s.objectStorage == nil {
+		return nil, ErrVideoStorageUnavailable
+	}
+	upload, err := s.repository.GetCourseVideoUpload(ctx, uploadID)
+	if err != nil {
+		return nil, err
+	}
+	if err := upload.EnsureActiveSession(input.MultipartUploadID, s.now()); err != nil {
+		return nil, err
+	}
+	if len(input.PartNumbers) == 0 || len(input.PartNumbers) > maxPresignedPartsPerCall {
+		return nil, domain.ErrCourseVideoUploadNotCompletable
+	}
+	allPartNumbers, err := allVideoPartNumbers(upload.FileSize)
+	if err != nil {
+		return nil, err
+	}
+	maxPartNumber := len(allPartNumbers)
+	seen := make(map[int]struct{}, len(input.PartNumbers))
+	for _, partNumber := range input.PartNumbers {
+		if partNumber <= 0 || partNumber > maxPartNumber {
+			return nil, domain.ErrInvalidCourseVideo
+		}
+		if _, exists := seen[partNumber]; exists {
+			return nil, domain.ErrInvalidCourseVideo
+		}
+		seen[partNumber] = struct{}{}
+	}
+	return s.presignUploadParts(ctx, upload.ObjectKey, upload.MultipartUploadID, input.PartNumbers)
+}
+
+// ListCourseVideoUploadParts 以 OSS Multipart 会话为准返回已经持久化成功的分片。
+func (s *Service) ListCourseVideoUploadParts(
+	ctx context.Context,
+	uploadID uint64,
+) ([]UploadedPart, error) {
+	if s.objectStorage == nil {
+		return nil, ErrVideoStorageUnavailable
+	}
+	upload, err := s.repository.GetCourseVideoUpload(ctx, uploadID)
+	if err != nil {
+		return nil, err
+	}
+	if err := upload.EnsureActive(s.now()); err != nil {
+		return nil, err
+	}
+	parts, err := s.objectStorage.ListUploadedParts(
+		ctx, upload.ObjectKey, upload.MultipartUploadID,
+	)
+	if errors.Is(err, ErrMultipartUploadNotFound) {
+		return nil, domain.ErrCourseVideoUploadNotCompletable
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: list multipart upload parts: %v", ErrVideoStorageUnavailable, err)
+	}
+	if !validUploadedVideoPartSubset(parts, upload.FileSize) {
+		return nil, ErrVideoObjectInvalid
+	}
+	return parts, nil
+}
+
+func (s *Service) presignUploadParts(
+	ctx context.Context,
+	objectKey string,
+	multipartUploadID string,
+	partNumbers []int,
+) ([]VideoUploadPartTicket, error) {
+	tickets := make([]VideoUploadPartTicket, 0, len(partNumbers))
+	for _, partNumber := range partNumbers {
+		uploadURL, err := s.objectStorage.PresignUploadPart(
+			ctx, objectKey, multipartUploadID, partNumber, s.videoPolicy.UploadURLTTL,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("%w: presign upload part %d: %v", ErrVideoStorageUnavailable, partNumber, err)
+		}
+		tickets = append(tickets, VideoUploadPartTicket{PartNumber: partNumber, UploadURL: uploadURL})
+	}
+	return tickets, nil
+}
+
+func allVideoPartNumbers(fileSize int64) ([]int, error) {
+	if fileSize <= 0 {
+		return nil, domain.ErrInvalidCourseVideo
+	}
+	partCount := int((fileSize-1)/VideoUploadPartSizeBytes + 1)
+	if partCount <= 0 || partCount > maxMultipartPartNumber {
+		return nil, domain.ErrInvalidCourseVideo
+	}
+	partNumbers := make([]int, partCount)
+	for index := range partNumbers {
+		partNumbers[index] = index + 1
+	}
+	return partNumbers, nil
+}
+
+func (s *Service) abortMultipartUploadBestEffort(ctx context.Context, objectKey, multipartUploadID string) {
+	abortCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_ = s.objectStorage.AbortMultipartUpload(abortCtx, objectKey, multipartUploadID)
 }
 
 // CompleteCourseVideoUpload 根据上传任务核验对象，并原子地将上传任务更新为 promoted、
@@ -205,25 +352,27 @@ func (s *Service) CompleteCourseVideoUpload(ctx context.Context, uploadID uint64
 	if err != nil {
 		return nil, err
 	}
-	switch upload.Status {
-	case domain.CourseVideoUploadStatusPromoted:
+	if upload.IsPromoted() {
 		return s.repository.GetCourseVideo(ctx, upload.CourseVideoID)
-	case domain.CourseVideoUploadStatusPending:
-		// 只有 pending 任务需要访问对象存储；failed/cleaned 任务不会触碰 OSS。
-	default:
-		return nil, domain.ErrCourseVideoUploadNotCompletable
 	}
-	// 以对象存储中的实际元数据为准，不直接信任客户端的完成声明。
-	object, err := s.objectStorage.StatObject(ctx, upload.ObjectKey)
+	if err := upload.EnsurePending(); err != nil {
+		return nil, err
+	}
+	// 服务端从 OSS 读取分片和 ETag 后完成合并，不信任客户端声明的分片列表。
+	object, err := s.completeMultipartObject(ctx, *upload)
 	if errors.Is(err, ErrStoredObjectNotFound) {
 		return nil, domain.ErrVideoUploadIncomplete
+	}
+	if errors.Is(err, domain.ErrVideoUploadIncomplete) {
+		return nil, err
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrVideoStorageUnavailable, err)
 	}
-	if object.Size <= 0 || object.Size > s.videoPolicy.MaxVideoSizeBytes ||
-		!strings.EqualFold(strings.TrimSpace(object.ContentType), "video/mp4") {
-		return nil, ErrVideoObjectInvalid
+	if err := s.domainVideoPolicy().ValidateStored(domain.VideoFileMetadata{
+		ContentType: object.ContentType, Size: object.Size,
+	}); err != nil {
+		return nil, err
 	}
 	var video *domain.CourseVideo
 	// OSS 校验期间任务可能被另一次上传取代，因此事务内锁定并重新检查状态。
@@ -237,19 +386,12 @@ func (s *Service) CompleteCourseVideoUpload(ctx context.Context, uploadID uint64
 		if err != nil {
 			return err
 		}
-		if currentUpload.CourseVideoID != currentVideo.ID {
-			return domain.ErrCourseVideoUploadNotCompletable
-		}
-		if currentUpload.Status == domain.CourseVideoUploadStatusPromoted {
+		if currentUpload.IsPromoted() {
 			video = currentVideo
 			return nil
 		}
-		if currentUpload.Status != domain.CourseVideoUploadStatusPending {
-			return domain.ErrCourseVideoUploadNotCompletable
-		}
-		// pending 任务必须仍是逻辑视频当前指向的上传尝试。
-		if currentVideo.ObjectKey != currentUpload.ObjectKey {
-			return domain.ErrCourseVideoUploadNotCompletable
+		if err := currentUpload.EnsureCompletes(*currentVideo); err != nil {
+			return err
 		}
 		expectedVideoStatus := currentVideo.Status
 		if err := currentVideo.CompleteUpload(durationMS); err != nil {
@@ -269,6 +411,63 @@ func (s *Service) CompleteCourseVideoUpload(ctx context.Context, uploadID uint64
 		return nil
 	})
 	return video, err
+}
+
+func (s *Service) domainVideoPolicy() domain.VideoUploadPolicy {
+	return domain.VideoUploadPolicy{MaxSizeBytes: s.videoPolicy.MaxVideoSizeBytes}
+}
+
+func (s *Service) completeMultipartObject(
+	ctx context.Context,
+	upload domain.CourseVideoUpload,
+) (StoredObject, error) {
+	parts, err := s.objectStorage.ListUploadedParts(ctx, upload.ObjectKey, upload.MultipartUploadID)
+	if errors.Is(err, ErrMultipartUploadNotFound) {
+		// OSS 已合并但进程在数据库提交前中断时，会话已经不存在而最终对象已经存在。
+		return s.objectStorage.StatObject(ctx, upload.ObjectKey)
+	}
+	if err != nil {
+		return StoredObject{}, fmt.Errorf("list multipart upload parts: %w", err)
+	}
+	if !validUploadedVideoParts(parts, upload.FileSize) {
+		return StoredObject{}, domain.ErrVideoUploadIncomplete
+	}
+	if err := s.objectStorage.CompleteMultipartUpload(
+		ctx, upload.ObjectKey, upload.MultipartUploadID, parts,
+	); err != nil && !errors.Is(err, ErrMultipartUploadNotFound) {
+		return StoredObject{}, fmt.Errorf("complete multipart upload: %w", err)
+	}
+	return s.objectStorage.StatObject(ctx, upload.ObjectKey)
+}
+
+func validUploadedVideoParts(parts []UploadedPart, fileSize int64) bool {
+	if fileSize <= 0 {
+		return false
+	}
+	wantPartCount := int((fileSize + VideoUploadPartSizeBytes - 1) / VideoUploadPartSizeBytes)
+	return len(parts) == wantPartCount && validUploadedVideoPartSubset(parts, fileSize)
+}
+
+func validUploadedVideoPartSubset(parts []UploadedPart, fileSize int64) bool {
+	if fileSize <= 0 {
+		return false
+	}
+	wantPartCount := int((fileSize-1)/VideoUploadPartSizeBytes + 1)
+	previousPartNumber := 0
+	for _, part := range parts {
+		if part.PartNumber <= previousPartNumber || part.PartNumber > wantPartCount {
+			return false
+		}
+		wantSize := VideoUploadPartSizeBytes
+		if part.PartNumber == wantPartCount {
+			wantSize = fileSize - int64(part.PartNumber-1)*VideoUploadPartSizeBytes
+		}
+		if strings.TrimSpace(part.ETag) == "" || part.Size != wantSize {
+			return false
+		}
+		previousPartNumber = part.PartNumber
+	}
+	return true
 }
 
 func (s *Service) ListCourseVideos(ctx context.Context, courseID uint64) ([]domain.CourseVideo, error) {

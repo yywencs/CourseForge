@@ -15,6 +15,8 @@ var (
 	ErrInvalidCourse         = errors.New("课程编码、名称和学分必须有效")
 	ErrInvalidCourseVideo    = errors.New("课程视频信息不合法")
 	ErrVideoUploadIncomplete = errors.New("视频尚未完整上传")
+	ErrVideoObjectInvalid    = errors.New("上传的视频文件校验失败")
+	ErrVideoObjectStillInUse = errors.New("视频对象仍被可播放记录引用")
 
 	ErrCourseCoreLocked                = fmt.Errorf("%w: 已存在非计划教学班，只能维护课程简介和标签", ErrConflict)
 	ErrTeachingClassNotEditable        = fmt.Errorf("%w: 教学班已进入选课流程，不能通过基础维护修改", ErrConflict)

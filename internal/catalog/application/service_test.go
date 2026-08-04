@@ -3,6 +3,7 @@ package catalogapp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,10 @@ func TestCourseVideoUploadCompletesAfterObjectVerification(t *testing.T) {
 	repository := &videoRepositoryStub{repositoryStub: repositoryStub{
 		course: &domain.Course{ID: 1, CourseCode: "CS-101", CourseName: "程序设计", Credits: 3},
 	}}
-	storage := &objectStorageStub{object: StoredObject{Size: 1024, ContentType: "video/mp4"}}
+	storage := &objectStorageStub{
+		object:        StoredObject{Size: 1024, ContentType: "video/mp4"},
+		uploadedParts: []UploadedPart{{PartNumber: 1, ETag: "etag-1", Size: 1024}},
+	}
 	service := NewService(repository, WithVideoStorage(storage, VideoPolicy{
 		UploadURLTTL: time.Minute, PlaybackURLTTL: time.Minute, MaxVideoSizeBytes: 2048,
 	}))
@@ -31,7 +35,8 @@ func TestCourseVideoUploadCompletesAfterObjectVerification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartCourseVideoUpload() error = %v", err)
 	}
-	if ticket.UploadURL != "https://objects.example/upload" || repository.video == nil {
+	if ticket.MultipartUploadID != "multipart-1" || ticket.PartSizeBytes != VideoUploadPartSizeBytes ||
+		len(ticket.Parts) != 1 || ticket.Parts[0].PartNumber != 1 || repository.video == nil {
 		t.Fatalf("ticket = %#v, video = %#v", ticket, repository.video)
 	}
 	if ticket.UploadID != 11 {
@@ -39,6 +44,8 @@ func TestCourseVideoUploadCompletesAfterObjectVerification(t *testing.T) {
 	}
 	if repository.upload == nil || repository.upload.CourseVideoID != ticket.Video.ID ||
 		repository.upload.ObjectKey != ticket.Video.ObjectKey ||
+		repository.upload.MultipartUploadID != ticket.MultipartUploadID ||
+		repository.upload.FileSize != 1024 ||
 		repository.upload.Status != domain.CourseVideoUploadStatusPending ||
 		!repository.upload.ExpiresAt.Equal(now.Add(time.Minute)) {
 		t.Fatalf("upload = %#v", repository.upload)
@@ -69,8 +76,8 @@ func TestCourseVideoUploadCompletesAfterObjectVerification(t *testing.T) {
 	if repeated.ID != video.ID || repeated.Status != domain.CourseVideoStatusReady {
 		t.Fatalf("repeated video = %#v", repeated)
 	}
-	if storage.statObjectCalls != 1 {
-		t.Fatalf("StatObject() calls = %d, want 1", storage.statObjectCalls)
+	if storage.statObjectCalls != 1 || storage.completeMultipartCalls != 1 {
+		t.Fatalf("StatObject() calls = %d, complete calls = %d", storage.statObjectCalls, storage.completeMultipartCalls)
 	}
 }
 
@@ -123,10 +130,14 @@ func TestCourseVideoUploadRejectsMissingObject(t *testing.T) {
 		},
 		upload: &domain.CourseVideoUpload{
 			ID: 9, CourseVideoID: 7, ObjectKey: "course-videos/1/missing.mp4",
+			MultipartUploadID: "multipart-missing", FileSize: 1024,
 			Status: domain.CourseVideoUploadStatusPending,
 		},
 	}
-	storage := &objectStorageStub{statErr: ErrStoredObjectNotFound}
+	storage := &objectStorageStub{
+		listPartsErr: ErrMultipartUploadNotFound,
+		statErr:      ErrStoredObjectNotFound,
+	}
 	service := NewService(repository, WithVideoStorage(storage, VideoPolicy{
 		UploadURLTTL: time.Minute, PlaybackURLTTL: time.Minute, MaxVideoSizeBytes: 2048,
 	}))
@@ -134,6 +145,34 @@ func TestCourseVideoUploadRejectsMissingObject(t *testing.T) {
 	_, err := service.CompleteCourseVideoUpload(context.Background(), 9, nil)
 	if !errors.Is(err, domain.ErrVideoUploadIncomplete) {
 		t.Fatalf("CompleteCourseVideoUpload() error = %v, want %v", err, domain.ErrVideoUploadIncomplete)
+	}
+}
+
+func TestCourseVideoUploadRecoversAfterMultipartWasAlreadyCompleted(t *testing.T) {
+	repository := &videoRepositoryStub{
+		video: &domain.CourseVideo{
+			ID: 7, CourseID: 1, Kind: domain.CourseVideoKindPreview,
+			ObjectKey: "course-videos/1/completed.mp4", Status: domain.CourseVideoStatusUploading,
+		},
+		upload: &domain.CourseVideoUpload{
+			ID: 9, CourseVideoID: 7, ObjectKey: "course-videos/1/completed.mp4",
+			MultipartUploadID: "multipart-completed", FileSize: 1024,
+			Status: domain.CourseVideoUploadStatusPending,
+		},
+	}
+	storage := &objectStorageStub{
+		listPartsErr: ErrMultipartUploadNotFound,
+		object:       StoredObject{Size: 1024, ContentType: "video/mp4"},
+	}
+	service := NewService(repository, WithVideoStorage(storage, VideoPolicy{MaxVideoSizeBytes: 2048}))
+
+	video, err := service.CompleteCourseVideoUpload(context.Background(), 9, nil)
+	if err != nil || video.Status != domain.CourseVideoStatusReady ||
+		repository.upload.Status != domain.CourseVideoUploadStatusPromoted {
+		t.Fatalf("video = %#v, upload = %#v, error = %v", video, repository.upload, err)
+	}
+	if storage.completeMultipartCalls != 0 || storage.statObjectCalls != 1 {
+		t.Fatalf("complete calls = %d, stat calls = %d", storage.completeMultipartCalls, storage.statObjectCalls)
 	}
 }
 
@@ -163,7 +202,7 @@ func TestFailedCourseVideoUploadCannotComplete(t *testing.T) {
 	}
 }
 
-func TestCourseVideoUploadAttemptFailureStopsBeforePresigning(t *testing.T) {
+func TestCourseVideoUploadAttemptFailureAbortsMultipartUpload(t *testing.T) {
 	wantErr := errors.New("insert upload failed")
 	repository := &videoRepositoryStub{
 		repositoryStub: repositoryStub{
@@ -184,8 +223,33 @@ func TestCourseVideoUploadAttemptFailureStopsBeforePresigning(t *testing.T) {
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("StartCourseVideoUpload() error = %v, want %v", err, wantErr)
 	}
-	if storage.presignUploadCalls != 0 {
-		t.Fatalf("PresignUpload() calls = %d, want 0", storage.presignUploadCalls)
+	if storage.createMultipartCalls != 1 || storage.presignPartCalls != 1 || storage.abortMultipartCalls != 1 {
+		t.Fatalf("create calls = %d, presign calls = %d, abort calls = %d",
+			storage.createMultipartCalls, storage.presignPartCalls, storage.abortMultipartCalls)
+	}
+}
+
+func TestCourseVideoUploadPresignFailureAbortsBeforeTransaction(t *testing.T) {
+	repository := &videoRepositoryStub{repositoryStub: repositoryStub{
+		course: &domain.Course{ID: 1, CourseCode: "CS-101", CourseName: "程序设计", Credits: 3},
+	}}
+	wantErr := errors.New("presign unavailable")
+	storage := &objectStorageStub{presignPartErr: wantErr}
+	service := NewService(repository, WithVideoStorage(storage, VideoPolicy{
+		UploadURLTTL: time.Minute, MaxVideoSizeBytes: 2048,
+	}))
+	service.newObjectKey = func(uint64) (string, error) { return "course-videos/1/test.mp4", nil }
+
+	_, err := service.StartCourseVideoUpload(context.Background(), 1, StartVideoUploadInput{
+		Kind: domain.CourseVideoKindPreview, Title: "课程预览", FileName: "preview.mp4",
+		ContentType: "video/mp4", FileSize: 1024,
+	})
+	if !errors.Is(err, ErrVideoStorageUnavailable) || repository.transactions != 0 {
+		t.Fatalf("error = %v, transactions = %d", err, repository.transactions)
+	}
+	if storage.createMultipartCalls != 1 || storage.presignPartCalls != 1 || storage.abortMultipartCalls != 1 {
+		t.Fatalf("create calls = %d, presign calls = %d, abort calls = %d",
+			storage.createMultipartCalls, storage.presignPartCalls, storage.abortMultipartCalls)
 	}
 }
 
@@ -207,6 +271,76 @@ func TestCourseVideoObjectKeyFailureStopsBeforeTransaction(t *testing.T) {
 	}
 	if repository.transactions != 0 {
 		t.Fatalf("transactions = %d, want 0", repository.transactions)
+	}
+	storage := service.objectStorage.(*objectStorageStub)
+	if storage.createMultipartCalls != 0 {
+		t.Fatalf("CreateMultipartUpload() calls = %d, want 0", storage.createMultipartCalls)
+	}
+}
+
+func TestPresignCourseVideoUploadPartsValidatesMultipartUpload(t *testing.T) {
+	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+	repository := &videoRepositoryStub{upload: &domain.CourseVideoUpload{
+		ID: 11, CourseVideoID: 7, ObjectKey: "course-videos/1/test.mp4",
+		MultipartUploadID: "multipart-1", FileSize: VideoUploadPartSizeBytes + 1,
+		Status: domain.CourseVideoUploadStatusPending, ExpiresAt: now.Add(time.Minute),
+	}}
+	storage := &objectStorageStub{}
+	service := NewService(repository, WithVideoStorage(storage, VideoPolicy{UploadURLTTL: time.Minute}))
+	service.now = func() time.Time { return now }
+
+	parts, err := service.PresignCourseVideoUploadParts(context.Background(), 11, PresignVideoUploadPartsInput{
+		MultipartUploadID: "multipart-1", PartNumbers: []int{1, 2},
+	})
+	if err != nil || len(parts) != 2 || parts[1].PartNumber != 2 || storage.presignPartCalls != 2 {
+		t.Fatalf("parts = %#v, calls = %d, error = %v", parts, storage.presignPartCalls, err)
+	}
+	_, err = service.PresignCourseVideoUploadParts(context.Background(), 11, PresignVideoUploadPartsInput{
+		MultipartUploadID: "other-upload", PartNumbers: []int{1},
+	})
+	if !errors.Is(err, domain.ErrCourseVideoUploadNotCompletable) {
+		t.Fatalf("mismatched multipart ID error = %v", err)
+	}
+}
+
+func TestListCourseVideoUploadPartsReturnsOSSState(t *testing.T) {
+	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+	fileSize := 2*VideoUploadPartSizeBytes + 1
+	repository := &videoRepositoryStub{upload: &domain.CourseVideoUpload{
+		ID: 11, CourseVideoID: 7, ObjectKey: "course-videos/1/test.mp4",
+		MultipartUploadID: "multipart-1", FileSize: fileSize,
+		Status: domain.CourseVideoUploadStatusPending, ExpiresAt: now.Add(time.Minute),
+	}}
+	storage := &objectStorageStub{uploadedParts: []UploadedPart{
+		{PartNumber: 1, ETag: "etag-1", Size: VideoUploadPartSizeBytes},
+		{PartNumber: 3, ETag: "etag-3", Size: 1},
+	}}
+	service := NewService(repository, WithVideoStorage(storage, VideoPolicy{}))
+	service.now = func() time.Time { return now }
+
+	parts, err := service.ListCourseVideoUploadParts(context.Background(), 11)
+	if err != nil || len(parts) != 2 || parts[0].PartNumber != 1 || parts[1].PartNumber != 3 {
+		t.Fatalf("parts = %#v, error = %v", parts, err)
+	}
+	if storage.listPartsCalls != 1 {
+		t.Fatalf("ListUploadedParts() calls = %d, want 1", storage.listPartsCalls)
+	}
+}
+
+func TestListCourseVideoUploadPartsRejectsExpiredUpload(t *testing.T) {
+	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+	repository := &videoRepositoryStub{upload: &domain.CourseVideoUpload{
+		ID: 11, CourseVideoID: 7, ObjectKey: "course-videos/1/test.mp4",
+		MultipartUploadID: "multipart-1", FileSize: 1024,
+		Status: domain.CourseVideoUploadStatusPending, ExpiresAt: now.Add(-time.Second),
+	}}
+	storage := &objectStorageStub{}
+	service := NewService(repository, WithVideoStorage(storage, VideoPolicy{}))
+	service.now = func() time.Time { return now }
+
+	_, err := service.ListCourseVideoUploadParts(context.Background(), 11)
+	if !errors.Is(err, domain.ErrCourseVideoUploadNotCompletable) || storage.listPartsCalls != 0 {
+		t.Fatalf("error = %v, ListUploadedParts() calls = %d", err, storage.listPartsCalls)
 	}
 }
 
@@ -386,14 +520,14 @@ func (r *videoRepositoryStub) SaveCourseVideo(_ context.Context, video *domain.C
 	return nil
 }
 
-func (r *videoRepositoryStub) FailPendingCourseVideoUploads(_ context.Context, courseVideoID uint64) error {
+func (r *videoRepositoryStub) ListPendingCourseVideoUploadsForUpdate(_ context.Context, courseVideoID uint64) ([]domain.CourseVideoUpload, error) {
 	r.failPendingInTransaction = r.transactionDepth > 0
 	r.failedPendingCourseVideoID = courseVideoID
 	if r.previousUpload != nil && r.previousUpload.CourseVideoID == courseVideoID &&
 		r.previousUpload.Status == domain.CourseVideoUploadStatusPending {
-		r.previousUpload.Status = domain.CourseVideoUploadStatusFailed
+		return []domain.CourseVideoUpload{*r.previousUpload}, nil
 	}
-	return nil
+	return nil, nil
 }
 
 func (r *videoRepositoryStub) InsertCourseVideoUpload(_ context.Context, upload *domain.CourseVideoUpload) error {
@@ -425,26 +559,66 @@ func (r *videoRepositoryStub) SaveCourseVideoUpload(_ context.Context, upload *d
 		return r.saveCleanedErr
 	}
 	copy := *upload
+	if r.previousUpload != nil && upload.ID == r.previousUpload.ID {
+		r.previousUpload = &copy
+		return nil
+	}
 	r.upload = &copy
 	return nil
 }
 
 type objectStorageStub struct {
-	object             StoredObject
-	statErr            error
-	presignUploadCalls int
-	statObjectCalls    int
-	deleteObjectCalls  int
-	deletedObjectKeys  []string
-	deleteErr          error
-	objectExists       bool
-	statStarted        chan struct{}
-	statContinue       chan struct{}
+	object                 StoredObject
+	statErr                error
+	createMultipartCalls   int
+	presignPartCalls       int
+	completeMultipartCalls int
+	abortMultipartCalls    int
+	listPartsCalls         int
+	uploadedParts          []UploadedPart
+	createMultipartErr     error
+	presignPartErr         error
+	listPartsErr           error
+	completeMultipartErr   error
+	abortMultipartErr      error
+	statObjectCalls        int
+	deleteObjectCalls      int
+	deletedObjectKeys      []string
+	deleteErr              error
+	objectExists           bool
+	statStarted            chan struct{}
+	statContinue           chan struct{}
 }
 
-func (s *objectStorageStub) PresignUpload(context.Context, string, time.Duration) (string, error) {
-	s.presignUploadCalls++
-	return "https://objects.example/upload", nil
+func (s *objectStorageStub) CreateMultipartUpload(context.Context, string, string) (string, error) {
+	s.createMultipartCalls++
+	if s.createMultipartErr != nil {
+		return "", s.createMultipartErr
+	}
+	return "multipart-1", nil
+}
+
+func (s *objectStorageStub) PresignUploadPart(_ context.Context, _ string, _ string, partNumber int, _ time.Duration) (string, error) {
+	s.presignPartCalls++
+	if s.presignPartErr != nil {
+		return "", s.presignPartErr
+	}
+	return fmt.Sprintf("https://objects.example/upload?partNumber=%d", partNumber), nil
+}
+
+func (s *objectStorageStub) ListUploadedParts(context.Context, string, string) ([]UploadedPart, error) {
+	s.listPartsCalls++
+	return s.uploadedParts, s.listPartsErr
+}
+
+func (s *objectStorageStub) CompleteMultipartUpload(context.Context, string, string, []UploadedPart) error {
+	s.completeMultipartCalls++
+	return s.completeMultipartErr
+}
+
+func (s *objectStorageStub) AbortMultipartUpload(context.Context, string, string) error {
+	s.abortMultipartCalls++
+	return s.abortMultipartErr
 }
 
 func (s *objectStorageStub) StatObject(context.Context, string) (StoredObject, error) {
@@ -516,8 +690,8 @@ func (r *repositoryStub) InsertCourseVideo(context.Context, *domain.CourseVideo)
 func (r *repositoryStub) SaveCourseVideo(context.Context, *domain.CourseVideo, domain.CourseVideoStatus) error {
 	return nil
 }
-func (r *repositoryStub) FailPendingCourseVideoUploads(context.Context, uint64) error {
-	return nil
+func (r *repositoryStub) ListPendingCourseVideoUploadsForUpdate(context.Context, uint64) ([]domain.CourseVideoUpload, error) {
+	return nil, nil
 }
 func (r *repositoryStub) InsertCourseVideoUpload(context.Context, *domain.CourseVideoUpload) error {
 	return nil

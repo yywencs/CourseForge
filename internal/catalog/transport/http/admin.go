@@ -39,6 +39,11 @@ type completeVideoUploadRequest struct {
 	DurationMS *uint64 `json:"duration_ms"`
 }
 
+type presignVideoUploadPartsRequest struct {
+	MultipartUploadID string `json:"multipart_upload_id" binding:"required"`
+	PartNumbers       []int  `json:"part_numbers" binding:"required,min=1,max=100,dive,min=1,max=10000"`
+}
+
 func (r courseRequest) input() applicationcatalog.CourseInput {
 	return applicationcatalog.CourseInput{
 		CourseCode: r.CourseCode, CourseName: r.CourseName, Credits: r.Credits,
@@ -103,6 +108,8 @@ func (h *CatalogRoutes) RegisterAdminRoutes(group *gin.RouterGroup) {
 	courses.DELETE("/:course_id", h.deleteCourse)
 	courses.GET("/:course_id/videos", h.listCourseVideos)
 	courses.POST("/:course_id/videos/uploads", h.startVideoUpload)
+	group.GET("/course-video-uploads/:upload_id/parts", h.listVideoUploadParts)
+	group.POST("/course-video-uploads/:upload_id/parts/presign", h.presignVideoUploadParts)
 	group.POST("/course-video-uploads/:upload_id/complete", h.completeVideoUpload)
 
 	classes := group.Group("/teaching-classes")
@@ -146,10 +153,68 @@ func (h *CatalogRoutes) startVideoUpload(c *gin.Context) {
 	}
 	common.Success(c, gin.H{
 		"video": catalogdto.CourseVideo(ticket.Video), "upload_id": ticket.UploadID,
-		"upload_url": ticket.UploadURL,
-		"expires_at": ticket.ExpiresAt, "method": http.MethodPut,
-		"headers": gin.H{"Content-Type": "video/mp4"},
+		"multipart_upload_id": ticket.MultipartUploadID,
+		"part_size_bytes":     ticket.PartSizeBytes, "parts": videoUploadPartResponses(ticket.Parts),
+		"expires_at": ticket.ExpiresAt,
 	})
+}
+
+func (h *CatalogRoutes) presignVideoUploadParts(c *gin.Context) {
+	uploadID, ok := catalogID(c, "upload_id")
+	if !ok {
+		return
+	}
+	var request presignVideoUploadPartsRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.Error(c, http.StatusBadRequest, "视频分片信息格式不正确")
+		return
+	}
+	parts, err := h.service.PresignCourseVideoUploadParts(
+		c.Request.Context(),
+		uploadID,
+		applicationcatalog.PresignVideoUploadPartsInput{
+			MultipartUploadID: request.MultipartUploadID,
+			PartNumbers:       request.PartNumbers,
+		},
+	)
+	if err != nil {
+		handleCatalogError(c, err)
+		return
+	}
+	common.Success(c, gin.H{"parts": videoUploadPartResponses(parts)})
+}
+
+func (h *CatalogRoutes) listVideoUploadParts(c *gin.Context) {
+	uploadID, ok := catalogID(c, "upload_id")
+	if !ok {
+		return
+	}
+	parts, err := h.service.ListCourseVideoUploadParts(c.Request.Context(), uploadID)
+	if err != nil {
+		handleCatalogError(c, err)
+		return
+	}
+	items := make([]gin.H, 0, len(parts))
+	for _, part := range parts {
+		items = append(items, gin.H{
+			"part_number": part.PartNumber,
+			"etag":        part.ETag,
+			"size":        part.Size,
+		})
+	}
+	common.Success(c, gin.H{"parts": items})
+}
+
+func videoUploadPartResponses(parts []applicationcatalog.VideoUploadPartTicket) []gin.H {
+	items := make([]gin.H, 0, len(parts))
+	for _, part := range parts {
+		items = append(items, gin.H{
+			"part_number": part.PartNumber,
+			"upload_url":  part.UploadURL,
+			"method":      http.MethodPut,
+		})
+	}
+	return items
 }
 
 func (h *CatalogRoutes) completeVideoUpload(c *gin.Context) {

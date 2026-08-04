@@ -9,7 +9,9 @@ import type {
   SelectionRoundDraft,
   TeachingClass,
   TeachingClassDraft,
+  UploadedVideoPart,
   VideoPlaybackTicket,
+  VideoUploadPartTicket,
   VideoUploadTicket,
 } from '@/types/catalog'
 
@@ -43,7 +45,7 @@ export function listCourseVideos(courseId: number): Promise<ItemList<CourseVideo
   return unwrapAdmin(adminHttp.get(`/admin/v1/courses/${courseId}/videos`))
 }
 
-export function startCourseVideoUpload(courseId: number, input: {
+export async function startCourseVideoUpload(courseId: number, input: {
   video_kind: 'preview' | 'lesson'
   title: string
   file_name: string
@@ -51,7 +53,30 @@ export function startCourseVideoUpload(courseId: number, input: {
   file_size: number
   sort_order: number
 }): Promise<VideoUploadTicket> {
-  return unwrapAdmin(adminHttp.post(`/admin/v1/courses/${courseId}/videos/uploads`, input))
+  const ticket = await unwrapAdmin<VideoUploadTicket>(
+    adminHttp.post(`/admin/v1/courses/${courseId}/videos/uploads`, input),
+  )
+  if (!Number.isSafeInteger(ticket?.upload_id) || ticket.upload_id <= 0 ||
+    !ticket.multipart_upload_id || !Number.isSafeInteger(ticket.part_size_bytes) ||
+    ticket.part_size_bytes <= 0 || !Array.isArray(ticket.parts)) {
+    throw new Error('视频上传接口返回不完整，请确认后端已更新并重新启动')
+  }
+  return ticket
+}
+
+export function presignCourseVideoUploadParts(
+  uploadId: number,
+  multipartUploadId: string,
+  partNumbers: number[],
+): Promise<{ parts: VideoUploadPartTicket[] }> {
+  return unwrapAdmin(adminHttp.post(`/admin/v1/course-video-uploads/${uploadId}/parts/presign`, {
+    multipart_upload_id: multipartUploadId,
+    part_numbers: partNumbers,
+  }))
+}
+
+export function listCourseVideoUploadParts(uploadId: number): Promise<{ parts: UploadedVideoPart[] }> {
+  return unwrapAdmin(adminHttp.get(`/admin/v1/course-video-uploads/${uploadId}/parts`))
 }
 
 export function completeCourseVideoUpload(uploadId: number, durationMs?: number): Promise<CourseVideo> {

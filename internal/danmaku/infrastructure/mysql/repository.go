@@ -87,6 +87,33 @@ func (r *Repository) GetByClientMessage(
 	return &item, nil
 }
 
+// ListVisibleSegment 使用视频、状态和播放时间联合索引读取一个固定分段。
+func (r *Repository) ListVisibleSegment(
+	ctx context.Context,
+	videoID uint64,
+	segment danmaku.HistorySegment,
+) ([]danmaku.Danmaku, error) {
+	var rows []danmakuRow
+	err := r.db.WithContext(ctx).
+		Where(
+			"video_id = ? AND status = ? AND video_time_ms >= ? AND video_time_ms < ?",
+			videoID,
+			danmaku.StatusVisible,
+			segment.StartMS(),
+			segment.EndMS(),
+		).
+		Order("video_time_ms ASC, id ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, normalizeDBError(err)
+	}
+	items := make([]danmaku.Danmaku, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, row.domain())
+	}
+	return items, nil
+}
+
 type videoRow struct {
 	ID         uint64  `gorm:"column:id;primaryKey"`
 	VideoKind  string  `gorm:"column:video_kind"`

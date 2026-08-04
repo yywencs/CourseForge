@@ -7,7 +7,7 @@ function hex(value: number): string {
   return value.toString(16).padStart(2, '0')
 }
 
-// createRequestId 生成选课与候补请求的幂等标识，并兼容非 HTTPS 页面。
+// createRequestId 生成客户端写请求的幂等标识，并兼容非 HTTPS 页面。
 export function createRequestId(
   source: CryptoRandomSource = globalThis.crypto,
 ): string {

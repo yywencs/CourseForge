@@ -7,10 +7,11 @@ import (
 	"prizeforge/internal/danmaku/domain"
 )
 
-// Repository 定义弹幕发布用例需要的持久化能力。
+// Repository 定义弹幕发布与历史查询用例需要的持久化能力。
 type Repository interface {
 	Insert(context.Context, *danmaku.Danmaku) error
 	GetByClientMessage(context.Context, uint64, uint64, string) (*danmaku.Danmaku, error)
+	ListVisibleSegment(context.Context, uint64, danmaku.HistorySegment) ([]danmaku.Danmaku, error)
 }
 
 // VideoReader 定义课程视频状态和时长的只读查询能力。
@@ -27,7 +28,19 @@ type PublishCommand struct {
 	Content         string
 }
 
-// Service 编排视频校验、弹幕持久化和幂等冲突处理。
+// HistoryQuery 指定一个视频的固定历史弹幕分段。
+type HistoryQuery struct {
+	VideoID      uint64
+	SegmentIndex uint64
+}
+
+// HistoryPage 返回一个完整的固定时间分段及其可见弹幕。
+type HistoryPage struct {
+	Segment danmaku.HistorySegment
+	Items   []danmaku.Danmaku
+}
+
+// Service 编排视频校验、弹幕持久化、历史查询和幂等冲突处理。
 type Service struct {
 	repository Repository
 	videos     VideoReader
@@ -82,4 +95,32 @@ func (s *Service) Publish(ctx context.Context, command PublishCommand) (*danmaku
 		return nil, danmaku.ErrIdempotencyConflict
 	}
 	return existing, nil
+}
+
+// ListHistory 查询一个60秒分段内按播放位置稳定排序的可见弹幕。
+func (s *Service) ListHistory(ctx context.Context, query HistoryQuery) (*HistoryPage, error) {
+	if s == nil || s.repository == nil || s.videos == nil {
+		return nil, errors.New("danmaku service is not configured")
+	}
+	historyQuery, err := danmaku.NewHistoryQuery(query.VideoID, query.SegmentIndex)
+	if err != nil {
+		return nil, err
+	}
+	video, err := s.videos.GetVideo(ctx, historyQuery.VideoID())
+	if err != nil {
+		return nil, err
+	}
+	if video == nil {
+		return nil, danmaku.ErrVideoNotFound
+	}
+	if err := video.EnsureReadableHistory(historyQuery.VideoID(), historyQuery.Segment()); err != nil {
+		return nil, err
+	}
+	items, err := s.repository.ListVisibleSegment(
+		ctx, historyQuery.VideoID(), historyQuery.Segment(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &HistoryPage{Segment: historyQuery.Segment(), Items: items}, nil
 }

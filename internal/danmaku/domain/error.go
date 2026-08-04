@@ -13,8 +13,12 @@ var (
 	ErrIdempotencyConflict = errors.New("弹幕幂等请求与原请求不一致")
 	// ErrVideoNotFound 表示弹幕关联的课程视频不存在。
 	ErrVideoNotFound = errors.New("课程视频不存在")
-	// ErrVideoNotPlayable 表示课程视频类型或状态不允许发布弹幕。
-	ErrVideoNotPlayable = errors.New("课程视频当前不可发布弹幕")
+	// ErrVideoNotPlayable 表示课程视频类型或状态不允许读取或发布弹幕。
+	ErrVideoNotPlayable = errors.New("课程视频当前不可读取或发布弹幕")
 	// ErrVideoDurationUnavailable 表示缺少校验播放位置所需的视频时长。
 	ErrVideoDurationUnavailable = errors.New("课程视频时长不可用")
+	// ErrInvalidHistorySegment 表示历史弹幕分段编号无效或已经超出视频范围。
+	ErrInvalidHistorySegment = errors.New("弹幕历史分段不合法")
+	// ErrInvalidHistoryQuery 表示历史弹幕查询缺少有效的视频标识。
+	ErrInvalidHistoryQuery = errors.New("弹幕历史查询参数不合法")
 )

@@ -96,3 +96,51 @@ func TestVideoTargetRejectsInvalidPublishingFacts(t *testing.T) {
 		})
 	}
 }
+
+func TestHistorySegmentUsesFixedSixtySecondWindow(t *testing.T) {
+	segment, err := NewHistorySegment(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if segment.Index() != 3 || segment.StartMS() != 120_000 || segment.EndMS() != 180_000 {
+		t.Fatalf("segment = %#v", segment)
+	}
+	if _, err := NewHistorySegment(0); err != ErrInvalidHistorySegment {
+		t.Fatalf("NewHistorySegment(0) error = %v", err)
+	}
+}
+
+func TestNewHistoryQueryOwnsParameterValidation(t *testing.T) {
+	query, err := NewHistoryQuery(7, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query.VideoID() != 7 || query.Segment().Index() != 3 {
+		t.Fatalf("query video = %d, segment = %d", query.VideoID(), query.Segment().Index())
+	}
+	if _, err := NewHistoryQuery(0, 3); err != ErrInvalidHistoryQuery {
+		t.Fatalf("zero video ID error = %v, want %v", err, ErrInvalidHistoryQuery)
+	}
+	if _, err := NewHistoryQuery(7, 0); err != ErrInvalidHistorySegment {
+		t.Fatalf("zero segment error = %v, want %v", err, ErrInvalidHistorySegment)
+	}
+}
+
+func TestVideoTargetValidatesReadableHistorySegment(t *testing.T) {
+	segment, err := NewHistorySegment(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duration := uint64(180_000)
+	target := VideoTarget{
+		ID: 7, Kind: VideoKindPreview, Status: VideoStatusReady, DurationMS: &duration,
+	}
+	if err := target.EnsureReadableHistory(7, segment); err != nil {
+		t.Fatalf("EnsureReadableHistory() error = %v", err)
+	}
+	shortDuration := uint64(119_999)
+	target.DurationMS = &shortDuration
+	if err := target.EnsureReadableHistory(7, segment); err != ErrInvalidHistorySegment {
+		t.Fatalf("outside segment error = %v, want %v", err, ErrInvalidHistorySegment)
+	}
+}

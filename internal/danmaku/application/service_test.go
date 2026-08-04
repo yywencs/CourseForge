@@ -12,9 +12,23 @@ import (
 const serviceTestMessageID = "ec40a0ec-572c-4af5-9067-65f702fa666c"
 
 type repositoryStub struct {
-	insertErr error
-	existing  *danmaku.Danmaku
-	inserted  *danmaku.Danmaku
+	insertErr   error
+	existing    *danmaku.Danmaku
+	inserted    *danmaku.Danmaku
+	listed      []danmaku.Danmaku
+	listErr     error
+	listVideoID uint64
+	listSegment danmaku.HistorySegment
+}
+
+func (r *repositoryStub) ListVisibleSegment(
+	_ context.Context,
+	videoID uint64,
+	segment danmaku.HistorySegment,
+) ([]danmaku.Danmaku, error) {
+	r.listVideoID = videoID
+	r.listSegment = segment
+	return append([]danmaku.Danmaku(nil), r.listed...), r.listErr
 }
 
 func (r *repositoryStub) Insert(_ context.Context, item *danmaku.Danmaku) error {
@@ -126,5 +140,32 @@ func TestPublishPreservesVideoLookupError(t *testing.T) {
 	service := NewService(&repositoryStub{}, videoReaderStub{err: danmaku.ErrVideoNotFound})
 	if _, err := service.Publish(context.Background(), publishCommand()); !errors.Is(err, danmaku.ErrVideoNotFound) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestListHistoryReturnsValidatedSixtySecondSegment(t *testing.T) {
+	repository := &repositoryStub{listed: []danmaku.Danmaku{
+		{ID: 2, VideoID: 7, VideoTimeMS: 120_500, Content: "第一条", Status: danmaku.StatusVisible},
+		{ID: 3, VideoID: 7, VideoTimeMS: 125_000, Content: "第二条", Status: danmaku.StatusVisible},
+	}}
+	service := NewService(repository, videoReaderStub{video: readyVideo(180_000)})
+	page, err := service.ListHistory(context.Background(), HistoryQuery{VideoID: 7, SegmentIndex: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Segment.Index() != 3 || page.Segment.StartMS() != 120_000 ||
+		page.Segment.EndMS() != 180_000 || len(page.Items) != 2 {
+		t.Fatalf("page = %#v", page)
+	}
+	if repository.listVideoID != 7 || repository.listSegment.Index() != 3 {
+		t.Fatalf("repository query video = %d, segment = %d", repository.listVideoID, repository.listSegment.Index())
+	}
+}
+
+func TestListHistoryRejectsSegmentOutsideVideo(t *testing.T) {
+	service := NewService(&repositoryStub{}, videoReaderStub{video: readyVideo(119_999)})
+	_, err := service.ListHistory(context.Background(), HistoryQuery{VideoID: 7, SegmentIndex: 3})
+	if !errors.Is(err, danmaku.ErrInvalidHistorySegment) {
+		t.Fatalf("err = %v, want %v", err, danmaku.ErrInvalidHistorySegment)
 	}
 }

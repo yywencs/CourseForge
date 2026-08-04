@@ -1,18 +1,32 @@
 <script setup lang="ts">
-import { ExternalLink, PlayCircle, X } from '@lucide/vue'
-import { computed, nextTick, onBeforeUnmount, useTemplateRef, watch } from 'vue'
+import { ExternalLink, PlayCircle, Send, X } from '@lucide/vue'
+import { computed, nextTick, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
 
+import { publishDanmaku } from '@/api/danmaku'
+import type { PublishDanmakuRequest } from '@/types/danmaku'
 import type { TeachingClassSummary } from '@/types/enrollment'
+import { createRequestId } from '@/utils/requestId'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ course?: TeachingClassSummary }>()
 const previewDialog = useTemplateRef<HTMLDialogElement>('previewDialog')
+const video = useTemplateRef<HTMLVideoElement>('video')
+const content = shallowRef('')
+const submitting = shallowRef(false)
+const feedback = shallowRef('')
+const retryRequest = shallowRef<PublishDanmakuRequest>()
 
 const isDirectVideo = computed(() =>
   Boolean(props.course?.videoUrl?.match(/\.(mp4|webm)(\?.*)?$/i)),
 )
+const contentCharacters = computed(() => Array.from(content.value.trim()).length)
+const canSubmit = computed(() =>
+  Boolean(props.course?.videoId) && contentCharacters.value > 0 &&
+  contentCharacters.value <= 200 && !submitting.value,
+)
 
 watch(open, async (visible) => {
+  if (visible) resetComposer()
   await nextTick()
   const dialog = previewDialog.value
   if (!dialog) return
@@ -28,6 +42,50 @@ function close(): void {
   const dialog = previewDialog.value
   if (dialog?.open) dialog.close()
   open.value = false
+}
+
+function resetComposer(): void {
+  content.value = ''
+  feedback.value = ''
+  retryRequest.value = undefined
+  submitting.value = false
+}
+
+function handleContentInput(): void {
+  // 内容发生变化后，它已经不是上一次失败请求的幂等重试。
+  const normalizedContent = content.value.trim()
+  if (retryRequest.value && normalizedContent !== retryRequest.value.content) {
+    retryRequest.value = undefined
+  }
+  // 程序在成功后清空输入框时不覆盖成功提示；用户开始编辑下一条时再清除。
+  if (normalizedContent) feedback.value = ''
+}
+
+async function submitDanmaku(): Promise<void> {
+  const videoID = props.course?.videoId
+  const player = video.value
+  const normalizedContent = content.value.trim()
+  const characters = Array.from(normalizedContent).length
+  if (!videoID || !player || !normalizedContent || characters > 200 || submitting.value) return
+
+  const request = retryRequest.value ?? {
+    client_msg_id: createRequestId(),
+    video_time_ms: Math.max(0, Math.floor(player.currentTime * 1000)),
+    content: normalizedContent,
+  }
+  retryRequest.value = request
+  submitting.value = true
+  feedback.value = ''
+  try {
+    await publishDanmaku(videoID, request)
+    content.value = ''
+    retryRequest.value = undefined
+    feedback.value = '弹幕已发送并保存'
+  } catch (error) {
+    feedback.value = `${error instanceof Error ? error.message : '弹幕发送失败'}，可点击重试`
+  } finally {
+    submitting.value = false
+  }
 }
 
 function handleCancel(): void {
@@ -59,7 +117,28 @@ onBeforeUnmount(() => {
           <X :size="19" />
         </button>
         <div class="preview-dialog__media">
-          <video v-if="isDirectVideo" :src="course.videoUrl" controls preload="metadata" />
+          <template v-if="isDirectVideo">
+            <video ref="video" :src="course.videoUrl" controls preload="metadata" />
+            <form class="danmaku-composer" @submit.prevent="submitDanmaku">
+              <label for="danmaku-content">发送弹幕</label>
+              <div>
+                <input
+                  id="danmaku-content"
+                  v-model="content"
+                  type="text"
+                  autocomplete="off"
+                  placeholder="在当前播放位置说点什么"
+                  aria-describedby="danmaku-feedback"
+                  @input="handleContentInput"
+                />
+                <span :class="{ 'is-over-limit': contentCharacters > 200 }">{{ contentCharacters }}/200</span>
+                <button type="submit" :disabled="!canSubmit">
+                  <Send :size="16" />{{ submitting ? '发送中' : retryRequest ? '重试' : '发送' }}
+                </button>
+              </div>
+              <p id="danmaku-feedback" aria-live="polite">{{ feedback || '弹幕将绑定到当前播放时间' }}</p>
+            </form>
+          </template>
           <div v-else class="preview-dialog__placeholder">
             <PlayCircle :size="52" />
             <strong>课程内容将在外部页面打开</strong>
@@ -131,6 +210,76 @@ onBeforeUnmount(() => {
   max-height: 480px;
 }
 
+.danmaku-composer {
+  display: grid;
+  width: 100%;
+  gap: 7px;
+  padding: 14px 18px 16px;
+  color: white;
+  background: #151515;
+}
+
+.danmaku-composer > label {
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.danmaku-composer > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.danmaku-composer input {
+  min-width: 0;
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  outline: none;
+  color: white;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.danmaku-composer input:focus {
+  border-color: var(--signal);
+}
+
+.danmaku-composer span {
+  color: rgba(255, 255, 255, 0.55);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.danmaku-composer span.is-over-limit {
+  color: #ff8c82;
+}
+
+.danmaku-composer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 15px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--signal);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.danmaku-composer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.danmaku-composer p {
+  min-height: 16px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+}
+
 .preview-dialog__placeholder {
   display: grid;
   max-width: 420px;
@@ -192,6 +341,14 @@ onBeforeUnmount(() => {
 
   .preview-dialog__copy {
     padding: 20px;
+  }
+
+  .danmaku-composer > div {
+    flex-wrap: wrap;
+  }
+
+  .danmaku-composer input {
+    flex-basis: calc(100% - 54px);
   }
 }
 </style>

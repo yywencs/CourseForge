@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	danmakuapp "prizeforge/internal/danmaku/application"
-	"prizeforge/internal/danmaku/domain"
-	"prizeforge/internal/platform/http/middleware"
+	danmakuapp "github.com/yywencs/courseforge/internal/danmaku/application"
+	"github.com/yywencs/courseforge/internal/danmaku/domain"
+	"github.com/yywencs/courseforge/internal/platform/http/middleware"
 
 	"github.com/gin-gonic/gin"
 )

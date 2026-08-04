@@ -38,7 +38,7 @@ func (w *recordingDocumentWriter) Delete(
 	return nil
 }
 
-func TestEventHandlerSyncsCourseforgeRows(t *testing.T) {
+func TestEventHandlerSyncsCourseForgeRows(t *testing.T) {
 	writer := &recordingDocumentWriter{}
 	handler := NewEventHandler(&Config{ESIndexPrefix: "courseforge"}, writer)
 	table := &schema.Table{

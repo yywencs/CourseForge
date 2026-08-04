@@ -4,11 +4,11 @@ import (
 	"errors"
 	"time"
 
-	applicationapi "prizeforge/internal/identity/application"
-	authdomain "prizeforge/internal/identity/domain"
-	"prizeforge/internal/platform/http/middleware"
-	"prizeforge/internal/platform/observability/logger"
-	"prizeforge/server/http/common"
+	applicationapi "github.com/yywencs/courseforge/internal/identity/application"
+	authdomain "github.com/yywencs/courseforge/internal/identity/domain"
+	"github.com/yywencs/courseforge/internal/platform/http/middleware"
+	"github.com/yywencs/courseforge/internal/platform/observability/logger"
+	"github.com/yywencs/courseforge/server/http/common"
 
 	"github.com/gin-gonic/gin"
 )

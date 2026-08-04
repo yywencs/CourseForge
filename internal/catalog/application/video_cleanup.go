@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	domain "prizeforge/internal/catalog/domain"
+	domain "github.com/yywencs/courseforge/internal/catalog/domain"
 )
 
 var ErrVideoObjectStillInUse = domain.ErrVideoObjectStillInUse

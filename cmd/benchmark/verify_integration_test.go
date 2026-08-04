@@ -14,11 +14,11 @@ import (
 
 func TestVerifyBenchmarkFinalStateAgainstMySQLAndRedis(t *testing.T) {
 	mysqlDSN := integrationEnvOrDefault(
-		"PRIZEFORGE_INTEGRATION_MYSQL_DSN",
-		"root:prizeforge-integration@tcp(127.0.0.1:13306)/courseforge?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s",
+		"COURSEFORGE_INTEGRATION_MYSQL_DSN",
+		"root:courseforge-integration@tcp(127.0.0.1:13306)/courseforge?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s",
 	)
 	redisAddr := integrationEnvOrDefault(
-		"PRIZEFORGE_INTEGRATION_REDIS_ADDR",
+		"COURSEFORGE_INTEGRATION_REDIS_ADDR",
 		"127.0.0.1:16379",
 	)
 	prepare := prepareConfig{

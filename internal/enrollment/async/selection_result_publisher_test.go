@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	application "prizeforge/internal/enrollment/application"
-	"prizeforge/internal/enrollment/domain"
-	"prizeforge/internal/platform/rabbitmq"
+	application "github.com/yywencs/courseforge/internal/enrollment/application"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
 )
 
 type fakeSelectionPublicationStore struct {

@@ -5,8 +5,8 @@ package catalogdto
 import (
 	"time"
 
-	applicationcatalog "prizeforge/internal/catalog/application"
-	domain "prizeforge/internal/catalog/domain"
+	applicationcatalog "github.com/yywencs/courseforge/internal/catalog/application"
+	domain "github.com/yywencs/courseforge/internal/catalog/domain"
 )
 
 type CourseResponse struct {

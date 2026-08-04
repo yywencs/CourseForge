@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"prizeforge/internal/enrollment/domain"
-	"prizeforge/internal/platform/rabbitmq"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
 )
 
 type fakeSelectionPersistenceService struct {

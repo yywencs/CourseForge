@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	application "prizeforge/internal/enrollment/application"
-	"prizeforge/internal/platform/observability/logger"
+	application "github.com/yywencs/courseforge/internal/enrollment/application"
+	"github.com/yywencs/courseforge/internal/platform/observability/logger"
 
 	"github.com/hibiken/asynq"
 )

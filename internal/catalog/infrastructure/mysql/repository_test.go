@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"prizeforge/internal/catalog/domain"
+	"github.com/yywencs/courseforge/internal/catalog/domain"
 
 	"gorm.io/gorm"
 )

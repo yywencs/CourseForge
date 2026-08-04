@@ -67,7 +67,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          SSH_DIR="${RUNNER_TEMP}/prizeforge-ssh"
+          SSH_DIR="${RUNNER_TEMP}/courseforge-ssh"
           install -d -m 700 "${SSH_DIR}"
           printf '%s\n' "${PROD_SSH_PRIVATE_KEY}" >"${SSH_DIR}/id_ed25519"
           printf '%s\n' "${PROD_SSH_KNOWN_HOSTS}" >"${SSH_DIR}/known_hosts"
@@ -77,7 +77,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          SSH_DIR="${RUNNER_TEMP}/prizeforge-ssh"
+          SSH_DIR="${RUNNER_TEMP}/courseforge-ssh"
           printf -v remote_command 'bash -s -- %q %q' "${IMAGE_TAG}" "${PROD_DEPLOY_PATH}"
           ssh \
             -F /dev/null \
@@ -110,6 +110,6 @@ jobs:
         shell: bash
         run: |
           rm -f \
-            "${RUNNER_TEMP}/prizeforge-ssh/id_ed25519" \
-            "${RUNNER_TEMP}/prizeforge-ssh/known_hosts"
-          rmdir "${RUNNER_TEMP}/prizeforge-ssh" 2>/dev/null || true
+            "${RUNNER_TEMP}/courseforge-ssh/id_ed25519" \
+            "${RUNNER_TEMP}/courseforge-ssh/known_hosts"
+          rmdir "${RUNNER_TEMP}/courseforge-ssh" 2>/dev/null || true

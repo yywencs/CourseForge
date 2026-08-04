@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	enrollmentapp "prizeforge/internal/enrollment/application"
-	"prizeforge/internal/enrollment/domain"
+	enrollmentapp "github.com/yywencs/courseforge/internal/enrollment/application"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 
 	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"

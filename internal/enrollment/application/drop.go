@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"prizeforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
 // DropEnrollmentReceipt 描述退课用例完成后的处理状态。

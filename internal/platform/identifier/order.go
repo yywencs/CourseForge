@@ -1,6 +1,6 @@
 package identifier
 
-import "prizeforge/pkg/idgen"
+import "github.com/yywencs/courseforge/pkg/idgen"
 
 // OrderIDGenerator adapts the existing UUIDv7 generator to
 // constructor-injected IDGenerator ports.

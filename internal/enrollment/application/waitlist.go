@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"prizeforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
 // JoinWaitlistCommand 表示学生加入教学班候补队列的命令。

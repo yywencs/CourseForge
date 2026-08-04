@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	catalogapp "prizeforge/internal/catalog/application"
-	"prizeforge/internal/platform/config"
+	catalogapp "github.com/yywencs/courseforge/internal/catalog/application"
+	"github.com/yywencs/courseforge/internal/platform/config"
 )
 
 func TestResolveEndpoint(t *testing.T) {

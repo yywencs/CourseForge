@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"prizeforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 
 	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"prizeforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
 // SelectionAdmissionService 负责正式选课和候补申请的准入编排。

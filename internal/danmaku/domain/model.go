@@ -58,6 +58,11 @@ func NewHistorySegment(index uint64) (HistorySegment, error) {
 	}, nil
 }
 
+// HistorySegmentAt 返回包含指定视频播放位置的历史弹幕分段。
+func HistorySegmentAt(videoTimeMS uint64) (HistorySegment, error) {
+	return NewHistorySegment(videoTimeMS/HistorySegmentDurationMS + 1)
+}
+
 // Index 返回从1开始的分段编号。
 func (s HistorySegment) Index() uint64 { return s.index }
 

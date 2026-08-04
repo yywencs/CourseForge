@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"prizeforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
 // SelectCourseCommand 是 HTTP 层提交给应用层的选课命令。

@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"prizeforge/internal/platform/observability/logger"
+	"github.com/yywencs/courseforge/internal/platform/observability/logger"
 
 	"go.uber.org/zap"
 )

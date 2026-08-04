@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"prizeforge/internal/platform/config"
-	"prizeforge/internal/platform/observability/metrics"
+	"github.com/yywencs/courseforge/internal/platform/config"
+	"github.com/yywencs/courseforge/internal/platform/observability/metrics"
 
 	mysqldriver "github.com/go-sql-driver/mysql"
 	gormmysql "gorm.io/driver/mysql"
@@ -26,12 +26,12 @@ func NewDB(cfg *config.DatabaseConfig) *gorm.DB {
 	return db
 }
 
-// NewCourseforgeDB 创建选课单库连接。
+// NewCourseForgeDB 创建选课单库连接。
 // 未显式配置 courseforge_dsn 时，从现有 DSN 复制连接参数并将数据库名改为 courseforge。
-func NewCourseforgeDB(cfg *config.DatabaseConfig) *gorm.DB {
+func NewCourseForgeDB(cfg *config.DatabaseConfig) *gorm.DB {
 	courseCfg := *cfg
-	if strings.TrimSpace(courseCfg.CourseforgeDsn) != "" {
-		courseCfg.Dsn = courseCfg.CourseforgeDsn
+	if strings.TrimSpace(courseCfg.CourseForgeDSN) != "" {
+		courseCfg.Dsn = courseCfg.CourseForgeDSN
 	} else {
 		baseDSN := resolveDatabaseDSN(cfg.Dsn, "")
 		parsed, err := mysqldriver.ParseDSN(baseDSN)

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"prizeforge/internal/platform/config"
+	"github.com/yywencs/courseforge/internal/platform/config"
 )
 
 type recordingEventPublisher struct {

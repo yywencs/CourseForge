@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	applicationapi "prizeforge/internal/identity/application"
+	applicationapi "github.com/yywencs/courseforge/internal/identity/application"
 
 	"gorm.io/gorm"
 )

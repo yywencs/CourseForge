@@ -1,7 +1,7 @@
 import type { AxiosResponse } from 'axios'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { publishDanmaku } from './danmaku'
+import { listDanmakuSegment, publishDanmaku } from './danmaku'
 import { http } from './http'
 import type { ApiEnvelope } from '@/types/api'
 import type { Danmaku } from '@/types/danmaku'
@@ -37,5 +37,25 @@ describe('danmaku API contract', () => {
 
     await expect(publishDanmaku(7, request)).resolves.toEqual(response)
     expect(post).toHaveBeenCalledWith('/api/v1/course-videos/7/danmakus', request)
+  })
+
+  it('loads a fixed history segment', async () => {
+    const response = {
+      segment_index: 3,
+      start_ms: 120_000,
+      end_ms: 180_000,
+      items: [{
+        id: 9,
+        video_time_ms: 125_000,
+        content: '重点来了',
+        create_time: '2026-08-04T10:00:00Z',
+      }],
+    }
+    const get = vi.spyOn(http, 'get').mockResolvedValue(okResponse(response))
+
+    await expect(listDanmakuSegment(7, 3)).resolves.toEqual(response)
+    expect(get).toHaveBeenCalledWith('/api/v1/course-videos/7/danmakus', {
+      params: { segment_index: 3 },
+    })
   })
 })

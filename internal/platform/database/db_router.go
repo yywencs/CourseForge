@@ -3,8 +3,8 @@ package database
 import (
 	"context"
 	"fmt"
+	"github.com/yywencs/courseforge/internal/platform/config"
 	"hash/crc32"
-	"prizeforge/internal/platform/config"
 
 	"gorm.io/gorm"
 )

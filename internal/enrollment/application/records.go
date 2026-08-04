@@ -3,7 +3,7 @@ package enrollmentapp
 import (
 	"strings"
 
-	"prizeforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
 // SelectionApplicationRecord is the application-layer read model for the

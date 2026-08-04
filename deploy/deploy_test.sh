@@ -59,7 +59,7 @@ new_fixture() {
 	mkdir -p "${fixture_path}"
 	printf '%s\n' \
 		'ACR_REGISTRY=registry.example.com' \
-		'ACR_NAMESPACE=prizeforge' \
+		'ACR_NAMESPACE=courseforge' \
 		'IMAGE_TAG=v1.0.0' \
 		>"${fixture_path}/.env"
 	printf '%s\n' 'services: {}' >"${fixture_path}/compose.yaml"

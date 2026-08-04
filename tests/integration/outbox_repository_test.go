@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"prizeforge/internal/platform/outbox"
-	"prizeforge/internal/platform/outbox/mysql"
-	"prizeforge/pkg/xrand"
+	"github.com/yywencs/courseforge/internal/platform/outbox"
+	"github.com/yywencs/courseforge/internal/platform/outbox/mysql"
+	"github.com/yywencs/courseforge/pkg/xrand"
 )
 
 func TestOutboxRepositoryClaimRetryAndPublish(t *testing.T) {
 	eventID := fmt.Sprintf("integration-outbox-%s", xrand.RandomNumeric(12))
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	repository := outboxrepo.NewRepository(integrationCourseforgeDB)
+	repository := outboxrepo.NewRepository(integrationCourseForgeDB)
 	if err := repository.Append(context.Background(), &outbox.NewEvent{
 		EventID:       eventID,
 		AggregateType: "course",
@@ -28,7 +28,7 @@ func TestOutboxRepositoryClaimRetryAndPublish(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 	t.Cleanup(func() {
-		integrationCourseforgeDB.
+		integrationCourseForgeDB.
 			Table("outbox_event").
 			Where("event_id = ?", eventID).
 			Delete(nil)
@@ -85,7 +85,7 @@ func TestOutboxRepositoryClaimRetryAndPublish(t *testing.T) {
 		State      string
 		RetryCount uint32
 	}
-	if err := integrationCourseforgeDB.
+	if err := integrationCourseForgeDB.
 		Table("outbox_event").
 		Select("state, retry_count").
 		Where("event_id = ?", eventID).

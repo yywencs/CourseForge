@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	authdomain "prizeforge/internal/identity/domain"
+	authdomain "github.com/yywencs/courseforge/internal/identity/domain"
 )
 
 type StudentTokenIssuer interface {

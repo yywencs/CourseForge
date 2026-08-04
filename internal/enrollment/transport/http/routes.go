@@ -1,7 +1,7 @@
 package enrollmenthttp
 
 import (
-	enrollmentapp "prizeforge/internal/enrollment/application"
+	enrollmentapp "github.com/yywencs/courseforge/internal/enrollment/application"
 
 	"github.com/gin-gonic/gin"
 )

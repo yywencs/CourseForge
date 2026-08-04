@@ -123,7 +123,7 @@ func (c ObjectStorageConfig) Validate() error {
 
 type DatabaseConfig struct {
 	Dsn            string        `mapstructure:"dsn"`
-	CourseforgeDsn string        `mapstructure:"courseforge_dsn"`
+	CourseForgeDSN string        `mapstructure:"courseforge_dsn"`
 	MaxOpenConns   int           `mapstructure:"max_open_conns"`
 	MaxIdleConns   int           `mapstructure:"max_idle_conns"`
 	MaxLifeTime    time.Duration `mapstructure:"max_life_time"`

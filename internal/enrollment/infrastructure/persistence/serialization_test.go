@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	application "prizeforge/internal/enrollment/application"
-	"prizeforge/internal/enrollment/domain"
+	application "github.com/yywencs/courseforge/internal/enrollment/application"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
 func TestSelectionResultPayloadPreservesWireContract(t *testing.T) {

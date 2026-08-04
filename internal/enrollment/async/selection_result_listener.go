@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"prizeforge/internal/enrollment/domain"
-	"prizeforge/internal/platform/observability/metrics"
-	"prizeforge/internal/platform/rabbitmq"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/platform/observability/metrics"
+	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
 )
 
 type selectionResultPersistenceService interface {

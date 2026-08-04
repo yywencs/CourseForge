@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"prizeforge/internal/platform/rabbitmq"
-	"prizeforge/pkg/xrand"
+	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
+	"github.com/yywencs/courseforge/pkg/xrand"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )

@@ -23,7 +23,7 @@ auth:
 rabbitmq:
   addresses: rabbitmq
   port: 5672
-  username: prizeforge
+  username: courseforge
   password: overridden_by_environment
   publisher:
     pool_size: 8

@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	applicationapi "prizeforge/internal/enrollment/application"
-	"prizeforge/internal/enrollment/domain"
-	"prizeforge/internal/platform/cache"
+	applicationapi "github.com/yywencs/courseforge/internal/enrollment/application"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/platform/cache"
 )
 
 const (

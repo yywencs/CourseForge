@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	applicationapi "prizeforge/internal/enrollment/application"
-	"prizeforge/internal/enrollment/domain"
+	applicationapi "github.com/yywencs/courseforge/internal/enrollment/application"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 
 	"gorm.io/gorm"
 )

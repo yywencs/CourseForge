@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	catalogapp "prizeforge/internal/catalog/application"
-	"prizeforge/internal/platform/config"
+	catalogapp "github.com/yywencs/courseforge/internal/catalog/application"
+	"github.com/yywencs/courseforge/internal/platform/config"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"

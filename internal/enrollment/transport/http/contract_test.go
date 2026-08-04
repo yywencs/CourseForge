@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"prizeforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
 func TestApplicationResponseRetainsLegacyDeliveryAndFailureFields(t *testing.T) {

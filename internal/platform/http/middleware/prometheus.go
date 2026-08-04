@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"prizeforge/internal/platform/observability/metrics"
+	"github.com/yywencs/courseforge/internal/platform/observability/metrics"
 	"strconv"
 	"time"
 

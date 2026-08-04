@@ -1,7 +1,7 @@
 package admin
 
 import (
-	"prizeforge/server/http/common"
+	"github.com/yywencs/courseforge/server/http/common"
 
 	"github.com/gin-gonic/gin"
 )

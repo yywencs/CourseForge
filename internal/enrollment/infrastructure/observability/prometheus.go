@@ -3,8 +3,8 @@ package enrollmentobservability
 import (
 	"time"
 
-	application "prizeforge/internal/enrollment/application"
-	"prizeforge/internal/platform/observability/metrics"
+	application "github.com/yywencs/courseforge/internal/enrollment/application"
+	"github.com/yywencs/courseforge/internal/platform/observability/metrics"
 )
 
 // PrometheusObserver translates application outcomes to the existing metric

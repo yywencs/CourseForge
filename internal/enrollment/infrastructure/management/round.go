@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	enrollmentapp "prizeforge/internal/enrollment/application"
-	"prizeforge/internal/enrollment/domain"
+	enrollmentapp "github.com/yywencs/courseforge/internal/enrollment/application"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"

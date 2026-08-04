@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	danmakuapp "prizeforge/internal/danmaku/application"
-	"prizeforge/internal/danmaku/domain"
+	danmakuapp "github.com/yywencs/courseforge/internal/danmaku/application"
+	"github.com/yywencs/courseforge/internal/danmaku/domain"
 
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"

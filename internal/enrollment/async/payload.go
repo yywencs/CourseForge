@@ -3,7 +3,7 @@ package enrollmentasync
 import (
 	"time"
 
-	"prizeforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
 // selectionResultPayload is the version-preserving RabbitMQ integration

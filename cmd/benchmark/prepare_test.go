@@ -49,10 +49,10 @@ func TestParsePrepareConfigRequiresExplicitConfirmation(t *testing.T) {
 	}
 }
 
-func TestParsePrepareConfigRejectsNonCourseforgeDSN(t *testing.T) {
+func TestParsePrepareConfigRejectsNonCourseForgeDSN(t *testing.T) {
 	t.Setenv(
 		"COURSEFORGE_BENCHMARK_MYSQL_DSN",
-		"root:password@tcp(localhost:3306)/prizeforge?parseTime=true",
+		"root:password@tcp(localhost:3306)/unrelated_database?parseTime=true",
 	)
 	_, err := parsePrepareConfig([]string{"--confirm-reset"}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "courseforge") {

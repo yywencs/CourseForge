@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"prizeforge/internal/catalog/domain"
+	"github.com/yywencs/courseforge/internal/catalog/domain"
 
 	"gorm.io/gorm/clause"
 )

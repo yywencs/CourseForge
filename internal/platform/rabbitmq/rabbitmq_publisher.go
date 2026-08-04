@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"prizeforge/internal/platform/config"
-	"prizeforge/internal/platform/observability/metrics"
+	"github.com/yywencs/courseforge/internal/platform/config"
+	"github.com/yywencs/courseforge/internal/platform/observability/metrics"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )

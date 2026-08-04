@@ -3,9 +3,9 @@
 package integration
 
 import (
-	enrollmentrepo "prizeforge/internal/enrollment/infrastructure/persistence"
-	"prizeforge/internal/platform/cache"
-	"prizeforge/internal/platform/identifier"
+	enrollmentrepo "github.com/yywencs/courseforge/internal/enrollment/infrastructure/persistence"
+	"github.com/yywencs/courseforge/internal/platform/cache"
+	"github.com/yywencs/courseforge/internal/platform/identifier"
 
 	"gorm.io/gorm"
 )

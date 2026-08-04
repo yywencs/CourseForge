@@ -5,7 +5,7 @@ import (
 	stderrors "errors"
 	"time"
 
-	"prizeforge/internal/platform/observability/metrics"
+	"github.com/yywencs/courseforge/internal/platform/observability/metrics"
 
 	"github.com/redis/go-redis/v9"
 )

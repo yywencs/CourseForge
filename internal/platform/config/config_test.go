@@ -60,21 +60,21 @@ dcc:
 		Conf = nil
 	})
 
-	t.Setenv("PRIZEFORGE_DATA_MYSQL_DSN", "env-dsn")
+	t.Setenv("COURSEFORGE_DATA_MYSQL_DSN", "env-dsn")
 	t.Setenv(
-		"PRIZEFORGE_AUTH_JWT_SIGNING_KEY",
+		"COURSEFORGE_AUTH_JWT_SIGNING_KEY",
 		"environment-signing-key-with-at-least-32-bytes",
 	)
-	t.Setenv("PRIZEFORGE_DATA_MYSQL_COURSEFORGE_DSN", "env-courseforge-dsn")
-	t.Setenv("PRIZEFORGE_DATA_REDIS_PASSWORD", "env-redis-password")
-	t.Setenv("PRIZEFORGE_ASYNQ_REDIS_PASSWORD", "env-asynq-password")
-	t.Setenv("PRIZEFORGE_RABBITMQ_USERNAME", "env-user")
-	t.Setenv("PRIZEFORGE_RABBITMQ_PASSWORD", "env-rabbitmq-password")
-	t.Setenv("PRIZEFORGE_RABBITMQ_PUBLISHER_POOL_SIZE", "6")
-	t.Setenv("PRIZEFORGE_RABBITMQ_TOPIC_SELECTION_RESULT", "env-selection-result")
-	t.Setenv("PRIZEFORGE_RABBITMQ_LISTENER_SIMPLE_DEFAULT_CONCURRENCY", "2")
-	t.Setenv("PRIZEFORGE_RABBITMQ_LISTENER_SIMPLE_CONCURRENCY_SELECTION_RESULT_QUEUE", "6")
-	t.Setenv("PRIZEFORGE_DCC_RATE_LIMIT_ENABLED", "false")
+	t.Setenv("COURSEFORGE_DATA_MYSQL_COURSEFORGE_DSN", "env-courseforge-dsn")
+	t.Setenv("COURSEFORGE_DATA_REDIS_PASSWORD", "env-redis-password")
+	t.Setenv("COURSEFORGE_ASYNQ_REDIS_PASSWORD", "env-asynq-password")
+	t.Setenv("COURSEFORGE_RABBITMQ_USERNAME", "env-user")
+	t.Setenv("COURSEFORGE_RABBITMQ_PASSWORD", "env-rabbitmq-password")
+	t.Setenv("COURSEFORGE_RABBITMQ_PUBLISHER_POOL_SIZE", "6")
+	t.Setenv("COURSEFORGE_RABBITMQ_TOPIC_SELECTION_RESULT", "env-selection-result")
+	t.Setenv("COURSEFORGE_RABBITMQ_LISTENER_SIMPLE_DEFAULT_CONCURRENCY", "2")
+	t.Setenv("COURSEFORGE_RABBITMQ_LISTENER_SIMPLE_CONCURRENCY_SELECTION_RESULT_QUEUE", "6")
+	t.Setenv("COURSEFORGE_DCC_RATE_LIMIT_ENABLED", "false")
 
 	InitViperConfig()
 
@@ -87,10 +87,10 @@ dcc:
 	if Conf.Data.Database.Dsn != "env-dsn" {
 		t.Fatalf("mysql dsn = %q, want environment override", Conf.Data.Database.Dsn)
 	}
-	if Conf.Data.Database.CourseforgeDsn != "env-courseforge-dsn" {
+	if Conf.Data.Database.CourseForgeDSN != "env-courseforge-dsn" {
 		t.Fatalf(
 			"courseforge mysql dsn = %q, want environment override",
-			Conf.Data.Database.CourseforgeDsn,
+			Conf.Data.Database.CourseForgeDSN,
 		)
 	}
 	if Conf.Data.Redis.Password != "env-redis-password" {

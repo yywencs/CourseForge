@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	authinfra "prizeforge/internal/identity/infrastructure/mysql"
-	infraquery "prizeforge/internal/identity/infrastructure/query"
+	authinfra "github.com/yywencs/courseforge/internal/identity/infrastructure/mysql"
+	infraquery "github.com/yywencs/courseforge/internal/identity/infrastructure/query"
 )
 
 func TestAuthenticationRepositoryLoadsStudentAndCurrentRound(t *testing.T) {
@@ -23,7 +23,7 @@ func TestAuthenticationRepositoryLoadsStudentAndCurrentRound(t *testing.T) {
 		studentName = "集成测试学生"
 	)
 	now := time.Now().Truncate(time.Millisecond)
-	database := integrationCourseforgeDB
+	database := integrationCourseForgeDB
 	if err := database.Exec(
 		`INSERT INTO user_account
 			(id, password_hash, state)
@@ -106,7 +106,7 @@ func TestAuthenticationRepositoryLoadsAdministrator(t *testing.T) {
 		username        = "integration-admin-001"
 		password        = "integration-admin-bcrypt-hash"
 	)
-	database := integrationCourseforgeDB
+	database := integrationCourseForgeDB
 	if err := database.Exec(
 		`INSERT INTO user_account
 			(id, password_hash, state)

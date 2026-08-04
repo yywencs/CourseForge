@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"prizeforge/server/http/common"
+	"github.com/yywencs/courseforge/server/http/common"
 )
 
 func TestServerRegistersManagementRoutes(t *testing.T) {

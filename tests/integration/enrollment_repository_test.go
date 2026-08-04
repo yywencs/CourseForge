@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	application "prizeforge/internal/enrollment/application"
-	enrollmentasync "prizeforge/internal/enrollment/async"
-	"prizeforge/internal/enrollment/domain"
-	"prizeforge/internal/platform/rabbitmq"
-	"prizeforge/pkg/xrand"
+	application "github.com/yywencs/courseforge/internal/enrollment/application"
+	enrollmentasync "github.com/yywencs/courseforge/internal/enrollment/async"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
+	"github.com/yywencs/courseforge/pkg/xrand"
 )
 
 // TestEnrollmentRepositoryMinimalMainChain 使用真实 MySQL 和 Redis 验证：
@@ -52,7 +52,7 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		requestID,
 	)
 
-	repo := newEnrollmentRepositoryFixture(integrationCourseforgeDB, integrationRedis)
+	repo := newEnrollmentRepositoryFixture(integrationCourseForgeDB, integrationRedis)
 	round, err := repo.QuerySelectionRound(context.Background(), roundID)
 	if err != nil || round == nil || !round.AcceptingAt(now) {
 		t.Fatalf("QuerySelectionRound() = %#v, %v", round, err)
@@ -150,7 +150,7 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 	// 使用独立 topic 跑真实 RabbitMQ，避免集成测试之间相互消费消息。
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	topic := "prizeforge.integration.selection-result." + xrand.RandomNumeric(12)
+	topic := "courseforge.integration.selection-result." + xrand.RandomNumeric(12)
 	trackIntegrationRabbitMQTopology(t, topic)
 	connection, err := rabbitmq.NewConnection(integrationRabbitMQConfig)
 	if err != nil {
@@ -192,10 +192,10 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 	}
 
 	var applicationCount, enrollmentCount int64
-	integrationCourseforgeDB.Table("selection_application").
+	integrationCourseForgeDB.Table("selection_application").
 		Where("application_id = ?", applicationID).
 		Count(&applicationCount)
-	integrationCourseforgeDB.Table("student_course_enrollment").
+	integrationCourseForgeDB.Table("student_course_enrollment").
 		Where("application_id = ?", applicationID).
 		Count(&enrollmentCount)
 	if applicationCount != 1 || enrollmentCount != 1 {
@@ -224,7 +224,7 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		SelectedCredits     string
 		SelectedCourseCount uint16
 	}
-	if err := integrationCourseforgeDB.Table("student_selection_quota").
+	if err := integrationCourseForgeDB.Table("student_selection_quota").
 		Select(
 			"CAST(selected_credits AS CHAR) AS selected_credits, selected_course_count",
 		).
@@ -295,19 +295,19 @@ func TestEnrollmentRepositoryConcurrentReservationDoesNotOversell(t *testing.T) 
 		classID,
 		roundID,
 	)
-	if err := integrationCourseforgeDB.Table("teaching_class").
+	if err := integrationCourseForgeDB.Table("teaching_class").
 		Where("id = ?", classID).
 		Update("capacity", capacity).Error; err != nil {
 		t.Fatalf("set concurrent test class capacity: %v", err)
 	}
 
 	t.Cleanup(func() {
-		integrationCourseforgeDB.Exec(
+		integrationCourseForgeDB.Exec(
 			"DELETE FROM student_selection_quota WHERE student_id > ? AND student_id < ?",
 			studentID,
 			studentID+studentCount,
 		)
-		integrationCourseforgeDB.Exec(
+		integrationCourseForgeDB.Exec(
 			"DELETE FROM student WHERE id > ? AND id < ?",
 			studentID,
 			studentID+studentCount,
@@ -315,14 +315,14 @@ func TestEnrollmentRepositoryConcurrentReservationDoesNotOversell(t *testing.T) 
 	})
 	for index := 1; index < studentCount; index++ {
 		currentStudentID := studentID + uint64(index)
-		if err := integrationCourseforgeDB.Table("student").Create(map[string]interface{}{
+		if err := integrationCourseForgeDB.Table("student").Create(map[string]interface{}{
 			"id":         currentStudentID,
 			"major_id":   majorID,
 			"grade_year": 2026,
 		}).Error; err != nil {
 			t.Fatalf("seed concurrent student %d: %v", currentStudentID, err)
 		}
-		if err := integrationCourseforgeDB.Table("student_selection_quota").Create(
+		if err := integrationCourseForgeDB.Table("student_selection_quota").Create(
 			map[string]interface{}{
 				"round_id":              roundID,
 				"term_id":               termID,
@@ -375,7 +375,7 @@ func TestEnrollmentRepositoryConcurrentReservationDoesNotOversell(t *testing.T) 
 		reservation *application.SelectionReservation
 		err         error
 	}
-	repo := newEnrollmentRepositoryFixture(integrationCourseforgeDB, integrationRedis)
+	repo := newEnrollmentRepositoryFixture(integrationCourseForgeDB, integrationRedis)
 	start := make(chan struct{})
 	results := make(chan reservationResult, studentCount)
 	var workers sync.WaitGroup
@@ -462,7 +462,7 @@ func TestEnrollmentRepositoryDropAndProjectionRepair(t *testing.T) {
 	seedEnrollmentIntegrationData(
 		t, now, majorID, studentID, termID, courseID, classID, roundID,
 	)
-	db := integrationCourseforgeDB
+	db := integrationCourseForgeDB
 	if err := db.Table("student_selection_quota").
 		Where("round_id = ? AND student_id = ?", roundID, studentID).
 		Updates(map[string]interface{}{
@@ -567,7 +567,7 @@ func TestEnrollmentRepositoryWaitlistLifecycle(t *testing.T) {
 	seedEnrollmentIntegrationData(
 		t, now, majorID, studentID, termID, courseID, classID, roundID,
 	)
-	if err := integrationCourseforgeDB.Table("teaching_class").
+	if err := integrationCourseForgeDB.Table("teaching_class").
 		Where("id = ?", classID).Update("selected_count", 2).Error; err != nil {
 		t.Fatalf("fill teaching class: %v", err)
 	}
@@ -582,7 +582,7 @@ func TestEnrollmentRepositoryWaitlistLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWaitlistEntry() error = %v", err)
 	}
-	repo := newEnrollmentRepositoryFixture(integrationCourseforgeDB, integrationRedis)
+	repo := newEnrollmentRepositoryFixture(integrationCourseForgeDB, integrationRedis)
 	joined, err := repo.JoinWaitlist(context.Background(), entry)
 	if err != nil || joined.Position == 0 {
 		t.Fatalf("JoinWaitlist() = %#v, %v", joined, err)
@@ -596,7 +596,7 @@ func TestEnrollmentRepositoryWaitlistLifecycle(t *testing.T) {
 		t.Fatalf("ListStudentWaitlist() = %#v, %v", page, err)
 	}
 	// 释放一个 MySQL 名额后，队首候补才可被原子抢占。
-	if err := integrationCourseforgeDB.Table("teaching_class").
+	if err := integrationCourseForgeDB.Table("teaching_class").
 		Where("id = ?", classID).Update("selected_count", 1).Error; err != nil {
 		t.Fatalf("release class seat: %v", err)
 	}
@@ -632,7 +632,7 @@ func TestEnrollmentRepositoryLoadsEligibilitySnapshot(t *testing.T) {
 	seedEnrollmentIntegrationData(
 		t, now, majorID, studentID, termID, courseID, classID, roundID,
 	)
-	db := integrationCourseforgeDB
+	db := integrationCourseForgeDB
 	t.Cleanup(func() {
 		db.Exec("DELETE FROM student_course_history WHERE student_id = ?", studentID)
 		db.Exec("DELETE FROM course_prerequisite WHERE course_id = ?", courseID)
@@ -708,7 +708,7 @@ func waitForSelectionResultPersisted(
 	defer ticker.Stop()
 	for {
 		var count int64
-		err := integrationCourseforgeDB.Table("selection_application").
+		err := integrationCourseForgeDB.Table("selection_application").
 			Where("application_id = ?", applicationID).
 			Count(&count).Error
 		if err != nil {
@@ -731,7 +731,7 @@ func seedEnrollmentIntegrationData(
 	majorID, studentID, termID, courseID, classID, roundID uint64,
 ) {
 	t.Helper()
-	db := integrationCourseforgeDB
+	db := integrationCourseForgeDB
 	rows := []struct {
 		table string
 		value map[string]interface{}

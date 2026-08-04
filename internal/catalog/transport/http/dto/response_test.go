@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	applicationcatalog "prizeforge/internal/catalog/application"
+	applicationcatalog "github.com/yywencs/courseforge/internal/catalog/application"
 )
 
 func TestTeachingClassResponseUsesHTTPFieldNames(t *testing.T) {

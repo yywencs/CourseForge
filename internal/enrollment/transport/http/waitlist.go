@@ -4,9 +4,9 @@ import (
 	"strconv"
 	"time"
 
-	applicationapi "prizeforge/internal/enrollment/application"
-	"prizeforge/internal/enrollment/domain"
-	"prizeforge/server/http/common"
+	applicationapi "github.com/yywencs/courseforge/internal/enrollment/application"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/server/http/common"
 
 	"github.com/gin-gonic/gin"
 )

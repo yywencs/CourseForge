@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	applicationcatalog "prizeforge/internal/catalog/application"
-	"prizeforge/internal/catalog/domain"
+	applicationcatalog "github.com/yywencs/courseforge/internal/catalog/application"
+	"github.com/yywencs/courseforge/internal/catalog/domain"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"

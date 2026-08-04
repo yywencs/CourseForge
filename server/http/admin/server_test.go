@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	platformmiddleware "prizeforge/internal/platform/http/middleware"
-	"prizeforge/server/http/common"
+	platformmiddleware "github.com/yywencs/courseforge/internal/platform/http/middleware"
+	"github.com/yywencs/courseforge/server/http/common"
 
 	"github.com/gin-gonic/gin"
 )

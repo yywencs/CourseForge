@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"prizeforge/internal/platform/cdc"
+	"github.com/yywencs/courseforge/internal/platform/cdc"
 )
 
 func main() {

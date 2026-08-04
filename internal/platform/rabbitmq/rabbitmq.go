@@ -2,7 +2,7 @@ package rabbitmq
 
 import (
 	"fmt"
-	"prizeforge/internal/platform/config"
+	"github.com/yywencs/courseforge/internal/platform/config"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )

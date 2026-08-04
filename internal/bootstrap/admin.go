@@ -3,20 +3,20 @@ package bootstrap
 import (
 	"fmt"
 
-	catalogrepo "prizeforge/internal/catalog/infrastructure/mysql"
-	cataloghttp "prizeforge/internal/catalog/transport/http"
-	enrollmentapp "prizeforge/internal/enrollment/application"
-	roundrepo "prizeforge/internal/enrollment/infrastructure/management"
-	enrollmenthttp "prizeforge/internal/enrollment/transport/http"
-	identityapp "prizeforge/internal/identity/application"
-	authdomain "prizeforge/internal/identity/domain"
-	identitymysql "prizeforge/internal/identity/infrastructure/mysql"
-	identitysecurity "prizeforge/internal/identity/infrastructure/security"
-	identityhttp "prizeforge/internal/identity/transport/http"
-	"prizeforge/internal/platform/database"
-	"prizeforge/internal/platform/http/middleware"
-	adminhttp "prizeforge/server/http/admin"
-	"prizeforge/server/http/common"
+	catalogrepo "github.com/yywencs/courseforge/internal/catalog/infrastructure/mysql"
+	cataloghttp "github.com/yywencs/courseforge/internal/catalog/transport/http"
+	enrollmentapp "github.com/yywencs/courseforge/internal/enrollment/application"
+	roundrepo "github.com/yywencs/courseforge/internal/enrollment/infrastructure/management"
+	enrollmenthttp "github.com/yywencs/courseforge/internal/enrollment/transport/http"
+	identityapp "github.com/yywencs/courseforge/internal/identity/application"
+	authdomain "github.com/yywencs/courseforge/internal/identity/domain"
+	identitymysql "github.com/yywencs/courseforge/internal/identity/infrastructure/mysql"
+	identitysecurity "github.com/yywencs/courseforge/internal/identity/infrastructure/security"
+	identityhttp "github.com/yywencs/courseforge/internal/identity/transport/http"
+	"github.com/yywencs/courseforge/internal/platform/database"
+	"github.com/yywencs/courseforge/internal/platform/http/middleware"
+	adminhttp "github.com/yywencs/courseforge/server/http/admin"
+	"github.com/yywencs/courseforge/server/http/common"
 )
 
 // NewAdminApp 装配 CourseForge MySQL、管理员认证与 Admin HTTP 服务。
@@ -26,7 +26,7 @@ func NewAdminApp() (*HTTPApp, error) {
 		return nil, err
 	}
 
-	courseforgeDB := database.NewCourseforgeDB(&cfg.Data.Database)
+	courseforgeDB := database.NewCourseForgeDB(&cfg.Data.Database)
 	tokenManager, err := identitysecurity.NewTokenManager(
 		cfg.Auth.JWT.SigningKey,
 		cfg.Auth.JWT.Issuer,

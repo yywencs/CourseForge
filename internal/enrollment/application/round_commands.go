@@ -3,7 +3,7 @@ package enrollmentapp
 import (
 	"time"
 
-	domain "prizeforge/internal/enrollment/domain"
+	domain "github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
 type SelectionRoundCommand struct {

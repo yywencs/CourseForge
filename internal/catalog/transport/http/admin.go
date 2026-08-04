@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"strconv"
 
-	applicationcatalog "prizeforge/internal/catalog/application"
-	domain "prizeforge/internal/catalog/domain"
-	"prizeforge/internal/catalog/transport/http/dto"
-	"prizeforge/server/http/common"
+	applicationcatalog "github.com/yywencs/courseforge/internal/catalog/application"
+	domain "github.com/yywencs/courseforge/internal/catalog/domain"
+	"github.com/yywencs/courseforge/internal/catalog/transport/http/dto"
+	"github.com/yywencs/courseforge/server/http/common"
 
 	"github.com/gin-gonic/gin"
 )

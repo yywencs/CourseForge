@@ -3,7 +3,7 @@ package enrollmentasync
 import (
 	"context"
 
-	api "prizeforge/internal/enrollment/application"
+	api "github.com/yywencs/courseforge/internal/enrollment/application"
 
 	"github.com/hibiken/asynq"
 )

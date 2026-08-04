@@ -110,6 +110,26 @@ func TestHistorySegmentUsesFixedSixtySecondWindow(t *testing.T) {
 	}
 }
 
+func TestHistorySegmentAtUsesHalfOpenBoundaries(t *testing.T) {
+	tests := []struct {
+		videoTimeMS uint64
+		wantIndex   uint64
+	}{
+		{videoTimeMS: 0, wantIndex: 1},
+		{videoTimeMS: 59_999, wantIndex: 1},
+		{videoTimeMS: 60_000, wantIndex: 2},
+	}
+	for _, test := range tests {
+		segment, err := HistorySegmentAt(test.videoTimeMS)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if segment.Index() != test.wantIndex {
+			t.Fatalf("HistorySegmentAt(%d) = %d, want %d", test.videoTimeMS, segment.Index(), test.wantIndex)
+		}
+	}
+}
+
 func TestNewHistoryQueryOwnsParameterValidation(t *testing.T) {
 	query, err := NewHistoryQuery(7, 3)
 	if err != nil {

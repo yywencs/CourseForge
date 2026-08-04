@@ -35,7 +35,7 @@ docker build \
 export COURSEFORGE_BENCHMARK_MYSQL_DSN='root:密码@tcp(mysql:3306)/courseforge?charset=utf8mb4&parseTime=true&loc=Local&timeout=10s'
 export COURSEFORGE_BENCHMARK_REDIS_ADDR='redis:6379'
 export COURSEFORGE_BENCHMARK_REDIS_PASSWORD='密码'
-export COURSEFORGE_BENCHMARK_JWT_SIGNING_KEY='与 API PRIZEFORGE_AUTH_JWT_SIGNING_KEY 相同的至少32字节密钥'
+export COURSEFORGE_BENCHMARK_JWT_SIGNING_KEY='与 API COURSEFORGE_AUTH_JWT_SIGNING_KEY 相同的至少32字节密钥'
 
 ./bin/courseforge-benchmark prepare \
   --confirm-reset \

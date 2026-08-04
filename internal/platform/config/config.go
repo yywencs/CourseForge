@@ -17,7 +17,7 @@ func InitViperConfig() {
 
 	v.AddConfigPath("configs")
 	v.AddConfigPath(".")
-	v.SetEnvPrefix("PRIZEFORGE")
+	v.SetEnvPrefix("COURSEFORGE")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	v.AutomaticEnv()
 

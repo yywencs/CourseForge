@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"prizeforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
 type reconciliationRepairRepository struct {

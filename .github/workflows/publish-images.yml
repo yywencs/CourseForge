@@ -128,11 +128,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: prizeforge-api
+          - image: courseforge-api
             context: .
             dockerfile: ./Dockerfile
             target: api
-          - image: prizeforge-admin
+          - image: courseforge-admin
             context: .
             dockerfile: ./Dockerfile
             target: admin

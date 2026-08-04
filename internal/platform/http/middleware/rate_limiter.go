@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"prizeforge/internal/platform/config"
+	"github.com/yywencs/courseforge/internal/platform/config"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"

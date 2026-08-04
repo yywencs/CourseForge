@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"prizeforge/internal/platform/config"
+	"github.com/yywencs/courseforge/internal/platform/config"
 
 	"github.com/gin-gonic/gin"
 )

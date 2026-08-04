@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"prizeforge/internal/platform/outbox"
-	"prizeforge/internal/platform/rabbitmq"
+	"github.com/yywencs/courseforge/internal/platform/outbox"
+	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
 )
 
 type fakeOutboxRepository struct {

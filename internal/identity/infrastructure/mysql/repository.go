@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	authdomain "prizeforge/internal/identity/domain"
+	authdomain "github.com/yywencs/courseforge/internal/identity/domain"
 
 	"gorm.io/gorm"
 )

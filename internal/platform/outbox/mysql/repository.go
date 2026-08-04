@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"prizeforge/internal/platform/outbox"
+	"github.com/yywencs/courseforge/internal/platform/outbox"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"

@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
-	"prizeforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 
 	"gorm.io/gorm"
 )

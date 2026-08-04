@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"prizeforge/internal/platform/observability/logger"
+	"github.com/yywencs/courseforge/internal/platform/observability/logger"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )

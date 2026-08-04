@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strconv"
 
-	applicationcatalog "prizeforge/internal/catalog/application"
-	"prizeforge/internal/catalog/transport/http/dto"
-	"prizeforge/server/http/common"
+	applicationcatalog "github.com/yywencs/courseforge/internal/catalog/application"
+	"github.com/yywencs/courseforge/internal/catalog/transport/http/dto"
+	"github.com/yywencs/courseforge/server/http/common"
 
 	"github.com/gin-gonic/gin"
 )

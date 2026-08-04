@@ -6,26 +6,27 @@ import (
 	"errors"
 	"fmt"
 
-	catalogrepo "prizeforge/internal/catalog/infrastructure/mysql"
-	cataloghttp "prizeforge/internal/catalog/transport/http"
-	danmakuapp "prizeforge/internal/danmaku/application"
-	danmakurepo "prizeforge/internal/danmaku/infrastructure/mysql"
-	danmakuhttp "prizeforge/internal/danmaku/transport/http"
-	identityapp "prizeforge/internal/identity/application"
-	authdomain "prizeforge/internal/identity/domain"
-	identitymysql "prizeforge/internal/identity/infrastructure/mysql"
-	identityquery "prizeforge/internal/identity/infrastructure/query"
-	identitysecurity "prizeforge/internal/identity/infrastructure/security"
-	identityhttp "prizeforge/internal/identity/transport/http"
-	"prizeforge/internal/platform/cache"
-	"prizeforge/internal/platform/config"
-	"prizeforge/internal/platform/database"
-	"prizeforge/internal/platform/http/middleware"
-	"prizeforge/internal/platform/observability/logger"
-	"prizeforge/internal/platform/rabbitmq"
-	"prizeforge/internal/platform/taskqueue"
-	apihttp "prizeforge/server/http/api"
-	"prizeforge/server/http/common"
+	catalogrepo "github.com/yywencs/courseforge/internal/catalog/infrastructure/mysql"
+	cataloghttp "github.com/yywencs/courseforge/internal/catalog/transport/http"
+	danmakuapp "github.com/yywencs/courseforge/internal/danmaku/application"
+	danmakurepo "github.com/yywencs/courseforge/internal/danmaku/infrastructure/mysql"
+	danmakucache "github.com/yywencs/courseforge/internal/danmaku/infrastructure/redis"
+	danmakuhttp "github.com/yywencs/courseforge/internal/danmaku/transport/http"
+	identityapp "github.com/yywencs/courseforge/internal/identity/application"
+	authdomain "github.com/yywencs/courseforge/internal/identity/domain"
+	identitymysql "github.com/yywencs/courseforge/internal/identity/infrastructure/mysql"
+	identityquery "github.com/yywencs/courseforge/internal/identity/infrastructure/query"
+	identitysecurity "github.com/yywencs/courseforge/internal/identity/infrastructure/security"
+	identityhttp "github.com/yywencs/courseforge/internal/identity/transport/http"
+	"github.com/yywencs/courseforge/internal/platform/cache"
+	"github.com/yywencs/courseforge/internal/platform/config"
+	"github.com/yywencs/courseforge/internal/platform/database"
+	"github.com/yywencs/courseforge/internal/platform/http/middleware"
+	"github.com/yywencs/courseforge/internal/platform/observability/logger"
+	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
+	"github.com/yywencs/courseforge/internal/platform/taskqueue"
+	apihttp "github.com/yywencs/courseforge/server/http/api"
+	"github.com/yywencs/courseforge/server/http/common"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
@@ -74,7 +75,13 @@ func NewAPIApp() (*HTTPApp, error) {
 	}
 	enrollmentModule := newEnrollmentModule(runtime, studentAuth)
 	danmakuRepository := danmakurepo.NewRepository(runtime.db)
-	danmakuService := danmakuapp.NewService(danmakuRepository, danmakuRepository)
+	danmakuService := danmakuapp.NewService(
+		danmakuRepository,
+		danmakuRepository,
+		danmakuapp.WithSegmentCache(
+			danmakucache.NewSegmentCache(runtime.redis, danmakucache.DefaultSegmentTTL),
+		),
+	)
 
 	scheduledHandlers := append(
 		enrollmentModule.scheduledHandlers,
@@ -104,7 +111,7 @@ func NewAPIApp() (*HTTPApp, error) {
 }
 
 func newAPIRuntime(cfg *config.Config) (*apiRuntime, error) {
-	db := database.NewCourseforgeDB(&cfg.Data.Database)
+	db := database.NewCourseForgeDB(&cfg.Data.Database)
 	redis := cache.NewRedisClient(&cfg.Data.Redis)
 	asynqClient := taskqueue.NewAsynqClient(&cfg.Asynq)
 

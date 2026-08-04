@@ -2,7 +2,7 @@ package taskqueue
 
 import (
 	"fmt"
-	"prizeforge/internal/platform/config"
+	"github.com/yywencs/courseforge/internal/platform/config"
 
 	"github.com/hibiken/asynq"
 )

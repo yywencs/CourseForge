@@ -1,4 +1,4 @@
-module prizeforge
+module github.com/yywencs/courseforge
 
 go 1.25.0
 

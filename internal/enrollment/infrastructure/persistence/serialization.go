@@ -3,8 +3,8 @@ package enrollmentrepo
 import (
 	"time"
 
-	application "prizeforge/internal/enrollment/application"
-	"prizeforge/internal/enrollment/domain"
+	application "github.com/yywencs/courseforge/internal/enrollment/application"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
 // These payloads preserve the existing Redis Stream and audit-event JSON

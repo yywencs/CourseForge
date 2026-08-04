@@ -15,7 +15,7 @@ server:
 
 auth:
   jwt:
-    # 仅供本地开发；生产环境必须通过 PRIZEFORGE_AUTH_JWT_SIGNING_KEY 覆盖。
+    # 仅供本地开发；生产环境必须通过 COURSEFORGE_AUTH_JWT_SIGNING_KEY 覆盖。
     signing_key: "courseforge-local-development-key-change-me"
     issuer: "courseforge"
     audience: "courseforge-student"

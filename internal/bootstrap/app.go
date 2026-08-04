@@ -1,10 +1,10 @@
 package bootstrap
 
 import (
-	"prizeforge/internal/platform/config"
-	"prizeforge/internal/platform/rabbitmq"
-	"prizeforge/internal/platform/taskqueue"
-	httpserver "prizeforge/server/http"
+	"github.com/yywencs/courseforge/internal/platform/config"
+	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
+	"github.com/yywencs/courseforge/internal/platform/taskqueue"
+	httpserver "github.com/yywencs/courseforge/server/http"
 )
 
 // HTTPApp holds the wired application dependencies.

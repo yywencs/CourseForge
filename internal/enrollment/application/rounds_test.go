@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"prizeforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
 func TestBindRoundClassUsesDomainPolicyBeforeInsert(t *testing.T) {

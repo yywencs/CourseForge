@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"prizeforge/internal/platform/http/middleware"
-	"prizeforge/server/http/common"
+	"github.com/yywencs/courseforge/internal/platform/http/middleware"
+	"github.com/yywencs/courseforge/server/http/common"
 
 	"github.com/gin-gonic/gin"
 )

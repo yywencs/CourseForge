@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestLoadConfigFromEnvUsesCourseforgeDefaults(t *testing.T) {
+func TestLoadConfigFromEnvUsesCourseForgeDefaults(t *testing.T) {
 	t.Setenv("CDC_MYSQL_ADDR", "mysql:3306")
 	t.Setenv("CDC_MYSQL_USER", "canal")
 	t.Setenv("CDC_MYSQL_PASSWORD", "secret")
@@ -42,7 +42,7 @@ func TestConfigValidateRejectsInvalidTableRegex(t *testing.T) {
 	}
 }
 
-func TestLogicalIndexNameUsesCourseforgePrefix(t *testing.T) {
+func TestLogicalIndexNameUsesCourseForgePrefix(t *testing.T) {
 	cfg := &Config{ESIndexPrefix: "courseforge"}
 	if got, want := cfg.LogicalIndexName("teaching_class"), "courseforge_teaching_class"; got != want {
 		t.Fatalf("LogicalIndexName() = %q, want %q", got, want)

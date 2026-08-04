@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"prizeforge/internal/enrollment/domain"
+	"github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
 // EligibilityQuery loads the facts needed by the pure domain eligibility policy.

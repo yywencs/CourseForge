@@ -2,8 +2,8 @@
 import { ExternalLink, PlayCircle, Send, X } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
 
-import { publishDanmaku } from '@/api/danmaku'
-import type { PublishDanmakuRequest } from '@/types/danmaku'
+import { listDanmakuSegment, publishDanmaku } from '@/api/danmaku'
+import type { HistoricalDanmaku, PublishDanmakuRequest } from '@/types/danmaku'
 import type { TeachingClassSummary } from '@/types/enrollment'
 import { createRequestId } from '@/utils/requestId'
 
@@ -11,10 +11,29 @@ const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ course?: TeachingClassSummary }>()
 const previewDialog = useTemplateRef<HTMLDialogElement>('previewDialog')
 const video = useTemplateRef<HTMLVideoElement>('video')
+const danmakuLayer = useTemplateRef<HTMLDivElement>('danmakuLayer')
 const content = shallowRef('')
 const submitting = shallowRef(false)
 const feedback = shallowRef('')
 const retryRequest = shallowRef<PublishDanmakuRequest>()
+const danmakuEnabled = shallowRef(true)
+const historyFeedback = shallowRef('')
+
+const segmentDurationMS = 60_000
+const prefetchBeforeEndMS = 10_000
+const danmakuTravelDurationMS = 7_000
+const danmakuLaneCount = 6
+
+const segmentCache = new Map<number, HistoricalDanmaku[]>()
+const loadingSegments = new Map<number, Promise<HistoricalDanmaku[]>>()
+const segmentRetryAt = new Map<number, number>()
+const displayedDanmakuIDs = new Set<number>()
+const activeTimers = new Map<string, number>()
+const activeElements = new Map<string, HTMLSpanElement>()
+const laneAvailableAt = Array.from({ length: danmakuLaneCount }, () => 0)
+let historyGeneration = 0
+let lastPlaybackMS = -1
+let activeSequence = 0
 
 const isDirectVideo = computed(() =>
   Boolean(props.course?.videoUrl?.match(/\.(mp4|webm)(\?.*)?$/i)),
@@ -26,7 +45,12 @@ const canSubmit = computed(() =>
 )
 
 watch(open, async (visible) => {
-  if (visible) resetComposer()
+  if (visible) {
+    resetComposer()
+    resetDanmakuState()
+  } else {
+    resetDanmakuState()
+  }
   await nextTick()
   const dialog = previewDialog.value
   if (!dialog) return
@@ -49,6 +73,149 @@ function resetComposer(): void {
   feedback.value = ''
   retryRequest.value = undefined
   submitting.value = false
+}
+
+function currentSegmentIndex(videoTimeMS: number): number {
+  return Math.floor(Math.max(0, videoTimeMS) / segmentDurationMS) + 1
+}
+
+function resetDanmakuState(): void {
+  historyGeneration += 1
+  segmentCache.clear()
+  loadingSegments.clear()
+  segmentRetryAt.clear()
+  displayedDanmakuIDs.clear()
+  historyFeedback.value = ''
+  lastPlaybackMS = -1
+  clearActiveDanmakus()
+}
+
+function clearActiveDanmakus(): void {
+  for (const timer of activeTimers.values()) window.clearTimeout(timer)
+  activeTimers.clear()
+  activeElements.clear()
+  danmakuLayer.value?.replaceChildren()
+  laneAvailableAt.fill(0)
+}
+
+function loadSegment(segmentIndex: number): Promise<HistoricalDanmaku[]> {
+  const videoID = props.course?.videoId
+  if (!videoID || segmentIndex <= 0) return Promise.resolve([])
+  const durationMS = Math.floor((video.value?.duration ?? Number.NaN) * 1000)
+  if (segmentIndex > 1 && Number.isFinite(durationMS) &&
+    (segmentIndex - 1) * segmentDurationMS >= durationMS) {
+    return Promise.resolve([])
+  }
+  const cached = segmentCache.get(segmentIndex)
+  if (cached) return Promise.resolve(cached)
+  const loading = loadingSegments.get(segmentIndex)
+  if (loading) return loading
+  if ((segmentRetryAt.get(segmentIndex) ?? 0) > Date.now()) return Promise.resolve([])
+
+  const generation = historyGeneration
+  const request = listDanmakuSegment(videoID, segmentIndex)
+    .then((page) => {
+      if (generation !== historyGeneration || props.course?.videoId !== videoID) return []
+      if (page.segment_index !== segmentIndex) throw new Error('弹幕分段响应不匹配')
+      const items = [...page.items].sort((left, right) =>
+        left.video_time_ms - right.video_time_ms || left.id - right.id,
+      )
+      segmentCache.set(segmentIndex, items)
+      segmentRetryAt.delete(segmentIndex)
+      historyFeedback.value = ''
+      return items
+    })
+    .catch((error: unknown) => {
+      if (generation === historyGeneration) {
+        segmentRetryAt.set(segmentIndex, Date.now() + 5_000)
+        if (segmentIndex === currentSegmentIndex(currentVideoTimeMS())) {
+          historyFeedback.value = error instanceof Error ? error.message : '历史弹幕加载失败'
+        }
+      }
+      return []
+    })
+    .finally(() => {
+      if (loadingSegments.get(segmentIndex) === request) loadingSegments.delete(segmentIndex)
+    })
+  loadingSegments.set(segmentIndex, request)
+  return request
+}
+
+function currentVideoTimeMS(): number {
+  return Math.max(0, Math.floor((video.value?.currentTime ?? 0) * 1000))
+}
+
+function showDanmaku(item: HistoricalDanmaku): void {
+  if (!danmakuEnabled.value || displayedDanmakuIDs.has(item.id)) return
+  displayedDanmakuIDs.add(item.id)
+  const now = performance.now()
+  const lane = laneAvailableAt.findIndex((availableAt) => availableAt <= now)
+  if (lane < 0) return
+
+  laneAvailableAt[lane] = now + danmakuTravelDurationMS
+  const key = `${historyGeneration}-${item.id}-${activeSequence++}`
+  const element = document.createElement('span')
+  element.className = 'danmaku-item'
+  element.textContent = item.content
+  element.style.top = `${14 + lane * 34}px`
+  danmakuLayer.value?.append(element)
+  activeElements.set(key, element)
+  const timer = window.setTimeout(() => {
+    activeElements.get(key)?.remove()
+    activeElements.delete(key)
+    activeTimers.delete(key)
+  }, danmakuTravelDurationMS)
+  activeTimers.set(key, timer)
+}
+
+function dispatchDueDanmakus(fromMS: number, toMS: number): void {
+  if (!danmakuEnabled.value || toMS < fromMS) return
+  const firstSegment = currentSegmentIndex(Math.max(0, fromMS))
+  const lastSegment = currentSegmentIndex(toMS)
+  for (let segmentIndex = firstSegment; segmentIndex <= lastSegment; segmentIndex += 1) {
+    for (const item of segmentCache.get(segmentIndex) ?? []) {
+      if (item.video_time_ms > fromMS && item.video_time_ms <= toMS) showDanmaku(item)
+    }
+  }
+}
+
+function handleLoadedMetadata(): void {
+  const currentMS = currentVideoTimeMS()
+  lastPlaybackMS = currentMS === 0 ? -1 : currentMS
+  void loadSegment(currentSegmentIndex(currentMS))
+}
+
+function handleTimeUpdate(): void {
+  const currentMS = currentVideoTimeMS()
+  const segmentIndex = currentSegmentIndex(currentMS)
+  void loadSegment(segmentIndex)
+  const segmentEndMS = segmentIndex * segmentDurationMS
+  if (segmentEndMS - currentMS <= prefetchBeforeEndMS) void loadSegment(segmentIndex + 1)
+
+  // 大跨度变化交给 seeked 处理；这里不集中补放被跳过时间内的弹幕。
+  if (lastPlaybackMS >= 0 && (currentMS < lastPlaybackMS || currentMS - lastPlaybackMS > 2_000)) {
+    lastPlaybackMS = currentMS
+    return
+  }
+  dispatchDueDanmakus(lastPlaybackMS, currentMS)
+  lastPlaybackMS = currentMS
+}
+
+function handleSeeked(): void {
+  const currentMS = currentVideoTimeMS()
+  clearActiveDanmakus()
+  displayedDanmakuIDs.clear()
+  lastPlaybackMS = currentMS
+  const segmentIndex = currentSegmentIndex(currentMS)
+  void loadSegment(segmentIndex)
+  void loadSegment(segmentIndex + 1)
+}
+
+function toggleDanmaku(): void {
+  danmakuEnabled.value = !danmakuEnabled.value
+  clearActiveDanmakus()
+  lastPlaybackMS = currentVideoTimeMS()
+  if (danmakuEnabled.value) void loadSegment(currentSegmentIndex(lastPlaybackMS))
 }
 
 function handleContentInput(): void {
@@ -77,7 +244,20 @@ async function submitDanmaku(): Promise<void> {
   submitting.value = true
   feedback.value = ''
   try {
-    await publishDanmaku(videoID, request)
+    const published = await publishDanmaku(videoID, request)
+    const historyItem: HistoricalDanmaku = {
+      id: published.id,
+      video_time_ms: published.video_time_ms,
+      content: published.content,
+      create_time: published.create_time,
+    }
+    const segmentIndex = currentSegmentIndex(historyItem.video_time_ms)
+    const cached = segmentCache.get(segmentIndex)
+    if (cached && !cached.some((item) => item.id === historyItem.id)) {
+      cached.push(historyItem)
+      cached.sort((left, right) => left.video_time_ms - right.video_time_ms || left.id - right.id)
+    }
+    showDanmaku(historyItem)
     content.value = ''
     retryRequest.value = undefined
     feedback.value = '弹幕已发送并保存'
@@ -98,6 +278,7 @@ function handleBackdropClick(event: MouseEvent): void {
 }
 
 onBeforeUnmount(() => {
+  resetDanmakuState()
   if (previewDialog.value?.open) previewDialog.value.close()
 })
 </script>
@@ -118,9 +299,30 @@ onBeforeUnmount(() => {
         </button>
         <div class="preview-dialog__media">
           <template v-if="isDirectVideo">
-            <video ref="video" :src="course.videoUrl" controls preload="metadata" />
+            <div class="video-stage">
+              <video
+                ref="video"
+                :src="course.videoUrl"
+                controls
+                preload="metadata"
+                @loadedmetadata="handleLoadedMetadata"
+                @timeupdate="handleTimeUpdate"
+                @seeked="handleSeeked"
+                @ended="clearActiveDanmakus"
+              />
+              <div ref="danmakuLayer" class="danmaku-layer" aria-live="off" aria-hidden="true"></div>
+            </div>
             <form class="danmaku-composer" @submit.prevent="submitDanmaku">
-              <label for="danmaku-content">发送弹幕</label>
+              <header>
+                <label for="danmaku-content">发送弹幕</label>
+                <span v-if="historyFeedback">{{ historyFeedback }}</span>
+                <button
+                  class="danmaku-toggle"
+                  type="button"
+                  :aria-pressed="danmakuEnabled"
+                  @click="toggleDanmaku"
+                >弹幕 {{ danmakuEnabled ? '开' : '关' }}</button>
+              </header>
               <div>
                 <input
                   id="danmaku-content"
@@ -205,9 +407,58 @@ onBeforeUnmount(() => {
   background: var(--ink);
 }
 
-.preview-dialog__media video {
+.video-stage {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: #000;
+}
+
+.video-stage video {
+  display: block;
   width: 100%;
   max-height: 480px;
+}
+
+.danmaku-layer {
+  position: absolute;
+  z-index: 2;
+  inset: 0 0 42px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.danmaku-layer :deep(.danmaku-item) {
+  position: absolute;
+  left: 100%;
+  width: max-content;
+  max-width: 75%;
+  overflow: hidden;
+  color: white;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 28px;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 3px #000, 1px 0 2px #000, -1px 0 2px #000;
+  white-space: nowrap;
+  animation: danmaku-scroll 7s linear forwards;
+  will-change: transform;
+}
+
+@keyframes danmaku-scroll {
+  to {
+    transform: translateX(calc(-100% - 900px));
+  }
+}
+
+.danmaku-composer .danmaku-toggle {
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 6px;
+  color: white;
+  background: rgba(0, 0, 0, 0.62);
+  font-size: 11px;
+  cursor: pointer;
 }
 
 .danmaku-composer {
@@ -219,9 +470,27 @@ onBeforeUnmount(() => {
   background: #151515;
 }
 
-.danmaku-composer > label {
+.danmaku-composer > header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.danmaku-composer > header label {
   font-size: 12px;
   font-weight: 750;
+}
+
+.danmaku-composer > header span {
+  min-width: 0;
+  flex: 1;
+  color: #ffaaa2;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.danmaku-composer > header .danmaku-toggle {
+  margin-left: auto;
 }
 
 .danmaku-composer > div {

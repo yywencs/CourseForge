@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"prizeforge/internal/platform/observability/metrics"
+	"github.com/yywencs/courseforge/internal/platform/observability/metrics"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"

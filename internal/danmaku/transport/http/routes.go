@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	danmakuapp "prizeforge/internal/danmaku/application"
-	"prizeforge/internal/danmaku/domain"
-	"prizeforge/internal/platform/http/middleware"
-	"prizeforge/server/http/common"
+	danmakuapp "github.com/yywencs/courseforge/internal/danmaku/application"
+	"github.com/yywencs/courseforge/internal/danmaku/domain"
+	"github.com/yywencs/courseforge/internal/platform/http/middleware"
+	"github.com/yywencs/courseforge/server/http/common"
 
 	"github.com/gin-gonic/gin"
 )

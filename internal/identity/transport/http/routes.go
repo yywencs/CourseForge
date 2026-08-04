@@ -1,7 +1,7 @@
 package identityhttp
 
 import (
-	identityapp "prizeforge/internal/identity/application"
+	identityapp "github.com/yywencs/courseforge/internal/identity/application"
 
 	"github.com/gin-gonic/gin"
 )

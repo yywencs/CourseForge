@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"prizeforge/internal/shared/xerr"
+	"github.com/yywencs/courseforge/internal/shared/xerr"
 )
 
 var (

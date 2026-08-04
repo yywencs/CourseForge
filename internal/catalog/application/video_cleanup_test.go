@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	domain "prizeforge/internal/catalog/domain"
+	domain "github.com/yywencs/courseforge/internal/catalog/domain"
 )
 
 func TestCleanupMissingObjectIsIdempotent(t *testing.T) {

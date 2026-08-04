@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"prizeforge/internal/platform/cache"
-	"prizeforge/internal/platform/config"
-	"prizeforge/internal/platform/observability/logger"
-	"prizeforge/internal/platform/rabbitmq"
+	"github.com/yywencs/courseforge/internal/platform/cache"
+	"github.com/yywencs/courseforge/internal/platform/config"
+	"github.com/yywencs/courseforge/internal/platform/observability/logger"
+	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -25,14 +25,14 @@ import (
 	"gorm.io/gorm"
 )
 
-const defaultIntegrationDSN = "root:prizeforge-integration@tcp(127.0.0.1:13306)/courseforge?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s"
+const defaultIntegrationDSN = "root:courseforge-integration@tcp(127.0.0.1:13306)/courseforge?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s"
 const defaultIntegrationRedisAddr = "127.0.0.1:16379"
 const defaultIntegrationRabbitMQAddr = "127.0.0.1:15673"
-const defaultIntegrationRabbitMQUser = "prizeforge-integration"
-const defaultIntegrationRabbitMQPassword = "prizeforge-integration"
+const defaultIntegrationRabbitMQUser = "courseforge-integration"
+const defaultIntegrationRabbitMQPassword = "courseforge-integration"
 
 var (
-	integrationCourseforgeDB      *gorm.DB
+	integrationCourseForgeDB      *gorm.DB
 	integrationRedis              *cache.Cache
 	integrationRedisClient        *redis.Client
 	integrationRabbitMQConfig     *config.RabbitMQConfig
@@ -44,31 +44,31 @@ var (
 func TestMain(m *testing.M) {
 	logger.Log = zap.NewNop()
 
-	dsn := envOrDefault("PRIZEFORGE_INTEGRATION_MYSQL_DSN", defaultIntegrationDSN)
+	dsn := envOrDefault("COURSEFORGE_INTEGRATION_MYSQL_DSN", defaultIntegrationDSN)
 	if err := validateIntegrationDSN(dsn); err != nil {
 		fmt.Fprintf(os.Stderr, "invalid integration MySQL DSN: %v\n", err)
 		os.Exit(1)
 	}
-	redisAddr := envOrDefault("PRIZEFORGE_INTEGRATION_REDIS_ADDR", defaultIntegrationRedisAddr)
+	redisAddr := envOrDefault("COURSEFORGE_INTEGRATION_REDIS_ADDR", defaultIntegrationRedisAddr)
 	if err := validateLocalAddress(redisAddr, "Redis"); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	rabbitMQAddr := envOrDefault("PRIZEFORGE_INTEGRATION_RABBITMQ_ADDR", defaultIntegrationRabbitMQAddr)
+	rabbitMQAddr := envOrDefault("COURSEFORGE_INTEGRATION_RABBITMQ_ADDR", defaultIntegrationRabbitMQAddr)
 	rabbitMQHost, rabbitMQPort, err := validateRabbitMQAddress(rabbitMQAddr)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	integrationCourseforgeDB, err = gorm.Open(gormMySQL.Open(dsn), &gorm.Config{})
+	integrationCourseForgeDB, err = gorm.Open(gormMySQL.Open(dsn), &gorm.Config{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "open integration courseforge database: %v\n", err)
 		os.Exit(1)
 	}
 	// 与应用默认配置保持一致，避免并发用例为每个 goroutine 同时新建连接，
 	// 从而让 Docker Desktop/OrbStack 的端口转发层成为测试瓶颈。
-	integrationSQLDB, err := integrationCourseforgeDB.DB()
+	integrationSQLDB, err := integrationCourseForgeDB.DB()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "get integration courseforge database: %v\n", err)
 		os.Exit(1)
@@ -90,8 +90,8 @@ func TestMain(m *testing.M) {
 	integrationRabbitMQConfig = &config.RabbitMQConfig{
 		Addresses: rabbitMQHost,
 		Port:      rabbitMQPort,
-		Username:  envOrDefault("PRIZEFORGE_INTEGRATION_RABBITMQ_USER", defaultIntegrationRabbitMQUser),
-		Password:  envOrDefault("PRIZEFORGE_INTEGRATION_RABBITMQ_PASSWORD", defaultIntegrationRabbitMQPassword),
+		Username:  envOrDefault("COURSEFORGE_INTEGRATION_RABBITMQ_USER", defaultIntegrationRabbitMQUser),
+		Password:  envOrDefault("COURSEFORGE_INTEGRATION_RABBITMQ_PASSWORD", defaultIntegrationRabbitMQPassword),
 		Topic: config.RabbitMQTopicConfig{
 			SelectionResult: "selection_result",
 		},
@@ -116,7 +116,7 @@ func TestMain(m *testing.M) {
 	}
 
 	code := m.Run()
-	if sqlDB, dbErr := integrationCourseforgeDB.DB(); dbErr == nil {
+	if sqlDB, dbErr := integrationCourseForgeDB.DB(); dbErr == nil {
 		_ = sqlDB.Close()
 	}
 	_ = integrationRabbitMQConnection.Close()

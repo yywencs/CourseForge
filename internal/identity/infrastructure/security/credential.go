@@ -3,7 +3,7 @@ package identitysecurity
 import (
 	"strings"
 
-	authdomain "prizeforge/internal/identity/domain"
+	authdomain "github.com/yywencs/courseforge/internal/identity/domain"
 
 	"golang.org/x/crypto/bcrypt"
 )

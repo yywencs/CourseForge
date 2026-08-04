@@ -1,17 +1,17 @@
 package bootstrap
 
 import (
-	enrollmentapp "prizeforge/internal/enrollment/application"
-	enrollmentasync "prizeforge/internal/enrollment/async"
-	enrollmentobservability "prizeforge/internal/enrollment/infrastructure/observability"
-	enrollmentrepo "prizeforge/internal/enrollment/infrastructure/persistence"
-	enrollmenthttp "prizeforge/internal/enrollment/transport/http"
-	"prizeforge/internal/platform/http/middleware"
-	"prizeforge/internal/platform/identifier"
-	"prizeforge/internal/platform/outbox"
-	outboxdispatcher "prizeforge/internal/platform/outbox/dispatcher"
-	outboxrepo "prizeforge/internal/platform/outbox/mysql"
-	"prizeforge/internal/platform/taskqueue"
+	enrollmentapp "github.com/yywencs/courseforge/internal/enrollment/application"
+	enrollmentasync "github.com/yywencs/courseforge/internal/enrollment/async"
+	enrollmentobservability "github.com/yywencs/courseforge/internal/enrollment/infrastructure/observability"
+	enrollmentrepo "github.com/yywencs/courseforge/internal/enrollment/infrastructure/persistence"
+	enrollmenthttp "github.com/yywencs/courseforge/internal/enrollment/transport/http"
+	"github.com/yywencs/courseforge/internal/platform/http/middleware"
+	"github.com/yywencs/courseforge/internal/platform/identifier"
+	"github.com/yywencs/courseforge/internal/platform/outbox"
+	outboxdispatcher "github.com/yywencs/courseforge/internal/platform/outbox/dispatcher"
+	outboxrepo "github.com/yywencs/courseforge/internal/platform/outbox/mysql"
+	"github.com/yywencs/courseforge/internal/platform/taskqueue"
 
 	"github.com/gin-gonic/gin"
 )

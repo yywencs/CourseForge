@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	applicationcatalog "prizeforge/internal/catalog/application"
-	"prizeforge/internal/catalog/domain"
+	applicationcatalog "github.com/yywencs/courseforge/internal/catalog/application"
+	"github.com/yywencs/courseforge/internal/catalog/domain"
 
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"

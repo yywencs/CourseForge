@@ -2,9 +2,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import CoursePreviewDialog from './CoursePreviewDialog.vue'
-import { publishDanmaku } from '@/api/danmaku'
+import { listDanmakuSegment, publishDanmaku } from '@/api/danmaku'
 
 vi.mock('@/api/danmaku', () => ({
+  listDanmakuSegment: vi.fn(),
   publishDanmaku: vi.fn(),
 }))
 
@@ -33,6 +34,13 @@ const course = {
 
 describe('CoursePreviewDialog danmaku composer', () => {
   beforeEach(() => {
+    vi.mocked(listDanmakuSegment).mockReset()
+    vi.mocked(listDanmakuSegment).mockImplementation(async (_videoID, segmentIndex) => ({
+      segment_index: segmentIndex,
+      start_ms: (segmentIndex - 1) * 60_000,
+      end_ms: segmentIndex * 60_000,
+      items: [],
+    }))
     vi.mocked(publishDanmaku).mockReset()
   })
 
@@ -73,7 +81,16 @@ describe('CoursePreviewDialog danmaku composer', () => {
   it('reuses the same idempotency request when retrying a failed send', async () => {
     vi.mocked(publishDanmaku)
       .mockRejectedValueOnce(new Error('网络中断'))
-      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({
+        id: 10,
+        video_id: 7,
+        student_id: 1001,
+        client_msg_id: 'ec40a0ec-572c-4af5-9067-65f702fa666c',
+        video_time_ms: 8_000,
+        content: '重试这条弹幕',
+        status: 'visible',
+        create_time: '2026-08-04T10:00:00Z',
+      })
     const wrapper = mount(CoursePreviewDialog, {
       props: { modelValue: false, course },
       global: { stubs: { teleport: true } },
@@ -100,5 +117,52 @@ describe('CoursePreviewDialog danmaku composer', () => {
     expect(vi.mocked(publishDanmaku).mock.calls[1]).toEqual(
       vi.mocked(publishDanmaku).mock.calls[0],
     )
+  })
+
+  it('loads, schedules and switches fixed history segments after seeking', async () => {
+    vi.mocked(listDanmakuSegment).mockImplementation(async (_videoID, segmentIndex) => ({
+      segment_index: segmentIndex,
+      start_ms: (segmentIndex - 1) * 60_000,
+      end_ms: segmentIndex * 60_000,
+      items: segmentIndex === 1
+        ? [{ id: 1, video_time_ms: 1_000, content: '第一段弹幕', create_time: '2026-08-04T10:00:00Z' }]
+        : segmentIndex === 3
+          ? [{ id: 3, video_time_ms: 125_200, content: '快进后的弹幕', create_time: '2026-08-04T10:01:00Z' }]
+          : [],
+    }))
+    const wrapper = mount(CoursePreviewDialog, {
+      props: { modelValue: false, course },
+      global: { stubs: { teleport: true } },
+    })
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises()
+    const player = wrapper.get('video').element
+    let currentTime = 0
+    Object.defineProperty(player, 'currentTime', {
+      configurable: true,
+      get: () => currentTime,
+      set: (value: number) => { currentTime = value },
+    })
+
+    currentTime = 0
+    await wrapper.get('video').trigger('loadedmetadata')
+    await flushPromises()
+    expect(listDanmakuSegment).toHaveBeenCalledWith(7, 1)
+
+    currentTime = 1.1
+    await wrapper.get('video').trigger('timeupdate')
+    expect(wrapper.get('.danmaku-item').text()).toBe('第一段弹幕')
+
+    currentTime = 125
+    await wrapper.get('video').trigger('seeked')
+    await flushPromises()
+    expect(listDanmakuSegment).toHaveBeenCalledWith(7, 3)
+    expect(listDanmakuSegment).toHaveBeenCalledWith(7, 4)
+
+    currentTime = 125.3
+    await wrapper.get('video').trigger('timeupdate')
+    await wrapper.vm.$nextTick()
+    await vi.waitFor(() => expect(wrapper.get('.danmaku-item').text()).toBe('快进后的弹幕'))
+    wrapper.unmount()
   })
 })

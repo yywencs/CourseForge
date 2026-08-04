@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	applicationapi "prizeforge/internal/identity/application"
-	authdomain "prizeforge/internal/identity/domain"
-	authinfra "prizeforge/internal/identity/infrastructure/security"
-	apihttp "prizeforge/server/http/api"
+	applicationapi "github.com/yywencs/courseforge/internal/identity/application"
+	authdomain "github.com/yywencs/courseforge/internal/identity/domain"
+	authinfra "github.com/yywencs/courseforge/internal/identity/infrastructure/security"
+	apihttp "github.com/yywencs/courseforge/server/http/api"
 
 	"golang.org/x/crypto/bcrypt"
 )

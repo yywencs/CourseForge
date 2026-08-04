@@ -16,3 +16,17 @@ export interface Danmaku {
   status: DanmakuStatus
   create_time: string
 }
+
+export interface HistoricalDanmaku {
+  id: number
+  video_time_ms: number
+  content: string
+  create_time: string
+}
+
+export interface DanmakuSegment {
+  segment_index: number
+  start_ms: number
+  end_ms: number
+  items: HistoricalDanmaku[]
+}

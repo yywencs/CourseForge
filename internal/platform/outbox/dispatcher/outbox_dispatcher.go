@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"prizeforge/internal/platform/observability/metrics"
-	"prizeforge/internal/platform/outbox"
-	"prizeforge/internal/platform/rabbitmq"
+	"github.com/yywencs/courseforge/internal/platform/observability/metrics"
+	"github.com/yywencs/courseforge/internal/platform/outbox"
+	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
 
 	"github.com/hibiken/asynq"
 )

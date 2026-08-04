@@ -5,12 +5,12 @@ LOCAL_COMPOSE_FILE ?= $(if $(wildcard docker-compose-my.yaml),docker-compose-my.
 LOCAL_COMPOSE ?= $(COMPOSE) -f $(LOCAL_COMPOSE_FILE)
 LOCAL_INFRA_SERVICES ?= $(if $(filter docker-compose-my.yaml,$(LOCAL_COMPOSE_FILE)),redis rabbitmq,mysql redis rabbitmq)
 INTEGRATION_COMPOSE ?= $(COMPOSE) -f compose.integration.yaml
-INTEGRATION_MYSQL_PASSWORD ?= prizeforge-integration
+INTEGRATION_MYSQL_PASSWORD ?= courseforge-integration
 INTEGRATION_MYSQL_PORT ?= 13306
 INTEGRATION_REDIS_PORT ?= 16379
 INTEGRATION_RABBITMQ_PORT ?= 15673
-INTEGRATION_RABBITMQ_USER ?= prizeforge-integration
-INTEGRATION_RABBITMQ_PASSWORD ?= prizeforge-integration
+INTEGRATION_RABBITMQ_USER ?= courseforge-integration
+INTEGRATION_RABBITMQ_PASSWORD ?= courseforge-integration
 export INTEGRATION_MYSQL_PASSWORD
 export INTEGRATION_MYSQL_PORT
 export INTEGRATION_REDIS_PORT
@@ -19,7 +19,7 @@ export INTEGRATION_RABBITMQ_USER
 export INTEGRATION_RABBITMQ_PASSWORD
 
 BIN_DIR ?= bin
-IMAGE_PREFIX ?= prizeforge
+IMAGE_PREFIX ?= courseforge
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || printf 'dev')
 LDFLAGS ?= -s -w
 LOCAL_PROMETHEUS_CONFIG ?= monitoring/prometheus/prometheus.local.yml
@@ -66,19 +66,26 @@ integration-test: ## 启动临时 MySQL、Redis、RabbitMQ，运行集成测试�
 	@set -eu; \
 	INTEGRATION_MYSQL_PASSWORD='$(INTEGRATION_MYSQL_PASSWORD)' INTEGRATION_MYSQL_PORT='$(INTEGRATION_MYSQL_PORT)' INTEGRATION_REDIS_PORT='$(INTEGRATION_REDIS_PORT)' INTEGRATION_RABBITMQ_PORT='$(INTEGRATION_RABBITMQ_PORT)' INTEGRATION_RABBITMQ_USER='$(INTEGRATION_RABBITMQ_USER)' INTEGRATION_RABBITMQ_PASSWORD='$(INTEGRATION_RABBITMQ_PASSWORD)' $(INTEGRATION_COMPOSE) up -d --wait mysql redis rabbitmq; \
 	trap '$(INTEGRATION_COMPOSE) down --volumes --remove-orphans' EXIT; \
+	expected_courseforge_table_count="$$(grep -c '^CREATE TABLE' docs/sql/courseforge.sql)"; \
 	courseforge_table_count="$$( $(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '"'"'courseforge'"'"'"' )"; \
-	test "$$courseforge_table_count" = "18"; \
+	if [ "$$courseforge_table_count" -ne "$$expected_courseforge_table_count" ]; then \
+		printf '%s\n' \
+			"CourseForge integration schema mismatch: expected $$expected_courseforge_table_count tables from docs/sql/courseforge.sql, found $$courseforge_table_count" \
+			"Current CourseForge tables:" >&2; \
+		$(INTEGRATION_COMPOSE) exec -T mysql sh -ec 'mysql -uroot -p"$$MYSQL_ROOT_PASSWORD" -Nse "SELECT table_name FROM information_schema.tables WHERE table_schema = '"'"'courseforge'"'"' ORDER BY table_name"' >&2; \
+		exit 1; \
+	fi; \
 	printf '%s\n' "CourseForge integration MySQL schema is ready"; \
 	redis_response="$$( $(INTEGRATION_COMPOSE) exec -T redis redis-cli ping )"; \
 	test "$$redis_response" = "PONG"; \
 	printf '%s\n' "integration Redis is ready"; \
 	$(INTEGRATION_COMPOSE) exec -T rabbitmq rabbitmq-diagnostics -q ping >/dev/null; \
 	printf '%s\n' "integration RabbitMQ is ready"; \
-	PRIZEFORGE_INTEGRATION_MYSQL_DSN='root:$(INTEGRATION_MYSQL_PASSWORD)@tcp(127.0.0.1:$(INTEGRATION_MYSQL_PORT))/courseforge?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s' \
-	PRIZEFORGE_INTEGRATION_REDIS_ADDR='127.0.0.1:$(INTEGRATION_REDIS_PORT)' \
-	PRIZEFORGE_INTEGRATION_RABBITMQ_ADDR='127.0.0.1:$(INTEGRATION_RABBITMQ_PORT)' \
-	PRIZEFORGE_INTEGRATION_RABBITMQ_USER='$(INTEGRATION_RABBITMQ_USER)' \
-	PRIZEFORGE_INTEGRATION_RABBITMQ_PASSWORD='$(INTEGRATION_RABBITMQ_PASSWORD)' \
+	COURSEFORGE_INTEGRATION_MYSQL_DSN='root:$(INTEGRATION_MYSQL_PASSWORD)@tcp(127.0.0.1:$(INTEGRATION_MYSQL_PORT))/courseforge?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s' \
+	COURSEFORGE_INTEGRATION_REDIS_ADDR='127.0.0.1:$(INTEGRATION_REDIS_PORT)' \
+	COURSEFORGE_INTEGRATION_RABBITMQ_ADDR='127.0.0.1:$(INTEGRATION_RABBITMQ_PORT)' \
+	COURSEFORGE_INTEGRATION_RABBITMQ_USER='$(INTEGRATION_RABBITMQ_USER)' \
+	COURSEFORGE_INTEGRATION_RABBITMQ_PASSWORD='$(INTEGRATION_RABBITMQ_PASSWORD)' \
 		$(GO) test -tags=integration ./tests/integration/... ./cmd/benchmark -count=1
 
 .PHONY: check
@@ -94,17 +101,17 @@ build: build-api build-admin build-cdc ## 构建全部服务
 .PHONY: build-api
 build-api:
 	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/prizeforge-api ./cmd/api
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/courseforge-api ./cmd/api
 
 .PHONY: build-admin
 build-admin:
 	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/prizeforge-admin ./cmd/admin
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/courseforge-admin ./cmd/admin
 
 .PHONY: build-cdc
 build-cdc:
 	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/prizeforge-cdc-sync ./cmd/cdc-sync
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/courseforge-cdc-sync ./cmd/cdc-sync
 
 .PHONY: build-benchmark
 build-benchmark: ## 构建 CourseForge 选课压测工具

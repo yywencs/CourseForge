@@ -3,11 +3,11 @@ package bootstrap
 import (
 	"time"
 
-	applicationcatalog "prizeforge/internal/catalog/application"
-	catalogasync "prizeforge/internal/catalog/async"
-	catalogstorage "prizeforge/internal/catalog/infrastructure/objectstorage"
-	"prizeforge/internal/platform/config"
-	"prizeforge/internal/platform/taskqueue"
+	applicationcatalog "github.com/yywencs/courseforge/internal/catalog/application"
+	catalogasync "github.com/yywencs/courseforge/internal/catalog/async"
+	catalogstorage "github.com/yywencs/courseforge/internal/catalog/infrastructure/objectstorage"
+	"github.com/yywencs/courseforge/internal/platform/config"
+	"github.com/yywencs/courseforge/internal/platform/taskqueue"
 )
 
 func newCatalogService(

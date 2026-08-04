@@ -1,8 +1,8 @@
 package enrollmentrepo
 
 import (
-	application "prizeforge/internal/enrollment/application"
-	"prizeforge/internal/platform/cache"
+	application "github.com/yywencs/courseforge/internal/enrollment/application"
+	"github.com/yywencs/courseforge/internal/platform/cache"
 
 	"gorm.io/gorm"
 )

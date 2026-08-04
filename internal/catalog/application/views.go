@@ -3,7 +3,7 @@ package catalogapp
 import (
 	"time"
 
-	domain "prizeforge/internal/catalog/domain"
+	domain "github.com/yywencs/courseforge/internal/catalog/domain"
 )
 
 type CourseVideoView struct {

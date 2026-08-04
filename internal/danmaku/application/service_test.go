@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"prizeforge/internal/danmaku/domain"
+	"github.com/yywencs/courseforge/internal/danmaku/domain"
 )
 
 const serviceTestMessageID = "ec40a0ec-572c-4af5-9067-65f702fa666c"
@@ -55,6 +55,40 @@ type videoReaderStub struct {
 	err   error
 }
 
+type segmentCacheStub struct {
+	items           []danmaku.Danmaku
+	getErr          error
+	invalidateErr   error
+	getCalls        int
+	invalidateCalls int
+	load            bool
+	segment         danmaku.HistorySegment
+}
+
+func (c *segmentCacheStub) GetOrLoad(
+	ctx context.Context,
+	_ uint64,
+	segment danmaku.HistorySegment,
+	loader SegmentLoader,
+) ([]danmaku.Danmaku, error) {
+	c.getCalls++
+	c.segment = segment
+	if c.load {
+		return loader(ctx)
+	}
+	return append([]danmaku.Danmaku(nil), c.items...), c.getErr
+}
+
+func (c *segmentCacheStub) Invalidate(
+	_ context.Context,
+	_ uint64,
+	segment danmaku.HistorySegment,
+) error {
+	c.invalidateCalls++
+	c.segment = segment
+	return c.invalidateErr
+}
+
 func (r videoReaderStub) GetVideo(context.Context, uint64) (*danmaku.VideoTarget, error) {
 	return r.video, r.err
 }
@@ -82,6 +116,24 @@ func TestPublishPersistsValidatedDanmaku(t *testing.T) {
 	}
 	if item.ID != 88 || item.Content != "关键内容" || repository.inserted == nil {
 		t.Fatalf("item = %#v, inserted = %#v", item, repository.inserted)
+	}
+}
+
+func TestPublishInvalidatesContainingSegmentWithoutFailingOnCacheError(t *testing.T) {
+	repository := &repositoryStub{}
+	segmentCache := &segmentCacheStub{invalidateErr: errors.New("redis unavailable")}
+	service := NewService(
+		repository,
+		videoReaderStub{video: readyVideo(120_000)},
+		WithSegmentCache(segmentCache),
+	)
+	command := publishCommand()
+	command.VideoTimeMS = 60_000
+	if _, err := service.Publish(context.Background(), command); err != nil {
+		t.Fatal(err)
+	}
+	if segmentCache.invalidateCalls != 1 || segmentCache.segment.Index() != 2 {
+		t.Fatalf("invalidate calls = %d, segment = %d", segmentCache.invalidateCalls, segmentCache.segment.Index())
 	}
 }
 
@@ -159,6 +211,59 @@ func TestListHistoryReturnsValidatedSixtySecondSegment(t *testing.T) {
 	}
 	if repository.listVideoID != 7 || repository.listSegment.Index() != 3 {
 		t.Fatalf("repository query video = %d, segment = %d", repository.listVideoID, repository.listSegment.Index())
+	}
+}
+
+func TestListHistoryReturnsCachedSegmentWithoutQueryingDanmakuRepository(t *testing.T) {
+	repository := &repositoryStub{listErr: errors.New("must not query database")}
+	segmentCache := &segmentCacheStub{
+		items: []danmaku.Danmaku{{ID: 9, VideoID: 7, VideoTimeMS: 120_500}},
+	}
+	service := NewService(
+		repository,
+		videoReaderStub{video: readyVideo(180_000)},
+		WithSegmentCache(segmentCache),
+	)
+	page, err := service.ListHistory(context.Background(), HistoryQuery{VideoID: 7, SegmentIndex: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != 9 || repository.listSegment.Index() != 0 {
+		t.Fatalf("page = %#v, repository segment = %d", page, repository.listSegment.Index())
+	}
+}
+
+func TestListHistoryLoadsRepositoryOnCacheMiss(t *testing.T) {
+	repository := &repositoryStub{listed: []danmaku.Danmaku{{ID: 2, VideoID: 7}}}
+	segmentCache := &segmentCacheStub{load: true}
+	service := NewService(
+		repository,
+		videoReaderStub{video: readyVideo(180_000)},
+		WithSegmentCache(segmentCache),
+	)
+	page, err := service.ListHistory(context.Background(), HistoryQuery{VideoID: 7, SegmentIndex: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || repository.listSegment.Index() != 3 || segmentCache.segment.Index() != 3 {
+		t.Fatalf("page = %#v, repository segment = %d, cache segment = %d", page, repository.listSegment.Index(), segmentCache.segment.Index())
+	}
+}
+
+func TestListHistoryFallsBackToDatabaseWhenCacheIsUnavailable(t *testing.T) {
+	repository := &repositoryStub{listed: []danmaku.Danmaku{{ID: 2, VideoID: 7}}}
+	segmentCache := &segmentCacheStub{getErr: errors.New("redis unavailable")}
+	service := NewService(
+		repository,
+		videoReaderStub{video: readyVideo(180_000)},
+		WithSegmentCache(segmentCache),
+	)
+	page, err := service.ListHistory(context.Background(), HistoryQuery{VideoID: 7, SegmentIndex: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || repository.listSegment.Index() != 3 {
+		t.Fatalf("page = %#v, repository segment = %d", page, repository.listSegment.Index())
 	}
 }
 

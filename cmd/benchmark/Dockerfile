@@ -29,17 +29,17 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates tzdata \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid 10001 prizeforge \
-    && useradd --uid 10001 --gid prizeforge --no-create-home --shell /usr/sbin/nologin prizeforge
+    && groupadd --gid 10001 courseforge \
+    && useradd --uid 10001 --gid courseforge --no-create-home --shell /usr/sbin/nologin courseforge
 
 WORKDIR /app
 
 ENV TZ=Asia/Shanghai
 
-COPY --from=builder --chown=prizeforge:prizeforge \
+COPY --from=builder --chown=courseforge:courseforge \
     /out/courseforge-benchmark /usr/local/bin/courseforge-benchmark
 
-USER prizeforge
+USER courseforge
 STOPSIGNAL SIGTERM
 
 ENTRYPOINT ["courseforge-benchmark"]

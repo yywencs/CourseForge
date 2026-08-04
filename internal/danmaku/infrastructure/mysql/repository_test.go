@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"prizeforge/internal/danmaku/domain"
+	"github.com/yywencs/courseforge/internal/danmaku/domain"
 
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm/schema"

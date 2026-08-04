@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"prizeforge/internal/platform/config"
-	"prizeforge/internal/platform/observability/logger"
-	"prizeforge/internal/platform/observability/metrics"
+	"github.com/yywencs/courseforge/internal/platform/config"
+	"github.com/yywencs/courseforge/internal/platform/observability/logger"
+	"github.com/yywencs/courseforge/internal/platform/observability/metrics"
 
 	"github.com/hibiken/asynq"
 )

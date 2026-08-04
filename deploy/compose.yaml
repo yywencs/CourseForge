@@ -1,18 +1,18 @@
-name: prizeforge
+name: courseforge
 
 x-app-environment: &app-environment
   TZ: Asia/Shanghai
-  PRIZEFORGE_AUTH_JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY is required}
-  PRIZEFORGE_DATA_MYSQL_COURSEFORGE_DSN: root:${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}@tcp(mysql:3306)/courseforge?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s
-  PRIZEFORGE_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
-  PRIZEFORGE_ASYNQ_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
-  PRIZEFORGE_RABBITMQ_USERNAME: ${RABBITMQ_USER:-prizeforge}
-  PRIZEFORGE_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
-  PRIZEFORGE_DCC_RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+  COURSEFORGE_AUTH_JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY is required}
+  COURSEFORGE_DATA_MYSQL_COURSEFORGE_DSN: root:${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}@tcp(mysql:3306)/courseforge?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s
+  COURSEFORGE_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+  COURSEFORGE_ASYNQ_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+  COURSEFORGE_RABBITMQ_USERNAME: ${RABBITMQ_USER:-courseforge}
+  COURSEFORGE_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+  COURSEFORGE_DCC_RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
 
 services:
   mysql:
-    image: ${ACR_REGISTRY:?ACR_REGISTRY is required}/${ACR_NAMESPACE:?ACR_NAMESPACE is required}/prizeforge-mysql:8.4.6
+    image: ${ACR_REGISTRY:?ACR_REGISTRY is required}/${ACR_NAMESPACE:?ACR_NAMESPACE is required}/courseforge-mysql:8.4.6
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
@@ -36,7 +36,7 @@ services:
       - backend
 
   redis:
-    image: ${ACR_REGISTRY:?ACR_REGISTRY is required}/${ACR_NAMESPACE:?ACR_NAMESPACE is required}/prizeforge-redis:7.4.9-alpine
+    image: ${ACR_REGISTRY:?ACR_REGISTRY is required}/${ACR_NAMESPACE:?ACR_NAMESPACE is required}/courseforge-redis:7.4.9-alpine
     restart: unless-stopped
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
@@ -58,11 +58,11 @@ services:
       - backend
 
   rabbitmq:
-    image: ${ACR_REGISTRY:?ACR_REGISTRY is required}/${ACR_NAMESPACE:?ACR_NAMESPACE is required}/prizeforge-rabbitmq:4.2.8-alpine
+    image: ${ACR_REGISTRY:?ACR_REGISTRY is required}/${ACR_NAMESPACE:?ACR_NAMESPACE is required}/courseforge-rabbitmq:4.2.8-alpine
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-prizeforge}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-courseforge}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
@@ -77,7 +77,7 @@ services:
       - backend
 
   api:
-    image: ${ACR_REGISTRY:?ACR_REGISTRY is required}/${ACR_NAMESPACE:?ACR_NAMESPACE is required}/prizeforge-api:${IMAGE_TAG:?IMAGE_TAG is required}
+    image: ${ACR_REGISTRY:?ACR_REGISTRY is required}/${ACR_NAMESPACE:?ACR_NAMESPACE is required}/courseforge-api:${IMAGE_TAG:?IMAGE_TAG is required}
     restart: unless-stopped
     init: true
     environment: *app-environment
@@ -96,7 +96,7 @@ services:
       - backend
 
   admin:
-    image: ${ACR_REGISTRY:?ACR_REGISTRY is required}/${ACR_NAMESPACE:?ACR_NAMESPACE is required}/prizeforge-admin:${IMAGE_TAG:?IMAGE_TAG is required}
+    image: ${ACR_REGISTRY:?ACR_REGISTRY is required}/${ACR_NAMESPACE:?ACR_NAMESPACE is required}/courseforge-admin:${IMAGE_TAG:?IMAGE_TAG is required}
     restart: unless-stopped
     init: true
     environment: *app-environment

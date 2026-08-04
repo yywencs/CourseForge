@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
+	"github.com/yywencs/courseforge/internal/bootstrap"
+	"github.com/yywencs/courseforge/internal/platform/observability/logger"
 	"log"
 	"os/signal"
-	"prizeforge/internal/bootstrap"
-	"prizeforge/internal/platform/observability/logger"
 	"syscall"
 	"time"
 )

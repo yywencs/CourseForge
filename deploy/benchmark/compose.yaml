@@ -61,7 +61,8 @@ services:
     restart: unless-stopped
     init: true
     ports:
-      - 127.0.0.1:8080:8080
+      # 双机压测时由安全组限制来源，仅允许压测机通过私网访问。
+      - 8080:8080
     volumes:
       - ./config.yaml:/app/configs/config.yaml:ro
     depends_on:

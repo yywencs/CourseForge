@@ -94,13 +94,15 @@ make check
 # 真实 MySQL、Redis、RabbitMQ 集成测试
 make integration-test
 
-# 构建选课压测工具
+# 构建选课和实时弹幕压测工具
 make build-benchmark
 ./bin/courseforge-benchmark prepare --help
 ./bin/courseforge-benchmark run --help
+./bin/courseforge-websocket-benchmark --help
 ```
 
-压测工具会准备隔离的高位 ID 测试数据，支持正常选课、幂等重试和候补三种场景。
+选课工具会准备隔离的高位 ID 测试数据，支持正常选课、幂等重试和候补三种场景；
+实时弹幕工具覆盖 WebSocket 建连、Protobuf 鉴权、HTTP 发布和跨实例广播交付。
 完整参数见 [压测工具说明](cmd/benchmark/README.md)。
 
 ## 发布与部署

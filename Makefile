@@ -106,7 +106,7 @@ integration-test: ## 启动临时 MySQL、Redis、RabbitMQ，运行集成测试�
 	COURSEFORGE_INTEGRATION_RABBITMQ_ADDR='127.0.0.1:$(INTEGRATION_RABBITMQ_PORT)' \
 	COURSEFORGE_INTEGRATION_RABBITMQ_USER='$(INTEGRATION_RABBITMQ_USER)' \
 	COURSEFORGE_INTEGRATION_RABBITMQ_PASSWORD='$(INTEGRATION_RABBITMQ_PASSWORD)' \
-		$(GO) test -tags=integration ./tests/integration/... ./cmd/benchmark -count=1
+		$(GO) test -tags=integration ./tests/integration/... ./cmd/benchmark/enrollment -count=1
 
 .PHONY: check
 check: fmt-check vet test test-deploy ## 执行格式、静态检查和测试
@@ -134,9 +134,17 @@ build-cdc:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/courseforge-cdc-sync ./cmd/cdc-sync
 
 .PHONY: build-benchmark
-build-benchmark: ## 构建 CourseForge 选课压测工具
+build-benchmark: build-enrollment-benchmark build-websocket-benchmark ## 构建全部压测工具
+
+.PHONY: build-enrollment-benchmark
+build-enrollment-benchmark: ## 构建 CourseForge 选课压测工具
 	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/courseforge-benchmark ./cmd/benchmark
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/courseforge-benchmark ./cmd/benchmark/enrollment
+
+.PHONY: build-websocket-benchmark
+build-websocket-benchmark: ## 构建 CourseForge 实时弹幕 WebSocket 压测工具
+	@mkdir -p $(BIN_DIR)
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/courseforge-websocket-benchmark ./cmd/benchmark/websocket
 
 .PHONY: run-api
 run-api: ## 本地启动 API 服务
@@ -166,8 +174,15 @@ docker-build-cdc:
 	$(DOCKER) build --target cdc-sync -t $(IMAGE_PREFIX)-cdc-sync:$(VERSION) .
 
 .PHONY: docker-build-benchmark
-docker-build-benchmark: ## 构建 CourseForge 选课压测镜像
-	$(DOCKER) build -f cmd/benchmark/Dockerfile -t courseforge-benchmark:$(VERSION) .
+docker-build-benchmark: docker-build-enrollment-benchmark docker-build-websocket-benchmark ## 构建全部压测镜像
+
+.PHONY: docker-build-enrollment-benchmark
+docker-build-enrollment-benchmark: ## 构建 CourseForge 选课压测镜像
+	$(DOCKER) build -f cmd/benchmark/enrollment/Dockerfile -t courseforge-benchmark:$(VERSION) .
+
+.PHONY: docker-build-websocket-benchmark
+docker-build-websocket-benchmark: ## 构建 CourseForge 实时弹幕 WebSocket 压测镜像
+	$(DOCKER) build -f cmd/benchmark/websocket/Dockerfile -t courseforge-websocket-benchmark:$(VERSION) .
 
 .PHONY: monitoring-config
 monitoring-config:

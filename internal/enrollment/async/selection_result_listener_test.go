@@ -87,3 +87,19 @@ func TestSelectionResultListenerRetriesPersistenceFailure(t *testing.T) {
 		t.Fatalf("Handle() = retry:%t err:%v, want retry with %v", retry, err, persistErr)
 	}
 }
+
+func TestSelectionResultListenerDoesNotRetryDeterministicBusinessFailure(t *testing.T) {
+	service := &fakeSelectionPersistenceService{err: enrollment.ErrTeachingClassFull}
+	retry, err := NewSelectionResultListener(service).Handle(
+		context.Background(),
+		selectionResultEventBody(t),
+	)
+	if retry || !errors.Is(err, enrollment.ErrTeachingClassFull) {
+		t.Fatalf(
+			"Handle() = retry:%t err:%v, want permanent %v",
+			retry,
+			err,
+			enrollment.ErrTeachingClassFull,
+		)
+	}
+}

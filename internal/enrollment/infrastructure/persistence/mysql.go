@@ -207,7 +207,8 @@ func validatePersistedApplication(
 		existing.TeachingClassID != result.TeachingClassID ||
 		existing.State != string(result.State) {
 		return fmt.Errorf(
-			"选课结果幂等冲突: application_id=%s",
+			"%w: application_id=%s",
+			enrollment.ErrIdempotencyConflict,
 			result.ApplicationID,
 		)
 	}

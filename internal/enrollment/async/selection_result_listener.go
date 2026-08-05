@@ -10,6 +10,7 @@ import (
 	"github.com/yywencs/courseforge/internal/enrollment/domain"
 	"github.com/yywencs/courseforge/internal/platform/observability/metrics"
 	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
+	"github.com/yywencs/courseforge/internal/shared/xerr"
 )
 
 type selectionResultPersistenceService interface {
@@ -58,8 +59,22 @@ func (l *SelectionResultListener) Handle(
 	startedAt := time.Now()
 	if err := l.service.SaveSelectionResult(ctx, result); err != nil {
 		metrics.ObserveSelectionPersistence("error", time.Since(startedAt))
-		return true, err
+		return isRetryableSelectionPersistenceError(err), err
 	}
 	metrics.ObserveSelectionPersistence("success", time.Since(startedAt))
 	return false, nil
+}
+
+// isRetryableSelectionPersistenceError 区分基础设施瞬时故障与确定性业务冲突。
+// 未识别的持久化错误默认允许有限重试，由 Consumer 的最大次数防止无限循环。
+func isRetryableSelectionPersistenceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var businessError *xerr.CodeError
+	if errors.As(err, &businessError) {
+		return false
+	}
+	return !errors.Is(err, enrollment.ErrConflict) &&
+		!errors.Is(err, enrollment.ErrNotFound)
 }

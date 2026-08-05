@@ -31,6 +31,8 @@ rabbitmq:
     simple:
       prefetch: 1
       default_concurrency: 1
+      max_retries: 3
+      retry_delays: [1s, 5s, 30s]
       concurrency:
         selection_result_queue: 8
   topic:

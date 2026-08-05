@@ -38,6 +38,8 @@ rabbitmq:
     simple:
       prefetch: 1
       default_concurrency: 1
+      max_retries: 3
+      retry_delays: [1s, 5s, 30s]
       concurrency:
         selection_result_queue: 8
 dcc:
@@ -110,8 +112,11 @@ dcc:
 	}
 	if Conf.RabbitMQ.Listener.Simple.Prefetch != 1 ||
 		Conf.RabbitMQ.Listener.Simple.DefaultConcurrency != 2 ||
+		Conf.RabbitMQ.Listener.Simple.MaxRetries != 3 ||
+		len(Conf.RabbitMQ.Listener.Simple.RetryDelays) != 3 ||
+		Conf.RabbitMQ.Listener.Simple.RetryDelays[1] != 5*time.Second ||
 		Conf.RabbitMQ.Listener.Simple.Concurrency["selection_result_queue"] != 6 {
-		t.Fatalf("rabbitmq listener config = %#v, want prefetch=1 default=2 selection=6",
+		t.Fatalf("rabbitmq listener config = %#v, want retry and concurrency settings",
 			Conf.RabbitMQ.Listener.Simple)
 	}
 	if Conf.Dcc.RateLimit.Enabled {

@@ -6,12 +6,14 @@ import (
 	"time"
 
 	"github.com/yywencs/courseforge/internal/platform/observability/logger"
+	"github.com/yywencs/courseforge/internal/platform/observability/metrics"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 const (
 	defaultMessageHandleTimeout = 30 * time.Second
+	defaultFailureRouteTimeout  = 5 * time.Second
 	defaultPrefetchCount        = 1
 	defaultConsumerConcurrency  = 1
 )
@@ -21,8 +23,8 @@ const (
 // 每个 Listener 对应一个 topic，由 RabbitMQConsumer 管理生命周期。
 //
 // Handle 返回值含义：
-//   - retry=true  → Nack 并重回队列，等待重新消费（用于临时性错误）
-//   - retry=false → Ack 确认消费成功，或 Reject 丢弃（用于永久性错误）
+//   - retry=true  → 进入分级延迟重试队列（用于临时性错误）
+//   - retry=false → 直接进入死信队列（用于永久性错误）
 type Listener interface {
 	Handle(ctx context.Context, body []byte) (retry bool, err error)
 }
@@ -48,6 +50,7 @@ type RabbitMQConsumer struct {
 	prefetch           int                 // 每个 Channel 最多允许的未确认消息数
 	defaultConcurrency int                 // 未单独配置队列时使用的消费者并发数
 	handleTimeout      time.Duration       // 单条消息处理上限，防止一个调用永久占住消费者
+	retryPolicy        retryPolicy         // 延迟重试次数和每一级重试队列的 TTL
 }
 
 // ConsumerOption 定制 RabbitMQ 消费端的 QoS 和队列并发度。
@@ -83,6 +86,14 @@ func WithQueueConcurrency(concurrency map[string]int) ConsumerOption {
 	}
 }
 
+// WithRetryPolicy 设置临时错误的最大重试次数和各次延迟。
+// 延迟数量少于最大重试次数时，后续重试沿用最后一个延迟。
+func WithRetryPolicy(maxRetries int, delays []time.Duration) ConsumerOption {
+	return func(c *RabbitMQConsumer) {
+		c.retryPolicy = newRetryPolicy(maxRetries, delays)
+	}
+}
+
 // NewRabbitMQConsumer 创建通用 RabbitMQConsumer。
 // 所有 topic → Listener 映射由 bootstrap 从同一份 RabbitMQ topic 配置显式注册，
 // 避免生产端使用配置、消费端使用硬编码常量而发生 Exchange 名称漂移。
@@ -97,6 +108,7 @@ func NewRabbitMQConsumer(
 		prefetch:           defaultPrefetchCount,
 		defaultConcurrency: defaultConsumerConcurrency,
 		handleTimeout:      defaultMessageHandleTimeout,
+		retryPolicy:        newRetryPolicy(0, nil),
 	}
 	for _, option := range options {
 		if option != nil {
@@ -190,6 +202,10 @@ func (c *RabbitMQConsumer) startConsumer(topic string, l Listener, workerID, con
 	if err := channel.QueueBind(q.Name, "", topic, false, nil); err != nil {
 		return fmt.Errorf("绑定队列: %w", err)
 	}
+	failureRouter, err := declareFailureTopology(channel, topic, c.retryPolicy)
+	if err != nil {
+		return err
+	}
 
 	// 每个并行消费者使用独立 Channel，避免并发处理共享 ACK 状态。
 	if err := channel.Qos(c.prefetchCount(), 0, false); err != nil {
@@ -210,7 +226,7 @@ func (c *RabbitMQConsumer) startConsumer(topic string, l Listener, workerID, con
 		return fmt.Errorf("注册消费者: %w", err)
 	}
 
-	go c.handle(msgs, l)
+	go c.handle(topic, msgs, l, failureRouter)
 
 	c.channels = append(c.channels, channel)
 	started = true
@@ -228,38 +244,96 @@ func (c *RabbitMQConsumer) startConsumer(topic string, l Listener, workerID, con
 // handle 是消息消费循环，每个 topic 在独立 goroutine 中运行。
 //
 // 容错策略：
-//   - Panic recovery：单个消息处理即使 panic 也不会导致消费循环退出
-//   - 手动 Ack：成功消费后 Ack，失败根据 retry 决定 Nack（重回队列）或 Reject（丢弃）
+//   - Panic recovery：panic 被视为临时错误，同样受最大重试次数约束
+//   - 手动 Ack：成功消费直接 ACK；失败消息获得 Confirm 并进入 retry/DLQ 后再 ACK
 //   - 错误日志记录但不中断循环
-func (c *RabbitMQConsumer) handle(msgs <-chan amqp.Delivery, l Listener) {
+func (c *RabbitMQConsumer) handle(
+	topic string,
+	msgs <-chan amqp.Delivery,
+	l Listener,
+	router failedMessageRouter,
+) {
 	for d := range msgs {
-		// 使用闭包 + defer 隔离单个消息的 panic
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Error("RabbitMQ 消息处理 panic，重回队列", "reason", r)
-					_ = d.Nack(false, true) // 重回队列，避免消息丢失
-				}
-			}()
-
-			handleCtx, cancel := context.WithTimeout(context.Background(), c.messageHandleTimeout())
-			defer cancel()
-
-			retry, err := l.Handle(handleCtx, d.Body)
-			if err != nil {
-				logger.Error("消息处理失败", "err", err)
-				if retry {
-					_ = d.Nack(false, true) // requeue=true，放回队列尾部
-				} else {
-					logger.Error("永久性错误，丢弃消息", "err", err)
-					_ = d.Reject(false) // requeue=false，直接丢弃
-				}
-				return
-			}
-
-			_ = d.Ack(false) // 确认消费成功
-		}()
+		c.handleDelivery(topic, d, l, router)
 	}
+}
+
+func (c *RabbitMQConsumer) handleDelivery(
+	topic string,
+	delivery amqp.Delivery,
+	listener Listener,
+	router failedMessageRouter,
+) {
+	retry, handleErr := c.invokeListener(listener, delivery.Body)
+	if handleErr == nil {
+		metrics.IncRabbitMQConsume(topic, "success")
+		_ = delivery.Ack(false)
+		return
+	}
+
+	retryCount := deliveryRetryCount(delivery)
+	routeCtx, cancel := context.WithTimeout(context.Background(), defaultFailureRouteTimeout)
+	defer cancel()
+	if retry && retryCount < c.retryPolicy.maxRetries {
+		nextRetry := retryCount + 1
+		if router != nil {
+			if err := router.Retry(routeCtx, delivery, nextRetry, handleErr); err == nil {
+				metrics.IncRabbitMQConsume(topic, "retry_scheduled")
+				logger.Error(
+					"RabbitMQ 消息处理失败，已进入延迟重试队列",
+					"topic", topic,
+					"retry", nextRetry,
+					"delay", c.retryPolicy.delay(nextRetry),
+					"err", handleErr,
+				)
+				_ = delivery.Ack(false)
+				return
+			} else {
+				metrics.IncRabbitMQConsume(topic, "retry_route_error")
+				logger.Error("RabbitMQ 重试消息路由失败，原消息重回主队列", "err", err)
+			}
+		}
+		_ = delivery.Nack(false, true)
+		return
+	}
+
+	if router != nil {
+		if err := router.DeadLetter(routeCtx, delivery, handleErr); err == nil {
+			result := "dead_letter_permanent"
+			if retry {
+				result = "dead_letter_exhausted"
+			}
+			metrics.IncRabbitMQConsume(topic, result)
+			logger.Error(
+				"RabbitMQ 消息进入死信队列",
+				"topic", topic,
+				"retry_count", retryCount,
+				"retryable", retry,
+				"err", handleErr,
+			)
+			_ = delivery.Ack(false)
+			return
+		} else {
+			metrics.IncRabbitMQConsume(topic, "dead_letter_route_error")
+			logger.Error("RabbitMQ 死信消息路由失败，原消息重回主队列", "err", err)
+		}
+	}
+	_ = delivery.Nack(false, true)
+}
+
+func (c *RabbitMQConsumer) invokeListener(
+	listener Listener,
+	body []byte,
+) (retry bool, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			retry = true
+			err = fmt.Errorf("RabbitMQ listener panic: %v", recovered)
+		}
+	}()
+	handleCtx, cancel := context.WithTimeout(context.Background(), c.messageHandleTimeout())
+	defer cancel()
+	return listener.Handle(handleCtx, body)
 }
 
 func (c *RabbitMQConsumer) messageHandleTimeout() time.Duration {

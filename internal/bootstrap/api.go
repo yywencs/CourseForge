@@ -138,6 +138,10 @@ func newAPIRuntime(cfg *config.Config) (*apiRuntime, error) {
 		rabbitmq.WithPrefetch(cfg.RabbitMQ.Listener.Simple.Prefetch),
 		rabbitmq.WithDefaultConcurrency(cfg.RabbitMQ.Listener.Simple.DefaultConcurrency),
 		rabbitmq.WithQueueConcurrency(cfg.RabbitMQ.Listener.Simple.Concurrency),
+		rabbitmq.WithRetryPolicy(
+			cfg.RabbitMQ.Listener.Simple.MaxRetries,
+			cfg.RabbitMQ.Listener.Simple.RetryDelays,
+		),
 	)
 	return &apiRuntime{
 		cfg:         cfg,

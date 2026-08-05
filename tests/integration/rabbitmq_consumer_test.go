@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -32,6 +33,7 @@ func TestRabbitMQConsumerProcessesOneQueueWithMultipleIndependentChannels(t *tes
 		connection,
 		rabbitmq.WithPrefetch(1),
 		rabbitmq.WithQueueConcurrency(map[string]int{topic + "_queue": 3}),
+		rabbitmq.WithRetryPolicy(1, []time.Duration{50 * time.Millisecond}),
 	)
 	t.Cleanup(consumer.Shutdown)
 
@@ -84,9 +86,9 @@ func TestRabbitMQConsumerProcessesOneQueueWithMultipleIndependentChannels(t *tes
 	}
 }
 
-// TestRabbitMQConsumerRequeuesRetryableFailure 验证临时错误会 NACK 并重新入队，
-// 同一条消息第二次处理成功后才完成消费。
-func TestRabbitMQConsumerRequeuesRetryableFailure(t *testing.T) {
+// TestRabbitMQConsumerDelaysRetryableFailure 验证临时错误进入持久化延迟队列，
+// TTL 到期回到主队列后再次处理。
+func TestRabbitMQConsumerDelaysRetryableFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -96,7 +98,10 @@ func TestRabbitMQConsumerRequeuesRetryableFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect RabbitMQ retry test: %v", err)
 	}
-	consumer := rabbitmq.NewRabbitMQConsumer(connection)
+	consumer := rabbitmq.NewRabbitMQConsumer(
+		connection,
+		rabbitmq.WithRetryPolicy(1, []time.Duration{100 * time.Millisecond}),
+	)
 	t.Cleanup(consumer.Shutdown)
 	retryListener := newIntegrationRetryOnceListener()
 	consumer.RegisterListener(topic, retryListener)
@@ -122,6 +127,65 @@ func TestRabbitMQConsumerRequeuesRetryableFailure(t *testing.T) {
 		t.Fatal("requeued RabbitMQ message body changed between attempts")
 	}
 	assertIntegrationEventBody(t, secondCall.body, event.ID, 7_000_002)
+}
+
+// TestRabbitMQConsumerDeadLettersAfterRetryLimit 验证毒消息达到最大重试次数后
+// 进入 DLQ，不再回到主队列形成无限循环。
+func TestRabbitMQConsumerDeadLettersAfterRetryLimit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	topic := "courseforge.integration.consumer.dlq." + xrand.RandomNumeric(12)
+	trackIntegrationRabbitMQTopology(t, topic)
+	connection, err := rabbitmq.NewConnection(integrationRabbitMQConfig)
+	if err != nil {
+		t.Fatalf("connect RabbitMQ DLQ test: %v", err)
+	}
+	consumer := rabbitmq.NewRabbitMQConsumer(
+		connection,
+		rabbitmq.WithRetryPolicy(
+			2,
+			[]time.Duration{50 * time.Millisecond, 100 * time.Millisecond},
+		),
+	)
+	t.Cleanup(consumer.Shutdown)
+	listener := newIntegrationAlwaysRetryListener(3)
+	consumer.RegisterListener(topic, listener)
+	if err := consumer.Start(ctx); err != nil {
+		t.Fatalf("start RabbitMQ DLQ consumer: %v", err)
+	}
+
+	publisher := newIntegrationTopicPublisher(t, connection)
+	if err := publisher.PublishTopic(ctx, topic, rabbitmq.NewBaseEvent(int64(7_000_003))); err != nil {
+		t.Fatalf("publish poison event: %v", err)
+	}
+	for attempt := 1; attempt <= 3; attempt++ {
+		call := waitIntegrationListenerCall(t, ctx, listener.calls)
+		if call.attempt != attempt || !call.retry || call.err == nil {
+			t.Fatalf("listener call = %#v, want retry attempt %d", call, attempt)
+		}
+	}
+
+	waitIntegrationQueueMessages(t, ctx, connection, topic+"_dlq", 1)
+	inspectionChannel, err := connection.Channel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadLetter, ok, err := inspectionChannel.Get(topic+"_dlq", false)
+	if err != nil {
+		_ = inspectionChannel.Close()
+		t.Fatal(err)
+	}
+	if !ok || headerInt(deadLetter.Headers["x-courseforge-retry-count"]) != 2 {
+		_ = inspectionChannel.Close()
+		t.Fatalf("dead letter retry header = %#v, want 2", deadLetter.Headers)
+	}
+	if err := deadLetter.Ack(false); err != nil {
+		_ = inspectionChannel.Close()
+		t.Fatal(err)
+	}
+	_ = inspectionChannel.Close()
+	waitIntegrationQueueMessages(t, ctx, connection, topic+"_queue", 0)
 }
 
 type integrationListenerCall struct {
@@ -161,6 +225,29 @@ type integrationRetryOnceListener struct {
 	mu       sync.Mutex
 	attempts int
 	calls    chan integrationListenerCall
+}
+
+type integrationAlwaysRetryListener struct {
+	mu       sync.Mutex
+	attempts int
+	calls    chan integrationListenerCall
+}
+
+func newIntegrationAlwaysRetryListener(attempts int) *integrationAlwaysRetryListener {
+	return &integrationAlwaysRetryListener{calls: make(chan integrationListenerCall, attempts)}
+}
+
+func (l *integrationAlwaysRetryListener) Handle(_ context.Context, body []byte) (bool, error) {
+	l.mu.Lock()
+	l.attempts++
+	attempt := l.attempts
+	l.mu.Unlock()
+	call := integrationListenerCall{
+		body: append([]byte(nil), body...), retry: true,
+		err: errors.New("persistent integration failure"), attempt: attempt,
+	}
+	l.calls <- call
+	return call.retry, call.err
 }
 
 func newIntegrationRetryOnceListener() *integrationRetryOnceListener {
@@ -216,11 +303,65 @@ func assertIntegrationEventBody(t *testing.T, body []byte, eventID string, data 
 	}
 }
 
+func waitIntegrationQueueMessages(
+	t *testing.T,
+	ctx context.Context,
+	connection *amqp.Connection,
+	queueName string,
+	want int,
+) {
+	t.Helper()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		channel, err := connection.Channel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		queue, inspectErr := channel.QueueInspect(queueName)
+		_ = channel.Close()
+		if inspectErr == nil && queue.Messages == want {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("queue %s messages did not become %d: %v", queueName, want, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func headerInt(value interface{}) int {
+	switch number := value.(type) {
+	case int8:
+		return int(number)
+	case int16:
+		return int(number)
+	case int32:
+		return int(number)
+	case int64:
+		return int(number)
+	case int:
+		return number
+	default:
+		return -1
+	}
+}
+
 func trackIntegrationRabbitMQTopology(t *testing.T, topic string) {
 	t.Helper()
 	t.Cleanup(func() {
 		if channel, err := integrationRabbitMQConnection.Channel(); err == nil {
 			_, _ = channel.QueueDelete(topic+"_queue", false, false, false)
+			for retry := 1; retry <= 3; retry++ {
+				_, _ = channel.QueueDelete(
+					fmt.Sprintf("%s_retry_%d_queue", topic, retry),
+					false,
+					false,
+					false,
+				)
+			}
+			_, _ = channel.QueueDelete(topic+"_dlq", false, false, false)
 			_ = channel.Close()
 		}
 		if channel, err := integrationRabbitMQConnection.Channel(); err == nil {

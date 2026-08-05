@@ -173,9 +173,11 @@ type RabbitMQListener struct {
 }
 
 type RabbitMQSimple struct {
-	Prefetch           int            `mapstructure:"prefetch"`
-	DefaultConcurrency int            `mapstructure:"default_concurrency"`
-	Concurrency        map[string]int `mapstructure:"concurrency"`
+	Prefetch           int             `mapstructure:"prefetch"`
+	DefaultConcurrency int             `mapstructure:"default_concurrency"`
+	Concurrency        map[string]int  `mapstructure:"concurrency"`
+	MaxRetries         int             `mapstructure:"max_retries"`
+	RetryDelays        []time.Duration `mapstructure:"retry_delays"`
 }
 
 type RabbitMQTopicConfig struct {

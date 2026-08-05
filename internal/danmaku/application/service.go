@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/yywencs/courseforge/internal/danmaku/domain"
+	danmaku "github.com/yywencs/courseforge/internal/danmaku/domain"
 )
 
 // Repository 定义弹幕发布与历史查询用例需要的持久化能力。
@@ -26,6 +26,13 @@ type SegmentLoader func(context.Context) ([]danmaku.Danmaku, error)
 type SegmentCache interface {
 	GetOrLoad(context.Context, uint64, danmaku.HistorySegment, SegmentLoader) ([]danmaku.Danmaku, error)
 	Invalidate(context.Context, uint64, danmaku.HistorySegment) error
+}
+
+// RealtimePublisher 发布一条已经成功持久化的实时弹幕。
+//
+// 发布是尽力而为的旁路行为，具体实现负责处理自身错误和可观测性，不能反向改变
+type RealtimePublisher interface {
+	Publish(context.Context, danmaku.Danmaku)
 }
 
 // PublishCommand 封装一次已认证学生的弹幕发布请求。
@@ -54,6 +61,7 @@ type Service struct {
 	repository Repository
 	videos     VideoReader
 	cache      SegmentCache
+	realtime   RealtimePublisher
 }
 
 // NewService 创建弹幕应用服务。
@@ -71,6 +79,11 @@ type ServiceOption func(*Service)
 // WithSegmentCache 为历史弹幕查询配置分段缓存。
 func WithSegmentCache(cache SegmentCache) ServiceOption {
 	return func(service *Service) { service.cache = cache }
+}
+
+// WithRealtimePublisher 配置弹幕首次持久化成功后的实时发布端口。
+func WithRealtimePublisher(publisher RealtimePublisher) ServiceOption {
+	return func(service *Service) { service.realtime = publisher }
 }
 
 // Publish 同步持久化一条弹幕。
@@ -100,6 +113,7 @@ func (s *Service) Publish(ctx context.Context, command PublishCommand) (*danmaku
 
 	if err := s.repository.Insert(ctx, item); err == nil {
 		s.invalidateSegment(ctx, *item)
+		s.publishRealtime(ctx, *item)
 		return item, nil
 	} else if !errors.Is(err, danmaku.ErrClientMessageExists) {
 		return nil, err
@@ -119,6 +133,12 @@ func (s *Service) Publish(ctx context.Context, command PublishCommand) (*danmaku
 	}
 	s.invalidateSegment(ctx, *existing)
 	return existing, nil
+}
+
+func (s *Service) publishRealtime(ctx context.Context, item danmaku.Danmaku) {
+	if s.realtime != nil {
+		s.realtime.Publish(ctx, item)
+	}
 }
 
 func (s *Service) invalidateSegment(ctx context.Context, item danmaku.Danmaku) {

@@ -65,6 +65,14 @@ type segmentCacheStub struct {
 	segment         danmaku.HistorySegment
 }
 
+type realtimePublisherStub struct {
+	items []danmaku.Danmaku
+}
+
+func (p *realtimePublisherStub) Publish(_ context.Context, item danmaku.Danmaku) {
+	p.items = append(p.items, item)
+}
+
 func (c *segmentCacheStub) GetOrLoad(
 	ctx context.Context,
 	_ uint64,
@@ -119,6 +127,24 @@ func TestPublishPersistsValidatedDanmaku(t *testing.T) {
 	}
 }
 
+func TestPublishRealtimeOnlyAfterFirstSuccessfulInsert(t *testing.T) {
+	repository := &repositoryStub{}
+	publisher := &realtimePublisherStub{}
+	service := NewService(
+		repository,
+		videoReaderStub{video: readyVideo(5000)},
+		WithRealtimePublisher(publisher),
+	)
+	item, err := service.Publish(context.Background(), publishCommand())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(publisher.items) != 1 || publisher.items[0].ID != item.ID ||
+		publisher.items[0].CreateTime != item.CreateTime {
+		t.Fatalf("published items = %#v, want persisted item %#v", publisher.items, item)
+	}
+}
+
 func TestPublishInvalidatesContainingSegmentWithoutFailingOnCacheError(t *testing.T) {
 	repository := &repositoryStub{}
 	segmentCache := &segmentCacheStub{invalidateErr: errors.New("redis unavailable")}
@@ -144,13 +170,21 @@ func TestPublishReturnsExistingDanmakuForMatchingIdempotentRetry(t *testing.T) {
 	}
 	existing.ID = 42
 	repository := &repositoryStub{insertErr: danmaku.ErrClientMessageExists, existing: existing}
-	service := NewService(repository, videoReaderStub{video: readyVideo(5000)})
+	publisher := &realtimePublisherStub{}
+	service := NewService(
+		repository,
+		videoReaderStub{video: readyVideo(5000)},
+		WithRealtimePublisher(publisher),
+	)
 	item, err := service.Publish(context.Background(), publishCommand())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if item.ID != existing.ID {
 		t.Fatalf("id = %d, want %d", item.ID, existing.ID)
+	}
+	if len(publisher.items) != 0 {
+		t.Fatalf("idempotent retry published %d items, want 0", len(publisher.items))
 	}
 }
 

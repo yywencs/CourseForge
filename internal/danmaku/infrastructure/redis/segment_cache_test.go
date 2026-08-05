@@ -1,4 +1,4 @@
-package danmakucache
+package danmakuredis
 
 import (
 	"testing"

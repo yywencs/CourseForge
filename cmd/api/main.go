@@ -31,6 +31,10 @@ func main() {
 
 	logger.Info("starting realtime danmaku hub")
 	app.DanmakuHub().Start()
+	logger.Info("starting realtime danmaku subscriber")
+	if err := app.DanmakuSubscriber().Start(ctx); err != nil {
+		log.Fatalf("start realtime danmaku subscriber: %v", err)
+	}
 
 	// 启动 API HTTP 服务
 	go func() {
@@ -59,6 +63,11 @@ func main() {
 		logger.Error("API server shutdown error", "error", err)
 	} else {
 		logger.Info("API server shut down gracefully")
+	}
+	if err := app.DanmakuSubscriber().Stop(shutdownCtx); err != nil {
+		logger.Error("realtime danmaku subscriber shutdown error", "error", err)
+	} else {
+		logger.Info("realtime danmaku subscriber shut down gracefully")
 	}
 	if err := app.DanmakuHub().Stop(shutdownCtx); err != nil {
 		logger.Error("realtime danmaku hub shutdown error", "error", err)

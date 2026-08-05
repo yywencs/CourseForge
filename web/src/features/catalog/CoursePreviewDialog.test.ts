@@ -3,6 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import CoursePreviewDialog from './CoursePreviewDialog.vue'
 import { listDanmakuSegment, publishDanmaku } from '@/api/danmaku'
+import type { HistoricalDanmaku } from '@/types/danmaku'
+
+const realtimeMock = vi.hoisted(() => ({
+  options: undefined as undefined | { onDanmaku: (item: HistoricalDanmaku) => void },
+  start: vi.fn(),
+  stop: vi.fn(),
+}))
 
 vi.mock('@/api/danmaku', () => ({
   listDanmakuSegment: vi.fn(),
@@ -11,6 +18,13 @@ vi.mock('@/api/danmaku', () => ({
 
 vi.mock('@/utils/requestId', () => ({
   createRequestId: () => 'ec40a0ec-572c-4af5-9067-65f702fa666c',
+}))
+
+vi.mock('@/features/catalog/danmakuRealtime', () => ({
+  createDanmakuRealtimeClient: vi.fn((options) => {
+    realtimeMock.options = options
+    return { start: realtimeMock.start, stop: realtimeMock.stop }
+  }),
 }))
 
 const course = {
@@ -34,6 +48,10 @@ const course = {
 
 describe('CoursePreviewDialog danmaku composer', () => {
   beforeEach(() => {
+    window.sessionStorage.clear()
+    realtimeMock.options = undefined
+    realtimeMock.start.mockReset()
+    realtimeMock.stop.mockReset()
     vi.mocked(listDanmakuSegment).mockReset()
     vi.mocked(listDanmakuSegment).mockImplementation(async (_videoID, segmentIndex) => ({
       segment_index: segmentIndex,
@@ -163,6 +181,62 @@ describe('CoursePreviewDialog danmaku composer', () => {
     await wrapper.get('video').trigger('timeupdate')
     await wrapper.vm.$nextTick()
     await vi.waitFor(() => expect(wrapper.get('.danmaku-item').text()).toBe('快进后的弹幕'))
+    wrapper.unmount()
+  })
+
+  it('starts realtime reception and displays a danmaku near the current position', async () => {
+    window.sessionStorage.setItem('courseforge.student-session', JSON.stringify({
+      accessToken: 'student-token',
+      studentId: 1001,
+    }))
+    const wrapper = mount(CoursePreviewDialog, {
+      props: { modelValue: false, course },
+      global: { stubs: { teleport: true } },
+    })
+
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises()
+    expect(realtimeMock.start).toHaveBeenCalledOnce()
+
+    wrapper.get('video').element.currentTime = 12.5
+    realtimeMock.options?.onDanmaku({
+      id: 21,
+      video_time_ms: 12_345,
+      content: '刚刚收到的实时弹幕',
+      create_time: '2026-08-05T08:01:00.000Z',
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('.danmaku-item').text()).toBe('刚刚收到的实时弹幕')
+    await wrapper.setProps({ modelValue: false })
+    await flushPromises()
+    expect(realtimeMock.stop).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
+
+  it('pauses and resumes active danmaku animations with video playback', async () => {
+    const wrapper = mount(CoursePreviewDialog, {
+      props: { modelValue: false, course },
+      global: { stubs: { teleport: true } },
+    })
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises()
+
+    const layer = wrapper.get('.danmaku-layer')
+    const player = wrapper.get('video').element
+    expect(layer.classes()).toContain('is-paused')
+
+    await player.play()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.danmaku-layer').classes()).not.toContain('is-paused')
+
+    player.pause()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.danmaku-layer').classes()).toContain('is-paused')
+
+    await player.play()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.danmaku-layer').classes()).not.toContain('is-paused')
     wrapper.unmount()
   })
 })

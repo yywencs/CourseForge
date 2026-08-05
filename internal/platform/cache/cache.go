@@ -47,6 +47,8 @@ type rediser interface {
 	Pipeline() redis.Pipeliner
 	Eval(ctx context.Context, script string, keys []string, args ...interface{}) *redis.Cmd
 	Ping(ctx context.Context) *redis.StatusCmd
+	Publish(ctx context.Context, channel string, message interface{}) *redis.IntCmd
+	Subscribe(ctx context.Context, channels ...string) *redis.PubSub
 }
 
 type Item struct {
@@ -131,6 +133,12 @@ type Cache struct {
 
 	hits   uint64
 	misses uint64
+}
+
+// PubSubSubscription 表示一个已经由 Redis 确认的频道订阅。
+type PubSubSubscription interface {
+	Channel(opts ...redis.ChannelOption) <-chan *redis.Message
+	Close() error
 }
 
 func New(opt *Options) *Cache {
@@ -525,6 +533,30 @@ func (cd *Cache) Ping(ctx context.Context) error {
 		return errRedisLocalCacheNil
 	}
 	return cd.opt.Redis.Ping(ctx).Err()
+}
+
+// Publish 向 Redis Pub/Sub 频道发布二进制消息。
+func (cd *Cache) Publish(ctx context.Context, channel string, message []byte) error {
+	if cd == nil || cd.opt == nil || cd.opt.Redis == nil {
+		return errRedisLocalCacheNil
+	}
+	return cd.opt.Redis.Publish(ctx, channel, message).Err()
+}
+
+// Subscribe 订阅 Redis Pub/Sub 频道，并等待 Redis 返回订阅确认。
+func (cd *Cache) Subscribe(
+	ctx context.Context,
+	channels ...string,
+) (PubSubSubscription, error) {
+	if cd == nil || cd.opt == nil || cd.opt.Redis == nil {
+		return nil, errRedisLocalCacheNil
+	}
+	subscription := cd.opt.Redis.Subscribe(ctx, channels...)
+	if _, err := subscription.Receive(ctx); err != nil {
+		_ = subscription.Close()
+		return nil, err
+	}
+	return subscription, nil
 }
 
 // Pipeline returns a Redis pipeline for batch operations.

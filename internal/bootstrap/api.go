@@ -10,7 +10,7 @@ import (
 	cataloghttp "github.com/yywencs/courseforge/internal/catalog/transport/http"
 	danmakuapp "github.com/yywencs/courseforge/internal/danmaku/application"
 	danmakurepo "github.com/yywencs/courseforge/internal/danmaku/infrastructure/mysql"
-	danmakucache "github.com/yywencs/courseforge/internal/danmaku/infrastructure/redis"
+	danmakuredis "github.com/yywencs/courseforge/internal/danmaku/infrastructure/redis"
 	danmakuhttp "github.com/yywencs/courseforge/internal/danmaku/transport/http"
 	danmakuws "github.com/yywencs/courseforge/internal/danmaku/transport/websocket"
 	identityapp "github.com/yywencs/courseforge/internal/identity/application"
@@ -76,14 +76,18 @@ func NewAPIApp() (*HTTPApp, error) {
 	}
 	enrollmentModule := newEnrollmentModule(runtime, studentAuth)
 	danmakuRepository := danmakurepo.NewRepository(runtime.db)
+	danmakuHub := danmakuws.NewHub(0)
+	danmakuSubscriber := danmakuredis.NewRealtimeSubscriber(runtime.redis, danmakuHub)
 	danmakuService := danmakuapp.NewService(
 		danmakuRepository,
 		danmakuRepository,
 		danmakuapp.WithSegmentCache(
-			danmakucache.NewSegmentCache(runtime.redis, danmakucache.DefaultSegmentTTL),
+			danmakuredis.NewSegmentCache(runtime.redis, danmakuredis.DefaultSegmentTTL),
+		),
+		danmakuapp.WithRealtimePublisher(
+			danmakuredis.NewRealtimePublisher(runtime.redis),
 		),
 	)
-	danmakuHub := danmakuws.NewHub(0)
 
 	scheduledHandlers := append(
 		enrollmentModule.scheduledHandlers,
@@ -106,11 +110,12 @@ func NewAPIApp() (*HTTPApp, error) {
 
 	initialized = true
 	return &HTTPApp{
-		Config:           cfg,
-		apiServer:        apiServer,
-		asynqWorker:      asynqWorker,
-		rabbitMQConsumer: runtime.consumer,
-		danmakuHub:       danmakuHub,
+		Config:            cfg,
+		apiServer:         apiServer,
+		asynqWorker:       asynqWorker,
+		rabbitMQConsumer:  runtime.consumer,
+		danmakuHub:        danmakuHub,
+		danmakuSubscriber: danmakuSubscriber,
 	}, nil
 }
 

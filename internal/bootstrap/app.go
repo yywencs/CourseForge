@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	danmakuredis "github.com/yywencs/courseforge/internal/danmaku/infrastructure/redis"
 	danmakuws "github.com/yywencs/courseforge/internal/danmaku/transport/websocket"
 	"github.com/yywencs/courseforge/internal/platform/config"
 	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
@@ -15,11 +16,12 @@ import (
 type HTTPApp struct {
 	Config *config.Config
 
-	apiServer        httpserver.Server
-	adminServer      httpserver.Server
-	asynqWorker      *taskqueue.AsynqWorker
-	rabbitMQConsumer *rabbitmq.RabbitMQConsumer
-	danmakuHub       *danmakuws.Hub
+	apiServer         httpserver.Server
+	adminServer       httpserver.Server
+	asynqWorker       *taskqueue.AsynqWorker
+	rabbitMQConsumer  *rabbitmq.RabbitMQConsumer
+	danmakuHub        *danmakuws.Hub
+	danmakuSubscriber *danmakuredis.RealtimeSubscriber
 }
 
 // APIServer returns the API HTTP server.
@@ -36,3 +38,8 @@ func (a *HTTPApp) RabbitMQConsumer() *rabbitmq.RabbitMQConsumer { return a.rabbi
 
 // DanmakuHub returns the API process-local realtime danmaku connection hub.
 func (a *HTTPApp) DanmakuHub() *danmakuws.Hub { return a.danmakuHub }
+
+// DanmakuSubscriber returns the cross-instance realtime danmaku subscriber.
+func (a *HTTPApp) DanmakuSubscriber() *danmakuredis.RealtimeSubscriber {
+	return a.danmakuSubscriber
+}

@@ -3,6 +3,12 @@ import { ExternalLink, PlayCircle, Send, X } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
 
 import { listDanmakuSegment, publishDanmaku } from '@/api/danmaku'
+import {
+  createDanmakuRealtimeClient,
+  type DanmakuRealtimeClient,
+  type DanmakuRealtimeStatus,
+} from '@/features/catalog/danmakuRealtime'
+import { readStoredAccessToken } from '@/stores/session'
 import type { HistoricalDanmaku, PublishDanmakuRequest } from '@/types/danmaku'
 import type { TeachingClassSummary } from '@/types/enrollment'
 import { createRequestId } from '@/utils/requestId'
@@ -18,6 +24,8 @@ const feedback = shallowRef('')
 const retryRequest = shallowRef<PublishDanmakuRequest>()
 const danmakuEnabled = shallowRef(true)
 const historyFeedback = shallowRef('')
+const realtimeFeedback = shallowRef('')
+const playbackPaused = shallowRef(true)
 
 const segmentDurationMS = 60_000
 const prefetchBeforeEndMS = 10_000
@@ -25,15 +33,18 @@ const danmakuTravelDurationMS = 7_000
 const danmakuLaneCount = 6
 
 const segmentCache = new Map<number, HistoricalDanmaku[]>()
+const realtimeDanmakus = new Map<number, HistoricalDanmaku[]>()
 const loadingSegments = new Map<number, Promise<HistoricalDanmaku[]>>()
 const segmentRetryAt = new Map<number, number>()
 const displayedDanmakuIDs = new Set<number>()
-const activeTimers = new Map<string, number>()
 const activeElements = new Map<string, HTMLSpanElement>()
 const laneAvailableAt = Array.from({ length: danmakuLaneCount }, () => 0)
 let historyGeneration = 0
 let lastPlaybackMS = -1
 let activeSequence = 0
+let accumulatedPausedMS = 0
+let pauseStartedAtMS = performance.now()
+let realtimeClient: DanmakuRealtimeClient | undefined
 
 const isDirectVideo = computed(() =>
   Boolean(props.course?.videoUrl?.match(/\.(mp4|webm)(\?.*)?$/i)),
@@ -49,6 +60,7 @@ watch(open, async (visible) => {
     resetComposer()
     resetDanmakuState()
   } else {
+    stopRealtimeDanmaku()
     resetDanmakuState()
   }
   await nextTick()
@@ -57,6 +69,7 @@ watch(open, async (visible) => {
   if (visible && props.course && !dialog.open) {
     // 原生 modal dialog 自动约束焦点，并在关闭后把焦点还给触发按钮。
     dialog.showModal()
+    startRealtimeDanmaku()
     return
   }
   if (!visible && dialog.open) dialog.close()
@@ -82,20 +95,107 @@ function currentSegmentIndex(videoTimeMS: number): number {
 function resetDanmakuState(): void {
   historyGeneration += 1
   segmentCache.clear()
+  realtimeDanmakus.clear()
   loadingSegments.clear()
   segmentRetryAt.clear()
   displayedDanmakuIDs.clear()
   historyFeedback.value = ''
+  realtimeFeedback.value = ''
   lastPlaybackMS = -1
+  playbackPaused.value = true
+  accumulatedPausedMS = 0
+  pauseStartedAtMS = performance.now()
+  danmakuLayer.value?.classList.add('is-paused')
   clearActiveDanmakus()
 }
 
+function addDanmaku(items: HistoricalDanmaku[], item: HistoricalDanmaku): void {
+  if (items.some((candidate) => candidate.id === item.id)) return
+  items.push(item)
+  items.sort((left, right) => left.video_time_ms - right.video_time_ms || left.id - right.id)
+}
+
+function handleRealtimeStatus(status: DanmakuRealtimeStatus): void {
+  switch (status) {
+    case 'connecting':
+      realtimeFeedback.value = '实时弹幕连接中…'
+      return
+    case 'reconnecting':
+      realtimeFeedback.value = '实时弹幕重连中…'
+      return
+    case 'unavailable':
+      realtimeFeedback.value = '实时弹幕暂时不可用，历史弹幕仍可播放'
+      return
+    case 'connected':
+      realtimeFeedback.value = ''
+  }
+}
+
+function handleRealtimeDanmaku(item: HistoricalDanmaku): void {
+  const segmentIndex = currentSegmentIndex(item.video_time_ms)
+  const received = realtimeDanmakus.get(segmentIndex) ?? []
+  addDanmaku(received, item)
+  realtimeDanmakus.set(segmentIndex, received)
+
+  const cached = segmentCache.get(segmentIndex)
+  if (cached) addDanmaku(cached, item)
+
+  const currentMS = currentVideoTimeMS()
+  if (item.video_time_ms <= currentMS && currentMS - item.video_time_ms <= 2_000) {
+    showDanmaku(item)
+  }
+}
+
+function startRealtimeDanmaku(): void {
+  stopRealtimeDanmaku()
+  const videoID = props.course?.videoId
+  const accessToken = readStoredAccessToken()
+  if (!videoID || !accessToken) return
+  realtimeClient = createDanmakuRealtimeClient({
+    videoId: videoID,
+    accessToken,
+    onDanmaku: handleRealtimeDanmaku,
+    onStatus: handleRealtimeStatus,
+    onError: (message) => { realtimeFeedback.value = message },
+  })
+  realtimeClient.start()
+}
+
+function stopRealtimeDanmaku(): void {
+  realtimeClient?.stop()
+  realtimeClient = undefined
+}
+
 function clearActiveDanmakus(): void {
-  for (const timer of activeTimers.values()) window.clearTimeout(timer)
-  activeTimers.clear()
   activeElements.clear()
   danmakuLayer.value?.replaceChildren()
   laneAvailableAt.fill(0)
+}
+
+function animationClockMS(): number {
+  const wallClockMS = playbackPaused.value ? pauseStartedAtMS : performance.now()
+  return wallClockMS - accumulatedPausedMS
+}
+
+function handlePlay(): void {
+  danmakuLayer.value?.classList.remove('is-paused')
+  if (!playbackPaused.value) return
+  const now = performance.now()
+  accumulatedPausedMS += Math.max(0, now - pauseStartedAtMS)
+  playbackPaused.value = false
+  lastPlaybackMS = currentVideoTimeMS()
+}
+
+function handlePause(): void {
+  danmakuLayer.value?.classList.add('is-paused')
+  if (playbackPaused.value) return
+  pauseStartedAtMS = performance.now()
+  playbackPaused.value = true
+}
+
+function handleEnded(): void {
+  handlePause()
+  clearActiveDanmakus()
 }
 
 function loadSegment(segmentIndex: number): Promise<HistoricalDanmaku[]> {
@@ -120,6 +220,7 @@ function loadSegment(segmentIndex: number): Promise<HistoricalDanmaku[]> {
       const items = [...page.items].sort((left, right) =>
         left.video_time_ms - right.video_time_ms || left.id - right.id,
       )
+      for (const item of realtimeDanmakus.get(segmentIndex) ?? []) addDanmaku(items, item)
       segmentCache.set(segmentIndex, items)
       segmentRetryAt.delete(segmentIndex)
       historyFeedback.value = ''
@@ -147,11 +248,11 @@ function currentVideoTimeMS(): number {
 
 function showDanmaku(item: HistoricalDanmaku): void {
   if (!danmakuEnabled.value || displayedDanmakuIDs.has(item.id)) return
-  displayedDanmakuIDs.add(item.id)
-  const now = performance.now()
+  const now = animationClockMS()
   const lane = laneAvailableAt.findIndex((availableAt) => availableAt <= now)
   if (lane < 0) return
 
+  displayedDanmakuIDs.add(item.id)
   laneAvailableAt[lane] = now + danmakuTravelDurationMS
   const key = `${historyGeneration}-${item.id}-${activeSequence++}`
   const element = document.createElement('span')
@@ -160,12 +261,11 @@ function showDanmaku(item: HistoricalDanmaku): void {
   element.style.top = `${14 + lane * 34}px`
   danmakuLayer.value?.append(element)
   activeElements.set(key, element)
-  const timer = window.setTimeout(() => {
-    activeElements.get(key)?.remove()
+  element.addEventListener('animationend', () => {
+    if (activeElements.get(key) !== element) return
     activeElements.delete(key)
-    activeTimers.delete(key)
-  }, danmakuTravelDurationMS)
-  activeTimers.set(key, timer)
+    element.remove()
+  }, { once: true })
 }
 
 function dispatchDueDanmakus(fromMS: number, toMS: number): void {
@@ -253,10 +353,7 @@ async function submitDanmaku(): Promise<void> {
     }
     const segmentIndex = currentSegmentIndex(historyItem.video_time_ms)
     const cached = segmentCache.get(segmentIndex)
-    if (cached && !cached.some((item) => item.id === historyItem.id)) {
-      cached.push(historyItem)
-      cached.sort((left, right) => left.video_time_ms - right.video_time_ms || left.id - right.id)
-    }
+    if (cached) addDanmaku(cached, historyItem)
     showDanmaku(historyItem)
     content.value = ''
     retryRequest.value = undefined
@@ -278,6 +375,7 @@ function handleBackdropClick(event: MouseEvent): void {
 }
 
 onBeforeUnmount(() => {
+  stopRealtimeDanmaku()
   resetDanmakuState()
   if (previewDialog.value?.open) previewDialog.value.close()
 })
@@ -305,17 +403,26 @@ onBeforeUnmount(() => {
                 :src="course.videoUrl"
                 controls
                 preload="metadata"
+                @playing="handlePlay"
+                @pause="handlePause"
                 @loadedmetadata="handleLoadedMetadata"
                 @timeupdate="handleTimeUpdate"
                 @seeked="handleSeeked"
-                @ended="clearActiveDanmakus"
+                @ended="handleEnded"
               />
-              <div ref="danmakuLayer" class="danmaku-layer" aria-live="off" aria-hidden="true"></div>
+              <div
+                ref="danmakuLayer"
+                class="danmaku-layer is-paused"
+                aria-live="off"
+                aria-hidden="true"
+              ></div>
             </div>
             <form class="danmaku-composer" @submit.prevent="submitDanmaku">
               <header>
                 <label for="danmaku-content">发送弹幕</label>
-                <span v-if="historyFeedback">{{ historyFeedback }}</span>
+                <span v-if="historyFeedback || realtimeFeedback">
+                  {{ historyFeedback || realtimeFeedback }}
+                </span>
                 <button
                   class="danmaku-toggle"
                   type="button"
@@ -443,6 +550,10 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   animation: danmaku-scroll 7s linear forwards;
   will-change: transform;
+}
+
+.danmaku-layer.is-paused :deep(.danmaku-item) {
+  animation-play-state: paused;
 }
 
 @keyframes danmaku-scroll {

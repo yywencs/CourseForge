@@ -71,6 +71,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+.impeccable/
 
 # Develop tools
 .vscode/
@@ -87,6 +88,7 @@ scripts/
 coverage.out
 coverage.html
 *.coverprofile
+/benchmark-results/
 
 docs/prov/
 docs/performance/

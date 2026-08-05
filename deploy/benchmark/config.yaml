@@ -1,0 +1,91 @@
+server:
+  trusted_proxies: [127.0.0.1/8, 172.16.0.0/12]
+  api:
+    addr: 0.0.0.0:8080
+    timeout: 60s
+  admin:
+    addr: 0.0.0.0:8081
+    timeout: 60s
+
+auth:
+  jwt:
+    signing_key: courseforge-benchmark-jwt-key-2026
+    issuer: courseforge
+    audience: courseforge-student
+    administrator_audience: courseforge-administrator
+    clock_skew: 30s
+    token_ttl: 2h
+
+rabbitmq:
+  addresses: rabbitmq
+  port: 5672
+  username: courseforge
+  password: courseforge-benchmark
+  publisher:
+    pool_size: 16
+  listener:
+    simple:
+      prefetch: 8
+      default_concurrency: 4
+      max_retries: 3
+      retry_delays: [1s, 5s, 30s]
+      concurrency:
+        selection_result_queue: 16
+  topic:
+    selection_result: selection_result
+
+data:
+  mysql:
+    dsn: ""
+    courseforge_dsn: root:courseforge-benchmark@tcp(mysql:3306)/courseforge?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s
+    max_open_conns: 100
+    max_idle_conns: 50
+    max_life_time: 1800s
+    max_idle_time: 180s
+    db_count: 1
+    tb_count: 1
+  redis:
+    host: redis
+    port: 6379
+    password: ""
+    db: 0
+    pool_size: 200
+    min_idle_size: 20
+    idle_timeout: 30000
+    connect_timeout: 5000
+    retry_attempts: 3
+    retry_interval: 1000
+    ping_interval: 60000
+    keep_alive: true
+  object_storage:
+    enabled: false
+
+asynq:
+  redis:
+    host: redis
+    port: 6379
+    password: ""
+    db: 1
+    pool_size: 50
+    min_idle_size: 10
+    idle_timeout: 30000
+    connect_timeout: 5000
+    retry_attempts: 3
+    retry_interval: 1000
+    ping_interval: 60000
+    keep_alive: true
+  concurrency: 20
+
+log:
+  level: info
+  filename: /tmp/courseforge-benchmark.log
+  max_size: 100
+  max_backups: 2
+  max_age: 3
+  compress: true
+
+dcc:
+  rate_limit:
+    enabled: false
+  enable_degrade: false
+  black_list: ""

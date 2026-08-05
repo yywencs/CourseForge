@@ -1,0 +1,82 @@
+name: courseforge-benchmark
+
+services:
+  mysql:
+    image: mysql:8.4.6
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: courseforge-benchmark
+      MYSQL_ROOT_HOST: "%"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --max-connections=500
+    ports:
+      - 127.0.0.1:3306:3306
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ../../docs/sql/courseforge.sql:/docker-entrypoint-initdb.d/10-courseforge.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks: [backend]
+
+  redis:
+    image: redis:7.4.9-alpine
+    command: ["redis-server", "--appendonly", "no"]
+    ports:
+      - 127.0.0.1:6379:6379
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [backend]
+
+  rabbitmq:
+    image: rabbitmq:4.2.8-alpine
+    environment:
+      TZ: Asia/Shanghai
+      RABBITMQ_DEFAULT_USER: courseforge
+      RABBITMQ_DEFAULT_PASS: courseforge-benchmark
+    ports:
+      - 127.0.0.1:5672:5672
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks: [backend]
+
+  api:
+    image: crpi-sm40omlac0wou3kp.cn-hangzhou.personal.cr.aliyuncs.com/wen-image/courseforge-api:${IMAGE_TAG:-v1.2.0}
+    restart: unless-stopped
+    init: true
+    ports:
+      - 127.0.0.1:8080:8080
+    volumes:
+      - ./config.yaml:/app/configs/config.yaml:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks: [backend]
+
+networks:
+  backend:
+
+volumes:
+  mysql-data:
+  redis-data:
+  rabbitmq-data:

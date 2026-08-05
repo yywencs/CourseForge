@@ -45,6 +45,37 @@ func IncRabbitMQPublish(topic, result string) {
 	RabbitMQPublishTotal.WithLabelValues(normalizeLabel(topic), normalizeLabel(result)).Inc()
 }
 
+func IncRabbitMQConsume(topic, result string) {
+	RabbitMQConsumeTotal.WithLabelValues(normalizeLabel(topic), normalizeLabel(result)).Inc()
+}
+
+// WebSocketConnectionOpened 记录一条连接成功注册到本机 Hub。
+func WebSocketConnectionOpened() {
+	WebSocketActiveConnections.Inc()
+	WebSocketConnectionsTotal.WithLabelValues("connected").Inc()
+}
+
+// WebSocketConnectionClosed 记录一条已注册连接从本机 Hub 移除。
+func WebSocketConnectionClosed() {
+	WebSocketActiveConnections.Dec()
+	WebSocketConnectionsTotal.WithLabelValues("closed").Inc()
+}
+
+// IncWebSocketBroadcastEvent 记录广播事件进入本机 Hub 的结果。
+func IncWebSocketBroadcastEvent(result string) {
+	WebSocketBroadcastEventsTotal.WithLabelValues(normalizeLabel(result)).Inc()
+}
+
+// IncWebSocketDelivery 记录 Hub 向单个客户端有界队列投递消息的结果。
+func IncWebSocketDelivery(result string) {
+	WebSocketDeliveriesTotal.WithLabelValues(normalizeLabel(result)).Inc()
+}
+
+// IncDanmakuSubscriberReconnect 记录 Redis 实时弹幕订阅的重连结果。
+func IncDanmakuSubscriberReconnect(result string) {
+	DanmakuSubscriberReconnectTotal.WithLabelValues(normalizeLabel(result)).Inc()
+}
+
 func IncRedisOp(cmd, result string) {
 	RedisOpsTotal.WithLabelValues(normalizeLabel(cmd), normalizeLabel(result)).Inc()
 }

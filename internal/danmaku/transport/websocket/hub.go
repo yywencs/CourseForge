@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"sync"
+
+	"github.com/yywencs/courseforge/internal/platform/observability/metrics"
 )
 
 const defaultBroadcastQueueSize = 256
@@ -120,16 +122,20 @@ func (h *Hub) Broadcast(videoID uint64, payload []byte) error {
 	event := broadcastEvent{videoID: videoID, payload: bytes.Clone(payload)}
 	select {
 	case <-h.stopping:
+		metrics.IncWebSocketBroadcastEvent("hub_stopped")
 		return ErrHubStopped
 	default:
 	}
 
 	select {
 	case h.broadcast <- event:
+		metrics.IncWebSocketBroadcastEvent("accepted")
 		return nil
 	case <-h.stopping:
+		metrics.IncWebSocketBroadcastEvent("hub_stopped")
 		return ErrHubStopped
 	default:
+		metrics.IncWebSocketBroadcastEvent("queue_full")
 		return ErrBroadcastQueueFull
 	}
 }
@@ -159,10 +165,15 @@ func (h *Hub) run() {
 
 		select {
 		case request := <-h.register:
-			request.result <- h.connections.Add(request.client)
+			firstForVideo := h.connections.Add(request.client)
+			metrics.WebSocketConnectionOpened()
+			request.result <- firstForVideo
 		case request := <-h.unregister:
 			removed, videoEmpty := h.connections.Remove(request.client)
 			request.client.close()
+			if removed {
+				metrics.WebSocketConnectionClosed()
+			}
 			request.result <- unregisterResult{removed: removed, videoEmpty: videoEmpty}
 		case event := <-h.broadcast:
 			h.broadcastToVideo(event)
@@ -181,8 +192,10 @@ func (h *Hub) broadcastToVideo(event broadcastEvent) {
 	for _, client := range clients {
 		select {
 		case client.send <- event.payload:
+			metrics.IncWebSocketDelivery("queued")
 		default:
 			// 单个慢连接不能阻塞同一视频的其他连接或整个 Hub。
+			metrics.IncWebSocketDelivery("client_queue_full")
 		}
 	}
 }
@@ -190,5 +203,6 @@ func (h *Hub) broadcastToVideo(event broadcastEvent) {
 func (h *Hub) shutdown() {
 	for _, client := range h.connections.Drain() {
 		client.close()
+		metrics.WebSocketConnectionClosed()
 	}
 }

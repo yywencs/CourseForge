@@ -11,6 +11,10 @@ import (
 	"github.com/yywencs/courseforge/internal/danmaku/domain"
 	danmakurealtime "github.com/yywencs/courseforge/internal/danmaku/infrastructure/realtime"
 	platformcache "github.com/yywencs/courseforge/internal/platform/cache"
+	platformmetrics "github.com/yywencs/courseforge/internal/platform/observability/metrics"
+
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 )
 
 type subscriptionStub struct {
@@ -47,6 +51,31 @@ func (s *messageSubscriberStub) Subscribe(
 ) (platformcache.PubSubSubscription, error) {
 	s.channels = append([]string(nil), channels...)
 	return s.subscription, s.err
+}
+
+type subscribeResult struct {
+	subscription platformcache.PubSubSubscription
+	err          error
+}
+
+type sequencedMessageSubscriberStub struct {
+	mu      sync.Mutex
+	results []subscribeResult
+	calls   int
+}
+
+func (s *sequencedMessageSubscriberStub) Subscribe(
+	_ context.Context,
+	_ ...string,
+) (platformcache.PubSubSubscription, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	index := s.calls
+	s.calls++
+	if index >= len(s.results) {
+		return nil, errors.New("unexpected subscribe call")
+	}
+	return s.results[index].subscription, s.results[index].err
 }
 
 type broadcastRecord struct {
@@ -170,6 +199,121 @@ func TestRealtimeSubscriberStopClosesSubscription(t *testing.T) {
 	}
 }
 
+func TestRealtimeSubscriberReconnectsWithExponentialBackoff(t *testing.T) {
+	attemptsBefore := prometheusMetricValue(t,
+		platformmetrics.DanmakuSubscriberReconnectTotal.WithLabelValues("attempt"),
+	)
+	failuresBefore := prometheusMetricValue(t,
+		platformmetrics.DanmakuSubscriberReconnectTotal.WithLabelValues("failure"),
+	)
+	successesBefore := prometheusMetricValue(t,
+		platformmetrics.DanmakuSubscriberReconnectTotal.WithLabelValues("success"),
+	)
+	initial := newSubscriptionStub()
+	reconnected := newSubscriptionStub()
+	client := &sequencedMessageSubscriberStub{results: []subscribeResult{
+		{subscription: initial},
+		{err: errors.New("redis unavailable 1")},
+		{err: errors.New("redis unavailable 2")},
+		{subscription: reconnected},
+	}}
+	broadcaster := &broadcasterStub{records: make(chan broadcastRecord, 1)}
+	subscriber := NewRealtimeSubscriber(client, broadcaster)
+	waits := make(chan time.Duration, 3)
+	subscriber.retryInitialDelay = 10 * time.Millisecond
+	subscriber.retryMaxDelay = 30 * time.Millisecond
+	subscriber.retryJitter = func(delay time.Duration) time.Duration {
+		return delay * 3 / 4
+	}
+	subscriber.retryWait = func(ctx context.Context, delay time.Duration) bool {
+		select {
+		case waits <- delay:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	if err := subscriber.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	stopSubscriber(t, subscriber)
+
+	close(initial.messages)
+	for index, want := range []time.Duration{
+		7500 * time.Microsecond,
+		15 * time.Millisecond,
+		22500 * time.Microsecond,
+	} {
+		select {
+		case got := <-waits:
+			if got != want {
+				t.Fatalf("retry wait %d = %v, want %v", index+1, got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for retry wait %d", index+1)
+		}
+	}
+
+	payload, err := danmakurealtime.MarshalPublished(danmaku.Danmaku{
+		ID: 90, VideoID: 9, CreateTime: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconnected.messages <- &redis.Message{
+		Channel: RealtimePublishedChannel,
+		Payload: string(payload),
+	}
+	select {
+	case record := <-broadcaster.records:
+		if record.videoID != 9 {
+			t.Fatalf("video id = %d, want 9", record.videoID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for broadcast after reconnect")
+	}
+	if got := prometheusMetricValue(t,
+		platformmetrics.DanmakuSubscriberReconnectTotal.WithLabelValues("attempt"),
+	); got != attemptsBefore+3 {
+		t.Fatalf("reconnect attempts = %v, want %v", got, attemptsBefore+3)
+	}
+	if got := prometheusMetricValue(t,
+		platformmetrics.DanmakuSubscriberReconnectTotal.WithLabelValues("failure"),
+	); got != failuresBefore+2 {
+		t.Fatalf("reconnect failures = %v, want %v", got, failuresBefore+2)
+	}
+	if got := prometheusMetricValue(t,
+		platformmetrics.DanmakuSubscriberReconnectTotal.WithLabelValues("success"),
+	); got != successesBefore+1 {
+		t.Fatalf("reconnect successes = %v, want %v", got, successesBefore+1)
+	}
+
+	select {
+	case <-initial.closed:
+	default:
+		t.Fatal("interrupted subscription was not closed")
+	}
+}
+
+func TestEqualJitterRealtimeSubscriberRetryStaysWithinHalfAndFullDelay(t *testing.T) {
+	delay := 30 * time.Second
+	for range 100 {
+		got := equalJitterRealtimeSubscriberRetry(delay)
+		if got < delay/2 || got > delay {
+			t.Fatalf("jittered retry delay = %v, want within [%v, %v]", got, delay/2, delay)
+		}
+	}
+}
+
+func TestNextRealtimeSubscriberRetryDelayCapsAtMaximum(t *testing.T) {
+	if got := nextRealtimeSubscriberRetryDelay(16*time.Second, 30*time.Second); got != 30*time.Second {
+		t.Fatalf("next retry delay = %v, want 30s", got)
+	}
+	if got := nextRealtimeSubscriberRetryDelay(30*time.Second, 30*time.Second); got != 30*time.Second {
+		t.Fatalf("capped retry delay = %v, want 30s", got)
+	}
+}
+
 func stopSubscriber(t *testing.T, subscriber *RealtimeSubscriber) {
 	t.Helper()
 	t.Cleanup(func() {
@@ -179,4 +323,16 @@ func stopSubscriber(t *testing.T, subscriber *RealtimeSubscriber) {
 			t.Errorf("Stop() error = %v", err)
 		}
 	})
+}
+
+func prometheusMetricValue(t *testing.T, metric prometheus.Metric) float64 {
+	t.Helper()
+	value := &dto.Metric{}
+	if err := metric.Write(value); err != nil {
+		t.Fatalf("write Prometheus metric: %v", err)
+	}
+	if value.Gauge != nil {
+		return value.GetGauge().GetValue()
+	}
+	return value.GetCounter().GetValue()
 }

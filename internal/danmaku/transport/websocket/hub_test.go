@@ -5,6 +5,11 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	platformmetrics "github.com/yywencs/courseforge/internal/platform/observability/metrics"
+
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 )
 
 const hubTestTimeout = time.Second
@@ -40,6 +45,12 @@ func TestHubBroadcastsOnlyToRequestedVideo(t *testing.T) {
 }
 
 func TestHubDoesNotBlockOnSlowConnection(t *testing.T) {
+	queuedBefore := prometheusMetricValue(t,
+		platformmetrics.WebSocketDeliveriesTotal.WithLabelValues("queued"),
+	)
+	droppedBefore := prometheusMetricValue(t,
+		platformmetrics.WebSocketDeliveriesTotal.WithLabelValues("client_queue_full"),
+	)
 	hub := NewHub(4)
 	hub.Start()
 	t.Cleanup(func() { stopHub(t, hub) })
@@ -62,15 +73,40 @@ func TestHubDoesNotBlockOnSlowConnection(t *testing.T) {
 	if got := <-slow.send; string(got) != "already-full" {
 		t.Fatalf("slow client payload = %q, want existing queued payload", got)
 	}
+	if got := prometheusMetricValue(t,
+		platformmetrics.WebSocketDeliveriesTotal.WithLabelValues("queued"),
+	); got != queuedBefore+1 {
+		t.Fatalf("queued deliveries = %v, want %v", got, queuedBefore+1)
+	}
+	if got := prometheusMetricValue(t,
+		platformmetrics.WebSocketDeliveriesTotal.WithLabelValues("client_queue_full"),
+	); got != droppedBefore+1 {
+		t.Fatalf("dropped deliveries = %v, want %v", got, droppedBefore+1)
+	}
 }
 
 func TestHubUnregisterClosesConnection(t *testing.T) {
+	activeBefore := prometheusMetricValue(t, platformmetrics.WebSocketActiveConnections)
+	connectedBefore := prometheusMetricValue(t,
+		platformmetrics.WebSocketConnectionsTotal.WithLabelValues("connected"),
+	)
+	closedBefore := prometheusMetricValue(t,
+		platformmetrics.WebSocketConnectionsTotal.WithLabelValues("closed"),
+	)
 	hub := NewHub(4)
 	hub.Start()
 	t.Cleanup(func() { stopHub(t, hub) })
 	client := newTestClientConn(1, 101, 1)
 	if _, err := hub.Register(context.Background(), client); err != nil {
 		t.Fatal(err)
+	}
+	if got := prometheusMetricValue(t, platformmetrics.WebSocketActiveConnections); got != activeBefore+1 {
+		t.Fatalf("active connections after register = %v, want %v", got, activeBefore+1)
+	}
+	if got := prometheusMetricValue(t,
+		platformmetrics.WebSocketConnectionsTotal.WithLabelValues("connected"),
+	); got != connectedBefore+1 {
+		t.Fatalf("connected events = %v, want %v", got, connectedBefore+1)
 	}
 
 	removed, videoEmpty, err := hub.Unregister(context.Background(), client)
@@ -83,6 +119,14 @@ func TestHubUnregisterClosesConnection(t *testing.T) {
 		)
 	}
 	assertClientClosed(t, client)
+	if got := prometheusMetricValue(t, platformmetrics.WebSocketActiveConnections); got != activeBefore {
+		t.Fatalf("active connections after unregister = %v, want %v", got, activeBefore)
+	}
+	if got := prometheusMetricValue(t,
+		platformmetrics.WebSocketConnectionsTotal.WithLabelValues("closed"),
+	); got != closedBefore+1 {
+		t.Fatalf("closed events = %v, want %v", got, closedBefore+1)
+	}
 
 	if err := hub.Broadcast(101, []byte("after-unregister")); err != nil {
 		t.Fatalf("Broadcast() error = %v", err)
@@ -91,12 +135,28 @@ func TestHubUnregisterClosesConnection(t *testing.T) {
 }
 
 func TestHubBroadcastQueueIsBounded(t *testing.T) {
+	acceptedBefore := prometheusMetricValue(t,
+		platformmetrics.WebSocketBroadcastEventsTotal.WithLabelValues("accepted"),
+	)
+	fullBefore := prometheusMetricValue(t,
+		platformmetrics.WebSocketBroadcastEventsTotal.WithLabelValues("queue_full"),
+	)
 	hub := NewHub(1)
 	if err := hub.Broadcast(101, []byte("first")); err != nil {
 		t.Fatalf("first Broadcast() error = %v", err)
 	}
 	if err := hub.Broadcast(101, []byte("second")); !errors.Is(err, ErrBroadcastQueueFull) {
 		t.Fatalf("second Broadcast() error = %v, want ErrBroadcastQueueFull", err)
+	}
+	if got := prometheusMetricValue(t,
+		platformmetrics.WebSocketBroadcastEventsTotal.WithLabelValues("accepted"),
+	); got != acceptedBefore+1 {
+		t.Fatalf("accepted broadcast events = %v, want %v", got, acceptedBefore+1)
+	}
+	if got := prometheusMetricValue(t,
+		platformmetrics.WebSocketBroadcastEventsTotal.WithLabelValues("queue_full"),
+	); got != fullBefore+1 {
+		t.Fatalf("full broadcast events = %v, want %v", got, fullBefore+1)
 	}
 	stopHub(t, hub)
 }
@@ -167,4 +227,16 @@ func stopHub(t *testing.T, hub *Hub) {
 	if err := hub.Stop(ctx); err != nil {
 		t.Fatalf("Stop() error = %v", err)
 	}
+}
+
+func prometheusMetricValue(t *testing.T, metric prometheus.Metric) float64 {
+	t.Helper()
+	value := &dto.Metric{}
+	if err := metric.Write(value); err != nil {
+		t.Fatalf("write Prometheus metric: %v", err)
+	}
+	if value.Gauge != nil {
+		return value.GetGauge().GetValue()
+	}
+	return value.GetCounter().GetValue()
 }

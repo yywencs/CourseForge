@@ -107,6 +107,65 @@ var (
 		[]string{"topic", "result"},
 	)
 
+	RabbitMQConsumeTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricNamespace,
+			Subsystem: "rabbitmq",
+			Name:      "consume_total",
+			Help:      "Total RabbitMQ consumer outcomes.",
+		},
+		[]string{"topic", "result"},
+	)
+
+	WebSocketActiveConnections = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: metricNamespace,
+			Subsystem: "websocket",
+			Name:      "active_connections",
+			Help:      "Current number of active WebSocket connections.",
+		},
+	)
+
+	WebSocketConnectionsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricNamespace,
+			Subsystem: "websocket",
+			Name:      "connections_total",
+			Help:      "Total WebSocket connection lifecycle events.",
+		},
+		[]string{"event"},
+	)
+
+	WebSocketBroadcastEventsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricNamespace,
+			Subsystem: "websocket",
+			Name:      "broadcast_events_total",
+			Help:      "Total WebSocket broadcast events submitted to the local hub.",
+		},
+		[]string{"result"},
+	)
+
+	WebSocketDeliveriesTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricNamespace,
+			Subsystem: "websocket",
+			Name:      "deliveries_total",
+			Help:      "Total WebSocket payload delivery attempts to client queues.",
+		},
+		[]string{"result"},
+	)
+
+	DanmakuSubscriberReconnectTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricNamespace,
+			Subsystem: "danmaku",
+			Name:      "subscriber_reconnect_total",
+			Help:      "Total Redis danmaku subscriber reconnect outcomes.",
+		},
+		[]string{"result"},
+	)
+
 	OutboxDispatchTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metricNamespace,
@@ -283,6 +342,12 @@ func init() {
 		WaitlistPromotionTotal,
 		ProjectionRepairPending,
 		RabbitMQPublishTotal,
+		RabbitMQConsumeTotal,
+		WebSocketActiveConnections,
+		WebSocketConnectionsTotal,
+		WebSocketBroadcastEventsTotal,
+		WebSocketDeliveriesTotal,
+		DanmakuSubscriberReconnectTotal,
 		OutboxDispatchTotal,
 		OutboxDispatchDuration,
 		RedisOpsTotal,

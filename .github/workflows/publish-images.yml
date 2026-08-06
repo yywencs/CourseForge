@@ -2,8 +2,6 @@ name: Publish images
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*"
 
@@ -17,9 +15,21 @@ concurrency:
 env:
   REGISTRY: ${{ vars.ACR_REGISTRY }}
   NAMESPACE: ${{ vars.ACR_NAMESPACE }}
-  IMAGE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('sha-{0}', github.sha) }}
+  IMAGE_TAG: ${{ github.ref_name }}
 
 jobs:
+  validate-tag:
+    name: Validate version tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate semantic version
+        shell: bash
+        run: |
+          [[ "${IMAGE_TAG}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
+            || { echo "invalid release tag: ${IMAGE_TAG}"; exit 1; }
+
   check:
     name: Backend Check
     runs-on: ubuntu-latest
@@ -121,6 +131,7 @@ jobs:
   publish:
     name: Publish ${{ matrix.image }}
     needs:
+      - validate-tag
       - check
       - frontend-check
       - frontend-e2e
@@ -183,13 +194,3 @@ jobs:
             org.opencontainers.image.version=${{ env.IMAGE_TAG }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
-
-  deploy-main:
-    name: Deploy main to production
-    if: github.ref == 'refs/heads/main'
-    needs:
-      - publish
-    uses: ./.github/workflows/deploy-production.yml
-    with:
-      image_tag: sha-${{ github.sha }}
-    secrets: inherit

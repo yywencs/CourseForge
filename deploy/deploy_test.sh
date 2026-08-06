@@ -95,24 +95,6 @@ test_successful_deployment() {
 	grep -q 'up -d api admin web' "${TEST_DOCKER_LOG}"
 }
 
-test_successful_sha_deployment() {
-	local fixture_path
-	fixture_path="$(new_fixture success-sha)"
-	TEST_DOCKER_LOG="${fixture_path}/docker.log"
-	TEST_DOCKER_FAIL_ON=""
-	TEST_HEALTH_RESULT=success
-	TEST_SMOKE_RESULT=success
-	TEST_EXISTING_WEB_ID=existing-web-container
-	export TEST_DOCKER_LOG TEST_DOCKER_FAIL_ON TEST_HEALTH_RESULT TEST_SMOKE_RESULT
-	export TEST_EXISTING_WEB_ID
-
-	local image_tag="sha-0123456789abcdef0123456789abcdef01234567"
-	HEALTHCHECK_ATTEMPTS=1 HEALTHCHECK_INTERVAL_SECONDS=0 \
-		"${DEPLOY_SCRIPT}" "${image_tag}" "${fixture_path}"
-
-	assert_image_tag "${fixture_path}" "${image_tag}"
-}
-
 test_pull_failure_keeps_previous_tag() {
 	local case_spec case_name failure_pattern fixture_path
 	for case_spec in \
@@ -231,7 +213,6 @@ test_invalid_tag_is_rejected() {
 }
 
 test_successful_deployment
-test_successful_sha_deployment
 test_pull_failure_keeps_previous_tag
 test_failed_deployment_rolls_back
 test_failed_business_smoke_rolls_back

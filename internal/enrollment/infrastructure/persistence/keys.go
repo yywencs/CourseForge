@@ -28,10 +28,30 @@ func applicationLookupKey(applicationID string) string {
 	return fmt.Sprintf("courseforge:selection:application:%s", applicationID)
 }
 
-func selectedCourseGuardKey(termID, studentID, courseID uint64) string {
-	return fmt.Sprintf("courseforge:selection:course:%d:%d:%d", termID, studentID, courseID)
-}
-
 func droppedEnrollmentKey(enrollmentID string) string {
 	return fmt.Sprintf("courseforge:selection:dropped:%s", enrollmentID)
+}
+
+func roundSnapshotKey(roundID uint64, version string) string {
+	return fmt.Sprintf("courseforge:selection:round:%d:%s", roundID, version)
+}
+
+func roundOpenVersionKey(roundID uint64) string {
+	return fmt.Sprintf("courseforge:selection:round:%d:open_version", roundID)
+}
+
+func teachingClassSnapshotKey(roundID uint64, version string, teachingClassID uint64) string {
+	return fmt.Sprintf("courseforge:selection:class:%d:%s:%d", roundID, version, teachingClassID)
+}
+
+func teachingClassScheduleKey(teachingClassID uint64) string {
+	return fmt.Sprintf("courseforge:selection:class:schedule:%d", teachingClassID)
+}
+
+func studentScheduleKey(roundID, studentID uint64) string {
+	return fmt.Sprintf("courseforge:selection:student:schedule:%d:%d", roundID, studentID)
+}
+
+func studentCourseSelectionKey(roundID, studentID uint64) string {
+	return fmt.Sprintf("courseforge:selection:student:courses:%d:%d", roundID, studentID)
 }

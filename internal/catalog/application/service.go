@@ -38,6 +38,15 @@ func WithVideoStorage(storage ObjectStorage, policy VideoPolicy) ServiceOption {
 	}
 }
 
+// StudentEligibilityFilter 隔离 Catalog 与选课模块的具体缓存实现。
+type StudentEligibilityFilter interface {
+	ListEligibleClassIDs(context.Context, uint64, uint64) ([]uint64, bool, error)
+}
+
+func WithStudentEligibilityFilter(filter StudentEligibilityFilter) ServiceOption {
+	return func(service *Service) { service.eligibilityFilter = filter }
+}
+
 type CourseInput struct {
 	CourseCode   string
 	CourseName   string
@@ -75,16 +84,20 @@ func (i TeachingClassInput) plan() domain.TeachingClassPlan {
 }
 
 type StudentCatalogQuery struct {
-	RoundID uint64
-	Keyword string
+	RoundID             uint64
+	StudentID           uint64
+	Keyword             string
+	EligibleClassIDs    []uint64
+	EligibilityFiltered bool
 }
 
 type Service struct {
-	repository    Repository
-	objectStorage ObjectStorage
-	videoPolicy   VideoPolicy
-	now           func() time.Time
-	newObjectKey  func(uint64) (string, error)
+	repository        Repository
+	objectStorage     ObjectStorage
+	videoPolicy       VideoPolicy
+	now               func() time.Time
+	newObjectKey      func(uint64) (string, error)
+	eligibilityFilter StudentEligibilityFilter
 }
 
 func NewService(repository Repository, options ...ServiceOption) *Service {
@@ -572,6 +585,19 @@ func (s *Service) ListTeachingClasses(ctx context.Context, termID uint64, keywor
 }
 
 func (s *Service) ListStudentCatalog(ctx context.Context, query StudentCatalogQuery) ([]TeachingClassView, error) {
+	if s.eligibilityFilter != nil && query.StudentID != 0 {
+		classIDs, ready, err := s.eligibilityFilter.ListEligibleClassIDs(ctx, query.RoundID, query.StudentID)
+		if err != nil {
+			return nil, err
+		}
+		if ready {
+			if len(classIDs) == 0 {
+				return []TeachingClassView{}, nil
+			}
+			query.EligibleClassIDs = classIDs
+			query.EligibilityFiltered = true
+		}
+	}
 	return s.repository.ListStudentCatalog(ctx, query)
 }
 

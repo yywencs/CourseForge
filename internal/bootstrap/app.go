@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"github.com/hibiken/asynq"
 	danmakuredis "github.com/yywencs/courseforge/internal/danmaku/infrastructure/redis"
 	danmakuws "github.com/yywencs/courseforge/internal/danmaku/transport/websocket"
 	"github.com/yywencs/courseforge/internal/platform/config"
@@ -11,8 +12,8 @@ import (
 
 // HTTPApp holds the wired application dependencies.
 //
-// Admin 只连接 CourseForge MySQL；API 额外装配选课所需的 Redis、
-// RabbitMQ、Asynq worker 和 RabbitMQ consumer。
+// Admin 连接 MySQL、Redis 和 Asynq 以管理轮次预热；API 额外装配
+// RabbitMQ、Asynq worker 与实时弹幕组件。
 type HTTPApp struct {
 	Config *config.Config
 
@@ -22,6 +23,15 @@ type HTTPApp struct {
 	rabbitMQConsumer  *rabbitmq.RabbitMQConsumer
 	danmakuHub        *danmakuws.Hub
 	danmakuSubscriber *danmakuredis.RealtimeSubscriber
+	asynqClient       *asynq.Client
+}
+
+// Close 释放仅用于投递任务的 Asynq 客户端。
+func (a *HTTPApp) Close() error {
+	if a == nil || a.asynqClient == nil {
+		return nil
+	}
+	return a.asynqClient.Close()
 }
 
 // APIServer returns the API HTTP server.

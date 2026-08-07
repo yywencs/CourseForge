@@ -93,6 +93,36 @@ async function addBinding(id: number): Promise<void> {
 async function removeBinding(id: number): Promise<void> {
   try { await admin.removeBinding(id); ElMessage.success('教学班已移出轮次') } catch (error) { showError(error, '移出轮次失败') }
 }
+async function warmupRound(item: SelectionRound): Promise<void> {
+  try {
+    await admin.warmupRound(item.id)
+    ElMessage.success('资格预热任务已提交')
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1000))
+      const status = await admin.refreshWarmupStatus(item.id)
+      if (status?.state === 'ready') {
+        ElMessage.success(`资格预热完成，共生成 ${status.eligible_count} 条资格关系`)
+        return
+      }
+      if (status?.state === 'failed') {
+        throw new Error(status.error_message || '资格预热失败')
+      }
+    }
+    ElMessage.info('资格预热仍在后台执行，可稍后刷新状态')
+  } catch (error) {
+    showError(error, '资格预热提交失败')
+  }
+}
+async function openRound(item: SelectionRound): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`确定开放“${item.round_name}”吗？开放后将不能再修改配置。`, '开放选课轮次', { type: 'warning' })
+    await admin.openRound(item.id)
+    ElMessage.success('选课轮次已开放')
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return
+    showError(error, '开放轮次失败')
+  }
+}
 function showError(error: unknown, fallback: string): void {
   ElMessage.error(error instanceof Error ? error.message : fallback)
 }
@@ -116,9 +146,10 @@ async function refresh(): Promise<void> {
     </div>
 
     <CatalogRecords
-      :mode="section" :courses="visibleCourses" :teaching-classes="visibleClasses" :rounds="visibleRounds"
+      :mode="section" :courses="visibleCourses" :teaching-classes="visibleClasses" :rounds="visibleRounds" :warmup-statuses="admin.warmupStatuses.value"
       @edit-course="editCourse" @edit-class="editClass" @edit-round="editRound" @manage-round="manageRound"
       @manage-course-video="manageCourseVideo"
+      @warmup-round="warmupRound" @open-round="openRound"
       @delete-course="(item) => confirmDelete('课程', item.course_name, () => admin.removeCourse(item.id))"
       @delete-class="(item) => confirmDelete('教学班', item.class_code, () => admin.removeTeachingClass(item.id))"
       @delete-round="(item) => confirmDelete('选课轮次', item.round_name, () => admin.removeRound(item.id))"

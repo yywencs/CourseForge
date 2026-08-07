@@ -21,6 +21,7 @@ type enrollmentRepositoryFixture struct {
 	*enrollmentrepo.ProjectionStore
 	*enrollmentrepo.RepairStore
 	*enrollmentrepo.WaitlistStore
+	*enrollmentrepo.EligibilityIndex
 }
 
 func newEnrollmentRepositoryFixture(
@@ -37,5 +38,6 @@ func newEnrollmentRepositoryFixture(
 		ProjectionStore:  stores.Projections,
 		RepairStore:      stores.Repairs,
 		WaitlistStore:    stores.Waitlist,
+		EligibilityIndex: stores.EligibilityIndex,
 	}
 }

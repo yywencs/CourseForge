@@ -6,6 +6,22 @@ import (
 	"time"
 )
 
+func TestSelectionRoundOpenRequiresClassesAndQuotas(t *testing.T) {
+	round := &SelectionRound{ID: 1, State: SelectionRoundStatePlanned}
+	if err := round.Open(SelectionRoundUsage{ClassBindingCount: 1}, true); !errors.Is(err, ErrRoundConfigurationEmpty) {
+		t.Fatalf("Open() error = %v, want %v", err, ErrRoundConfigurationEmpty)
+	}
+	if err := round.Open(SelectionRoundUsage{ClassBindingCount: 1, QuotaCount: 1}, false); !errors.Is(err, ErrRoundNotReady) {
+		t.Fatalf("Open() error = %v, want %v", err, ErrRoundNotReady)
+	}
+	if err := round.Open(SelectionRoundUsage{ClassBindingCount: 1, QuotaCount: 1}, true); err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if round.State != SelectionRoundStateOpen {
+		t.Fatalf("round state = %s", round.State)
+	}
+}
+
 func TestSelectionRoundOwnsChangeDeleteAndBindingRules(t *testing.T) {
 	round := validManagedRound()
 	changed := validRoundPlan()

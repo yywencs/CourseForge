@@ -15,10 +15,8 @@ type fakeEnrollmentRepository struct {
 	class             *enrollment.TeachingClass
 	quota             *enrollment.StudentSelectionQuota
 	active            bool
-	eligibility       *enrollment.EligibilitySnapshot
 	existing          bool
-	reserved          *enrollment.SelectionApplication
-	completed         *enrollment.SelectionResult
+	committed         *enrollment.SelectionResult
 	applicationRecord *SelectionApplicationRecord
 	enrollmentPage    *enrollment.EnrollmentPage
 }
@@ -53,71 +51,24 @@ func (f *fakeEnrollmentRepository) QuerySelectionByRequest(
 	return f.lookup, nil
 }
 
-func (f *fakeEnrollmentRepository) QuerySelectionRound(
-	context.Context,
-	uint64,
-) (*enrollment.SelectionRound, error) {
-	return f.round, nil
-}
-
-func (f *fakeEnrollmentRepository) QueryTeachingClass(
-	context.Context,
-	uint64,
-	uint64,
-) (*enrollment.TeachingClass, error) {
-	return f.class, nil
-}
-
-func (f *fakeEnrollmentRepository) QueryStudentSelectionQuota(
-	context.Context,
-	uint64,
-	uint64,
-) (*enrollment.StudentSelectionQuota, error) {
-	return f.quota, nil
-}
-
-func (f *fakeEnrollmentRepository) IsStudentActive(context.Context, uint64) (bool, error) {
-	return f.active, nil
-}
-
-func (f *fakeEnrollmentRepository) QueryEligibilitySnapshot(
-	context.Context,
-	uint64,
-	uint64,
-	uint64,
-	uint64,
-) (*enrollment.EligibilitySnapshot, error) {
-	return f.eligibility, nil
-}
-
-func (f *fakeEnrollmentRepository) HasExistingEnrollment(
-	context.Context,
-	uint64,
-	uint64,
-	uint64,
-) (bool, error) {
-	return f.existing, nil
-}
-
-func (f *fakeEnrollmentRepository) ReserveSelection(
-	_ context.Context,
-	application *enrollment.SelectionApplication,
-) (*SelectionReservation, error) {
-	if err := application.Reserve(); err != nil {
-		return nil, err
-	}
-	f.reserved = application
-	return &SelectionReservation{
-		Status:      ReservationStatusAcquired,
-		Application: application,
+func (f *fakeEnrollmentRepository) QuerySelectionAdmission(
+	context.Context, uint64, uint64, uint64, time.Time,
+) (*SelectionAdmissionSnapshot, error) {
+	return &SelectionAdmissionSnapshot{
+		Round:                f.round,
+		Class:                f.class,
+		Eligible:             f.active,
+		ExistingEnrollment:   f.existing,
+		CreditRemaining:      f.quota.CreditLimit - f.quota.SelectedCredits,
+		CourseQuotaRemaining: int64(f.quota.CourseLimit) - int64(f.quota.SelectedCourseCount),
 	}, nil
 }
 
-func (f *fakeEnrollmentRepository) CompleteSelection(
+func (f *fakeEnrollmentRepository) CommitSelection(
 	_ context.Context,
 	result *enrollment.SelectionResult,
 ) (*SelectionResultPublication, error) {
-	f.completed = result
+	f.committed = result
 	return &SelectionResultPublication{
 		DeliveryCursor: "1-0",
 		Result:         result,
@@ -183,17 +134,9 @@ func newSuccessfulEnrollmentUsecase(
 			CourseLimit: 6,
 		},
 		active: true,
-		eligibility: &enrollment.EligibilitySnapshot{
-			Student: &enrollment.StudentProfile{
-				ID:        10001,
-				MajorID:   1,
-				GradeYear: 2025,
-				State:     enrollment.StudentStateActive,
-			},
-		},
 	}
 	publisher := &fakeSelectionPublisher{}
-	admission := NewSelectionAdmissionService(repo, repo)
+	admission := NewSelectionAdmissionService(repo)
 	usecase := NewEnrollmentUsecase(
 		repo,
 		repo,
@@ -206,7 +149,7 @@ func newSuccessfulEnrollmentUsecase(
 	return usecase, repo, publisher, now
 }
 
-// TestEnrollmentUsecaseSelectCourse 验证最小主链路会完成预占、抢占、结果保存和消息发布。
+// TestEnrollmentUsecaseSelectCourse 验证最小主链路会原子提交结果并发布消息。
 func TestEnrollmentUsecaseSelectCourse(t *testing.T) {
 	usecase, repo, publisher, _ := newSuccessfulEnrollmentUsecase(t)
 	receipt, err := usecase.SelectCourse(context.Background(), &SelectCourseCommand{
@@ -225,11 +168,10 @@ func TestEnrollmentUsecaseSelectCourse(t *testing.T) {
 		receipt.DurablyPersisted {
 		t.Fatalf("SelectCourse() receipt = %#v", receipt)
 	}
-	if repo.reserved == nil || repo.completed == nil || publisher.publication == nil {
+	if repo.committed == nil || publisher.publication == nil {
 		t.Fatalf(
-			"main chain calls = reserved:%v completed:%v published:%v",
-			repo.reserved != nil,
-			repo.completed != nil,
+			"main chain calls = committed:%v published:%v",
+			repo.committed != nil,
 			publisher.publication != nil,
 		)
 	}
@@ -250,8 +192,8 @@ func TestEnrollmentUsecaseRejectsBeforeReservation(t *testing.T) {
 		if !errors.Is(err, enrollment.ErrDuplicateSelection) {
 			t.Fatalf("SelectCourse() error = %v, want %v", err, enrollment.ErrDuplicateSelection)
 		}
-		if repo.reserved != nil {
-			t.Fatal("duplicate course should not reserve Redis resources")
+		if repo.committed != nil {
+			t.Fatal("duplicate course should not commit Redis resources")
 		}
 	})
 
@@ -268,8 +210,8 @@ func TestEnrollmentUsecaseRejectsBeforeReservation(t *testing.T) {
 		if !errors.Is(err, enrollment.ErrRoundNotOpen) {
 			t.Fatalf("SelectCourse() error = %v, want %v", err, enrollment.ErrRoundNotOpen)
 		}
-		if repo.reserved != nil {
-			t.Fatal("closed round should not reserve Redis resources")
+		if repo.committed != nil {
+			t.Fatal("closed round should not commit Redis resources")
 		}
 	})
 }
@@ -292,7 +234,7 @@ func TestEnrollmentUsecaseKeepsRecoverableResult(t *testing.T) {
 		!errors.Is(err, publishErr) {
 		t.Fatalf("SelectCourse() error = %v, want in-progress wrapping publish error", err)
 	}
-	if repo.completed == nil || publisher.publication == nil {
+	if repo.committed == nil || publisher.publication == nil {
 		t.Fatal("publish failure should happen after Redis result completion")
 	}
 }
@@ -338,8 +280,8 @@ func TestEnrollmentUsecaseReturnsPersistedIdempotentResultBeforeMutableChecks(t 
 		!receipt.DurablyPersisted {
 		t.Fatalf("SelectCourse() receipt = %#v", receipt)
 	}
-	if repo.reserved != nil {
-		t.Fatal("persisted idempotent result should bypass a new reservation")
+	if repo.committed != nil {
+		t.Fatal("persisted idempotent result should bypass a new commit")
 	}
 }
 
@@ -373,8 +315,8 @@ func TestEnrollmentUsecaseRejectsIdempotencyFingerprintConflict(t *testing.T) {
 	if !errors.Is(err, enrollment.ErrIdempotencyConflict) {
 		t.Fatalf("SelectCourse() error = %v, want %v", err, enrollment.ErrIdempotencyConflict)
 	}
-	if repo.reserved != nil {
-		t.Fatal("idempotency conflict should not reserve new resources")
+	if repo.committed != nil {
+		t.Fatal("idempotency conflict should not commit new resources")
 	}
 }
 
@@ -410,14 +352,12 @@ func TestEnrollmentUsecaseResumesMatchingPendingBeforeMutableChecks(t *testing.T
 		t.Fatalf("SelectCourse() error = %v", err)
 	}
 	if receipt.State != enrollment.ApplicationStateSelected ||
-		repo.reserved != nil ||
-		repo.completed == nil ||
+		repo.committed == nil ||
 		publisher.publication == nil {
 		t.Fatalf(
-			"pending resume = receipt:%#v reserved:%v completed:%v published:%v",
+			"pending resume = receipt:%#v committed:%v published:%v",
 			receipt,
-			repo.reserved != nil,
-			repo.completed != nil,
+			repo.committed != nil,
 			publisher.publication != nil,
 		)
 	}

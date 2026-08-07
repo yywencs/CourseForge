@@ -119,6 +119,7 @@ func (r *Repository) InspectCourseUsage(ctx context.Context, id uint64) (catalog
 	}{
 		{table: "teaching_class", where: "course_id = ?", args: []interface{}{id}, target: &usage.TeachingClassCount},
 		{table: "teaching_class", where: "course_id = ? AND state <> ?", args: []interface{}{id, string(catalog.TeachingClassStatePlanned)}, target: &usage.NonPlannedTeachingClassCount},
+		{table: "selection_round_class AS src JOIN teaching_class AS tc ON tc.id = src.teaching_class_id", where: "tc.course_id = ?", args: []interface{}{id}, target: &usage.RoundBoundTeachingClassCount},
 		{table: "course_video", where: "course_id = ?", args: []interface{}{id}, target: &usage.CourseVideoCount},
 		{table: "course_prerequisite", where: "course_id = ? OR prerequisite_course_id = ?", args: []interface{}{id, id}, target: &usage.PrerequisiteCount},
 		{table: "student_course_history", where: "course_id = ?", args: []interface{}{id}, target: &usage.StudentHistoryCount},

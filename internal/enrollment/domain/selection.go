@@ -282,6 +282,32 @@ func (r SelectionRound) EnsureBindingsMutable() error {
 	return nil
 }
 
+// Open 在轮次配置完整且资格预热 ready 后推进到开放状态。
+func (r *SelectionRound) Open(usage SelectionRoundUsage, warmupReady bool) error {
+	if r == nil || r.State != SelectionRoundStatePlanned {
+		return ErrRoundNotEditable
+	}
+	if err := r.EnsureWarmupConfig(usage); err != nil {
+		return err
+	}
+	if !warmupReady {
+		return ErrRoundNotReady
+	}
+	r.State = SelectionRoundStateOpen
+	return nil
+}
+
+// EnsureWarmupConfig 校验轮次是否具备生成资格快照的最小配置。
+func (r *SelectionRound) EnsureWarmupConfig(usage SelectionRoundUsage) error {
+	if r == nil || (r.State != SelectionRoundStatePlanned && r.State != SelectionRoundStateOpen) {
+		return ErrRoundNotEditable
+	}
+	if usage.ClassBindingCount == 0 || usage.QuotaCount == 0 {
+		return ErrRoundConfigurationEmpty
+	}
+	return nil
+}
+
 func normalizeSelectionRoundPlan(plan SelectionRoundPlan) (SelectionRoundPlan, error) {
 	plan.RoundCode = strings.TrimSpace(plan.RoundCode)
 	plan.RoundName = strings.TrimSpace(plan.RoundName)

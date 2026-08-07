@@ -13,8 +13,16 @@ import (
 	"strings"
 	"time"
 
+	enrollmentapp "github.com/yywencs/courseforge/internal/enrollment/application"
+	roundrepo "github.com/yywencs/courseforge/internal/enrollment/infrastructure/management"
+	enrollmentrepo "github.com/yywencs/courseforge/internal/enrollment/infrastructure/persistence"
+	"github.com/yywencs/courseforge/internal/platform/cache"
+	"github.com/yywencs/courseforge/internal/platform/identifier"
+
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	redis "github.com/redis/go-redis/v9"
+	gormmysql "gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 const (
@@ -50,6 +58,7 @@ type prepareReport struct {
 	PreparedStudents int
 	StudentIDEnd     uint64
 	Capacity         int
+	WarmupVersion    string
 }
 
 func runPrepareCommand(args []string, stdout, stderr io.Writer) error {
@@ -73,6 +82,9 @@ func runPrepareCommand(args []string, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "  class capacity:   %d\n", report.Capacity)
 	fmt.Fprintf(stdout, "  credit limit:     %.1f\n", config.CreditLimit)
 	fmt.Fprintf(stdout, "  course limit:     %d\n", config.CourseLimit)
+	if report.WarmupVersion != "" {
+		fmt.Fprintf(stdout, "  warmup version:   %s\n", report.WarmupVersion)
+	}
 	fmt.Fprintln(stdout, "  Redis quota/seat: ready")
 	return nil
 }
@@ -179,7 +191,11 @@ func prepareBenchmarkData(ctx context.Context, config prepareConfig) (prepareRep
 	if err := redisClient.Ping(ctx).Err(); err != nil {
 		return prepareReport{}, fmt.Errorf("连接 Redis: %w", err)
 	}
-	if err := resetAndPreheatSelectionRedis(ctx, redisClient, config); err != nil {
+	if err := resetSelectionRedis(ctx, redisClient, config); err != nil {
+		return prepareReport{}, err
+	}
+	warmupVersion, err := runProductionWarmup(ctx, config, redisClient)
+	if err != nil {
 		return prepareReport{}, err
 	}
 
@@ -187,6 +203,7 @@ func prepareBenchmarkData(ctx context.Context, config prepareConfig) (prepareRep
 		PreparedStudents: config.Users,
 		StudentIDEnd:     studentIDEnd,
 		Capacity:         config.Capacity,
+		WarmupVersion:    warmupVersion,
 	}, nil
 }
 
@@ -282,6 +299,7 @@ func prepareCourseSelectionData(
 }
 
 func upsertBenchmarkCatalog(ctx context.Context, tx *sql.Tx, config prepareConfig) error {
+	state := "planned"
 	statements := []struct {
 		query string
 		args  []any
@@ -297,16 +315,17 @@ func upsertBenchmarkCatalog(ctx context.Context, tx *sql.Tx, config prepareConfi
 		{
 			`INSERT INTO teaching_class
 				(id, class_code, term_id, course_id, capacity, selected_count, state)
-			 VALUES (?, ?, ?, ?, ?, 0, 'open')
+			 VALUES (?, ?, ?, ?, ?, 0, ?)
 			 ON DUPLICATE KEY UPDATE
 				term_id = VALUES(term_id), course_id = VALUES(course_id),
-				capacity = VALUES(capacity), selected_count = 0, state = 'open'`,
+				capacity = VALUES(capacity), selected_count = 0, state = VALUES(state)`,
 			[]any{
 				config.TeachingClassID,
 				fmt.Sprintf("BENCH-%d", config.TeachingClassID),
 				benchmarkTermID,
 				benchmarkCourseID,
 				config.Capacity,
+				state,
 			},
 		},
 		{
@@ -314,14 +333,15 @@ func upsertBenchmarkCatalog(ctx context.Context, tx *sql.Tx, config prepareConfi
 				(id, term_id, round_code, round_name, start_time, end_time, state)
 			 VALUES (?, ?, ?, 'Benchmark Round',
 				 DATE_SUB(NOW(3), INTERVAL 1 DAY), DATE_ADD(NOW(3), INTERVAL 7 DAY),
-				 'open')
+				 ?)
 			 ON DUPLICATE KEY UPDATE
 				term_id = VALUES(term_id), start_time = VALUES(start_time),
-				end_time = VALUES(end_time), state = 'open'`,
+				end_time = VALUES(end_time), state = VALUES(state)`,
 			[]any{
 				config.RoundID,
 				benchmarkTermID,
 				fmt.Sprintf("BENCH-%d", config.RoundID),
+				state,
 			},
 		},
 		{
@@ -400,80 +420,71 @@ func upsertBenchmarkQuotas(ctx context.Context, tx *sql.Tx, config prepareConfig
 	return nil
 }
 
-func resetAndPreheatSelectionRedis(
+func resetSelectionRedis(
 	ctx context.Context,
 	client *redis.Client,
 	config prepareConfig,
 ) error {
-	for index := 0; index < config.Users; index++ {
-		studentID := config.StudentIDStart + uint64(index)
-		pattern := fmt.Sprintf(
-			"courseforge:selection:result:%d:%d:*",
-			config.RoundID,
-			studentID,
-		)
+	patterns := []string{
+		fmt.Sprintf("courseforge:selection:warmup:%d:*", config.RoundID),
+		fmt.Sprintf("courseforge:selection:eligible:%d:*", config.RoundID),
+		fmt.Sprintf("courseforge:selection:result:%d:*", config.RoundID),
+		fmt.Sprintf("courseforge:selection:round:%d:*", config.RoundID),
+		fmt.Sprintf("courseforge:selection:class:%d:*", config.RoundID),
+		fmt.Sprintf("courseforge:selection:student:schedule:%d:*", config.RoundID),
+		fmt.Sprintf("courseforge:selection:student:courses:%d:*", config.RoundID),
+	}
+	for _, pattern := range patterns {
 		if err := deleteRedisPattern(ctx, client, pattern); err != nil {
-			return fmt.Errorf("清理学生 %d 的选课幂等结果: %w", studentID, err)
+			return fmt.Errorf("清理资格预热缓存: %w", err)
 		}
 	}
-
-	pipe := client.Pipeline()
-	pipe.Set(
-		ctx,
+	for start := 0; start < config.Users; start += config.BatchSize {
+		end := min(start+config.BatchSize, config.Users)
+		keys := make([]string, 0, (end-start)*5)
+		for index := start; index < end; index++ {
+			studentID := config.StudentIDStart + uint64(index)
+			keys = append(keys,
+				fmt.Sprintf("courseforge:selection:quota:credit:%d:%d", config.RoundID, studentID),
+				fmt.Sprintf("courseforge:selection:quota:course:%d:%d", config.RoundID, studentID),
+				fmt.Sprintf("courseforge:selection:pending:%d:%d", config.RoundID, studentID),
+				fmt.Sprintf("courseforge:selection:student:schedule:%d:%d", config.RoundID, studentID),
+				fmt.Sprintf("courseforge:selection:student:courses:%d:%d", config.RoundID, studentID),
+			)
+		}
+		if err := client.Del(ctx, keys...).Err(); err != nil {
+			return fmt.Errorf("批量清理学生 Redis 状态: %w", err)
+		}
+	}
+	return client.Del(ctx,
 		fmt.Sprintf("courseforge:selection:class:seat:%d", config.TeachingClassID),
-		config.Capacity,
-		0,
-	)
-	for index := 0; index < config.Users; index++ {
-		queueSelectionPreheat(
-			ctx,
-			pipe,
-			config.RoundID,
-			benchmarkTermID,
-			benchmarkCourseID,
-			config.StudentIDStart+uint64(index),
-			creditUnits(config.CreditLimit),
-			config.CourseLimit,
-		)
-	}
-	if _, err := pipe.Exec(ctx); err != nil {
-		return fmt.Errorf("预热选课 Redis 资源: %w", err)
-	}
-	return nil
+		fmt.Sprintf("courseforge:selection:class:schedule:%d", config.TeachingClassID),
+	).Err()
 }
 
-type selectionPreheatPipeline interface {
-	Del(context.Context, ...string) *redis.IntCmd
-	Set(context.Context, string, interface{}, time.Duration) *redis.StatusCmd
-}
-
-func queueSelectionPreheat(
+func runProductionWarmup(
 	ctx context.Context,
-	pipe selectionPreheatPipeline,
-	roundID uint64,
-	termID uint64,
-	courseID uint64,
-	studentID uint64,
-	creditLimit int64,
-	courseLimit int,
-) {
-	pipe.Del(
-		ctx,
-		fmt.Sprintf("courseforge:selection:pending:%d:%d", roundID, studentID),
-		fmt.Sprintf("courseforge:selection:course:%d:%d:%d", termID, studentID, courseID),
-	)
-	pipe.Set(
-		ctx,
-		fmt.Sprintf("courseforge:selection:quota:credit:%d:%d", roundID, studentID),
-		creditLimit,
-		0,
-	)
-	pipe.Set(
-		ctx,
-		fmt.Sprintf("courseforge:selection:quota:course:%d:%d", roundID, studentID),
-		courseLimit,
-		0,
-	)
+	config prepareConfig,
+	redisClient *redis.Client,
+) (string, error) {
+	db, err := gorm.Open(gormmysql.Open(config.MySQLDSN), &gorm.Config{})
+	if err != nil {
+		return "", fmt.Errorf("创建预热 GORM 连接: %w", err)
+	}
+	redisCache := cache.New(&cache.Options{Redis: redisClient})
+	ids := identifier.NewOrderIDGenerator()
+	stores := enrollmentrepo.NewStores(db, redisCache, ids)
+	service := enrollmentapp.NewRoundWarmupService(stores.Eligibility, stores.EligibilityIndex, ids)
+	status, err := service.Warmup(ctx, config.RoundID)
+	if err != nil {
+		return "", fmt.Errorf("执行生产资格预热: %w", err)
+	}
+	management := enrollmentapp.NewRoundManagementService(roundrepo.NewRepository(db))
+	management.ConfigureWarmup(nil, stores.EligibilityIndex)
+	if _, err := management.OpenRound(ctx, config.RoundID); err != nil {
+		return "", fmt.Errorf("开放已预热轮次: %w", err)
+	}
+	return status.Version, nil
 }
 
 func deleteRedisPattern(ctx context.Context, client *redis.Client, pattern string) error {

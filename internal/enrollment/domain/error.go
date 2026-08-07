@@ -14,10 +14,13 @@ var (
 	ErrTermMismatch          = errors.New("教学班与选课轮次不属于同一学期")
 	ErrInvalidTimeRange      = errors.New("选课轮次结束时间必须晚于开始时间")
 	ErrInvalidSelectionRound = errors.New("选课轮次信息不完整")
+	ErrRoundAlreadyWarmed    = fmt.Errorf("%w: 选课轮次资格已预热，不能再修改配置", ErrConflict)
 
 	ErrTeachingClassNotEditable = fmt.Errorf("%w: 教学班已进入选课流程，不能通过基础维护修改", ErrConflict)
 	ErrRoundNotEditable         = fmt.Errorf("%w: 轮次已进入选课流程，不能通过基础维护修改", ErrConflict)
 	ErrRoundTermLocked          = fmt.Errorf("%w: 轮次已绑定教学班，不能修改所属学期", ErrConflict)
+	ErrRoundNotReady            = fmt.Errorf("%w: 轮次资格预热未完成，不能开放", ErrConflict)
+	ErrRoundConfigurationEmpty  = fmt.Errorf("%w: 轮次必须配置教学班和学生额度后才能开放", ErrConflict)
 
 	ErrInvalidParams           = xerr.New("ENROLLMENT_INVALID_PARAMS", "选课参数非法")
 	ErrRecordNotFound          = xerr.New("ENROLLMENT_RECORD_NOT_FOUND", "选课记录不存在")
@@ -31,6 +34,7 @@ var (
 	ErrPrerequisiteNotMet      = xerr.New("ENROLLMENT_PREREQUISITE_NOT_MET", "未满足课程先修要求")
 	ErrMajorNotAllowed         = xerr.New("ENROLLMENT_MAJOR_NOT_ALLOWED", "学生专业不在教学班允许范围内")
 	ErrGradeNotAllowed         = xerr.New("ENROLLMENT_GRADE_NOT_ALLOWED", "学生年级不在教学班允许范围内")
+	ErrEligibilityNotMet       = xerr.New("ENROLLMENT_ELIGIBILITY_NOT_MET", "学生不具备该教学班的选课资格")
 	ErrScheduleConflict        = xerr.New("ENROLLMENT_SCHEDULE_CONFLICT", "教学班上课时间与已选课程冲突")
 	ErrWaitlistAlreadyExists   = xerr.New("ENROLLMENT_WAITLIST_EXISTS", "该课程已有有效候补申请")
 	ErrWaitlistNotRequired     = xerr.New("ENROLLMENT_WAITLIST_NOT_REQUIRED", "教学班仍有余量，请直接选课")

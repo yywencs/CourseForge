@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	catalogapp "github.com/yywencs/courseforge/internal/catalog/application"
 	catalogrepo "github.com/yywencs/courseforge/internal/catalog/infrastructure/mysql"
 	cataloghttp "github.com/yywencs/courseforge/internal/catalog/transport/http"
 	danmakuapp "github.com/yywencs/courseforge/internal/danmaku/application"
@@ -63,18 +64,19 @@ func NewAPIApp() (*HTTPApp, error) {
 		}
 	}()
 
-	catalogService, err := newCatalogService(
-		catalogrepo.NewRepository(runtime.db),
-		cfg.Data.ObjectStorage,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("catalog video storage: %w", err)
-	}
 	identityRoutes, studentAuth, studentTokens, err := newStudentIdentity(runtime.db, cfg)
 	if err != nil {
 		return nil, err
 	}
 	enrollmentModule := newEnrollmentModule(runtime, studentAuth)
+	catalogService, err := newCatalogService(
+		catalogrepo.NewRepository(runtime.db),
+		cfg.Data.ObjectStorage,
+		catalogapp.WithStudentEligibilityFilter(enrollmentModule.eligibilityIndex),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("catalog video storage: %w", err)
+	}
 	danmakuRepository := danmakurepo.NewRepository(runtime.db)
 	danmakuHub := danmakuws.NewHub(0)
 	danmakuSubscriber := danmakuredis.NewRealtimeSubscriber(runtime.redis, danmakuHub)
@@ -116,6 +118,7 @@ func NewAPIApp() (*HTTPApp, error) {
 		rabbitMQConsumer:  runtime.consumer,
 		danmakuHub:        danmakuHub,
 		danmakuSubscriber: danmakuSubscriber,
+		asynqClient:       runtime.asynqClient,
 	}, nil
 }
 
@@ -202,6 +205,9 @@ func (r *apiRuntime) readinessChecks() common.ReadinessChecks {
 }
 
 func (r *apiRuntime) close() {
+	if r != nil && r.asynqClient != nil {
+		_ = r.asynqClient.Close()
+	}
 	if r != nil && r.rabbitConn != nil {
 		_ = r.rabbitConn.Close()
 	}

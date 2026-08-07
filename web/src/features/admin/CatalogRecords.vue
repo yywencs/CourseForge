@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { Link2, LockKeyhole, Pencil, Trash2, Video } from '@lucide/vue'
+import { Flame, Link2, LockKeyhole, Pencil, Play, Trash2, Video } from '@lucide/vue'
 
-import type { Course, SelectionRound, TeachingClass } from '@/types/catalog'
+import type { Course, RoundWarmupStatus, SelectionRound, TeachingClass } from '@/types/catalog'
 
-defineProps<{
+const props = defineProps<{
   mode: 'courses' | 'classes' | 'rounds'
   courses: readonly Course[]
   teachingClasses: readonly TeachingClass[]
   rounds: readonly SelectionRound[]
+	warmupStatuses: Readonly<Record<number, RoundWarmupStatus | null>>
 }>()
 const emit = defineEmits<{
   editCourse: [item: Course]
@@ -18,6 +19,8 @@ const emit = defineEmits<{
   editRound: [item: SelectionRound]
   deleteRound: [item: SelectionRound]
   manageRound: [item: SelectionRound]
+	warmupRound: [item: SelectionRound]
+	openRound: [item: SelectionRound]
 }>()
 
 function stateLabel(state: string): string {
@@ -27,6 +30,16 @@ function stateLabel(state: string): string {
 function scheduleLabel(item: TeachingClass): string {
   const schedule = item.schedules[0]
   return schedule ? `星期${schedule.day_of_week} · ${schedule.start_section}–${schedule.end_section} 节` : '时间待排'
+}
+
+function warmupLabel(roundId: number): string {
+  const status = props.warmupStatuses[roundId]
+  return status ? ({ queued: '已排队', running: '预热中', ready: '预热完成', failed: '预热失败' })[status.state] : '未预热'
+}
+
+function configurationLocked(roundId: number): boolean {
+  const state = props.warmupStatuses[roundId]?.state
+  return state === 'queued' || state === 'running' || state === 'ready'
 }
 </script>
 
@@ -58,10 +71,14 @@ function scheduleLabel(item: TeachingClass): string {
     <div v-else class="record-list">
       <article v-for="item in rounds" :key="item.id">
         <div class="record-code"><strong>{{ item.round_code }}</strong><span>学期 {{ item.term_id }}</span></div>
-        <div class="record-main"><h3>{{ item.round_name }}</h3><p>{{ new Date(item.start_time).toLocaleString() }} 至 {{ new Date(item.end_time).toLocaleString() }}</p><div><span class="state">{{ stateLabel(item.state) }}</span><span>{{ item.class_count }} 个教学班</span></div></div>
+        <div class="record-main"><h3>{{ item.round_name }}</h3><p>{{ new Date(item.start_time).toLocaleString() }} 至 {{ new Date(item.end_time).toLocaleString() }}</p><div><span class="state">{{ stateLabel(item.state) }}</span><span>{{ item.class_count }} 个教学班</span><span>{{ warmupLabel(item.id) }}</span></div></div>
         <div class="record-actions is-round">
-          <button type="button" aria-label="管理教学班绑定" @click="emit('manageRound', item)"><Link2 :size="16" /></button>
-          <template v-if="item.state === 'planned'"><button type="button" aria-label="编辑轮次" @click="emit('editRound', item)"><Pencil :size="16" /></button><button type="button" class="danger" aria-label="删除轮次" @click="emit('deleteRound', item)"><Trash2 :size="16" /></button></template>
+          <button type="button" aria-label="管理教学班绑定" :disabled="configurationLocked(item.id)" @click="emit('manageRound', item)"><Link2 :size="16" /></button>
+          <template v-if="item.state === 'planned'">
+            <button type="button" aria-label="预热资格" title="预热资格" :disabled="configurationLocked(item.id)" @click="emit('warmupRound', item)"><Flame :size="16" /></button>
+            <button type="button" aria-label="开放轮次" title="开放轮次" :disabled="warmupStatuses[item.id]?.state !== 'ready'" @click="emit('openRound', item)"><Play :size="16" /></button>
+            <button type="button" aria-label="编辑轮次" :disabled="configurationLocked(item.id)" @click="emit('editRound', item)"><Pencil :size="16" /></button><button type="button" class="danger" aria-label="删除轮次" :disabled="configurationLocked(item.id)" @click="emit('deleteRound', item)"><Trash2 :size="16" /></button>
+          </template>
           <span v-else class="locked"><LockKeyhole :size="16" /></span>
         </div>
       </article>
@@ -76,7 +93,7 @@ function scheduleLabel(item: TeachingClass): string {
 .record-code, .record-main { display: grid; gap: 5px; }.record-code strong { font-family: var(--font-mono); color: var(--brand); font-size: 11px; }.record-code span { color: var(--muted); font-size: 9px; }
 .record-main h3 { margin: 0; font-family: var(--font-display); font-size: 18px; font-variation-settings: "wdth" 82, "wght" 680; }.record-main p { overflow: hidden; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.6; text-overflow: ellipsis; white-space: nowrap; }.record-main > div { display: flex; gap: 5px; }.record-main > div span { padding: 3px 6px; border: 1px solid var(--line-soft); border-radius: 5px; color: var(--muted); font-size: 8px; }.record-main > div .state { color: var(--brand); background: var(--brand-pale); }
 .record-number { display: grid; justify-items: center; font-family: var(--font-display); font-size: 19px; }.record-number small { color: var(--muted); font-family: inherit; font-size: 8px; font-weight: 500; }
-.record-actions { display: flex; justify-content: flex-end; gap: 6px; }.record-actions.is-round { min-width: 128px; }.record-actions button, .locked { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-soft); background: white; cursor: pointer; }.record-actions button:hover { border-color: var(--brand); color: var(--brand); }.record-actions .danger:hover { border-color: var(--danger); color: var(--danger); }.locked { color: var(--muted); background: var(--surface-muted); cursor: default; }
+.record-actions { display: flex; justify-content: flex-end; gap: 6px; }.record-actions.is-round { min-width: 128px; }.record-actions button, .locked { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-soft); background: white; cursor: pointer; }.record-actions button:hover { border-color: var(--brand); color: var(--brand); }.record-actions button:disabled { opacity: .35; cursor: not-allowed; }.record-actions .danger:hover { border-color: var(--danger); color: var(--danger); }.locked { color: var(--muted); background: var(--surface-muted); cursor: default; }
 .empty { margin: 0; padding: 54px 20px; color: var(--muted); text-align: center; font-size: 12px; }
 @media (max-width: 800px) { .record-list article { grid-template-columns: 120px minmax(180px, 1fr) auto; }.record-number { display: none; } } @media (max-width: 580px) { .record-list article { grid-template-columns: 1fr auto; }.record-main { grid-column: 1 / -1; grid-row: 2; }.record-actions { grid-column: 2; grid-row: 1; } }
 </style>

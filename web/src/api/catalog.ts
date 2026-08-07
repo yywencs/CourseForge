@@ -5,6 +5,7 @@ import type {
   CourseDraft,
   CourseVideo,
   RoundClassBinding,
+	RoundWarmupStatus,
   SelectionRound,
   SelectionRoundDraft,
   TeachingClass,
@@ -123,6 +124,18 @@ export function updateSelectionRound(id: number, input: SelectionRoundDraft): Pr
 
 export function deleteSelectionRound(id: number): Promise<{ deleted: boolean }> {
   return unwrapAdmin(adminHttp.delete(`/admin/v1/selection-rounds/${id}`))
+}
+
+export function requestSelectionRoundWarmup(id: number): Promise<{ queued: boolean }> {
+	return unwrapAdmin(adminHttp.post(`/admin/v1/selection-rounds/${id}/warmup`))
+}
+
+export function getSelectionRoundWarmup(id: number): Promise<RoundWarmupStatus | null> {
+	return unwrapAdmin(adminHttp.get(`/admin/v1/selection-rounds/${id}/warmup`))
+}
+
+export function openSelectionRound(id: number): Promise<SelectionRound> {
+	return unwrapAdmin(adminHttp.post(`/admin/v1/selection-rounds/${id}/open`))
 }
 
 export function listRoundClasses(roundId: number): Promise<ItemList<RoundClassBinding>> {

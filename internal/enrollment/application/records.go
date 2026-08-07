@@ -21,18 +21,17 @@ type SelectionRequestRecord struct {
 	DurablyPersisted bool
 }
 
-type ReservationStatus string
-
-const (
-	ReservationStatusAcquired  ReservationStatus = "acquired"
-	ReservationStatusReused    ReservationStatus = "reused"
-	ReservationStatusCompleted ReservationStatus = "completed"
-)
-
-type SelectionReservation struct {
-	Status      ReservationStatus
-	Application *enrollment.SelectionApplication
-	Publication *SelectionResultPublication
+// SelectionAdmissionSnapshot 是 Redis 实时索引返回的准入事实。
+// 轮次与教学班字段用于构造服务端可信请求，其余字段用于提前返回明确的业务错误；
+// 最终并发判断仍由提交 Lua 在同一个原子边界内再次完成。
+type SelectionAdmissionSnapshot struct {
+	Round                *enrollment.SelectionRound
+	Class                *enrollment.TeachingClass
+	Eligible             bool
+	ExistingEnrollment   bool
+	ScheduleConflict     bool
+	CreditRemaining      enrollment.Credit
+	CourseQuotaRemaining int64
 }
 
 // SelectionResultPublication is the reliable-delivery state consumed by the

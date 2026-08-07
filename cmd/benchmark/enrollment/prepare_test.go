@@ -1,13 +1,10 @@
 package main
 
 import (
-	"context"
 	"io"
 	"strings"
 	"testing"
 	"time"
-
-	redis "github.com/redis/go-redis/v9"
 )
 
 func TestParsePrepareConfig(t *testing.T) {
@@ -63,73 +60,5 @@ func TestParsePrepareConfigRejectsNonCourseForgeDSN(t *testing.T) {
 func TestRepeatedValues(t *testing.T) {
 	if got, want := repeatedValues(3, "(?, ?)"), "(?, ?),(?, ?),(?, ?)"; got != want {
 		t.Fatalf("repeatedValues() = %q, want %q", got, want)
-	}
-}
-
-type recordingSelectionPreheatPipeline struct {
-	deleted []string
-	values  map[string]interface{}
-	ttls    map[string]time.Duration
-}
-
-func (p *recordingSelectionPreheatPipeline) Del(
-	ctx context.Context,
-	keys ...string,
-) *redis.IntCmd {
-	p.deleted = append(p.deleted, keys...)
-	return redis.NewIntCmd(ctx)
-}
-
-func (p *recordingSelectionPreheatPipeline) Set(
-	ctx context.Context,
-	key string,
-	value interface{},
-	expiration time.Duration,
-) *redis.StatusCmd {
-	if p.values == nil {
-		p.values = make(map[string]interface{})
-		p.ttls = make(map[string]time.Duration)
-	}
-	p.values[key] = value
-	p.ttls[key] = expiration
-	return redis.NewStatusCmd(ctx)
-}
-
-func TestQueueSelectionPreheatUsesProductionKeys(t *testing.T) {
-	pipe := &recordingSelectionPreheatPipeline{}
-	queueSelectionPreheat(
-		context.Background(),
-		pipe,
-		defaultBenchmarkRoundID,
-		benchmarkTermID,
-		benchmarkCourseID,
-		defaultBenchmarkStudentIDStart,
-		245,
-		10,
-	)
-
-	wantDeleted := []string{
-		"courseforge:selection:pending:9000000000101:9100000000000",
-		"courseforge:selection:course:9000000000004:9100000000000:9000000000005",
-	}
-	if len(pipe.deleted) != len(wantDeleted) {
-		t.Fatalf("deleted keys = %#v, want %#v", pipe.deleted, wantDeleted)
-	}
-	for index, key := range wantDeleted {
-		if pipe.deleted[index] != key {
-			t.Fatalf("deleted[%d] = %q, want %q", index, pipe.deleted[index], key)
-		}
-	}
-	wantValues := map[string]interface{}{
-		"courseforge:selection:quota:credit:9000000000101:9100000000000": int64(245),
-		"courseforge:selection:quota:course:9000000000101:9100000000000": 10,
-	}
-	for key, value := range wantValues {
-		if pipe.values[key] != value {
-			t.Fatalf("key %q value = %#v, want %#v", key, pipe.values[key], value)
-		}
-		if pipe.ttls[key] != 0 {
-			t.Fatalf("key %q TTL = %s, want no expiration", key, pipe.ttls[key])
-		}
 	}
 }

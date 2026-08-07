@@ -15,6 +15,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("bootstrap Admin app: %v", err)
 	}
+	defer func() { _ = app.Close() }()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()

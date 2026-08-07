@@ -18,7 +18,7 @@ import (
 )
 
 // TestEnrollmentRepositoryMinimalMainChain 使用真实 MySQL 和 Redis 验证：
-// 原子预占 → 完成结果/Stream → RabbitMQ Confirm → MySQL幂等落库。
+// 原子选课提交/Stream → RabbitMQ Confirm → MySQL幂等落库。
 func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 	const (
 		majorID       = uint64(990001)
@@ -45,27 +45,20 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 	cleanupEnrollmentRedis(
 		t,
 		roundID,
-		termID,
 		studentID,
-		courseID,
 		classID,
 		requestID,
 	)
 
 	repo := newEnrollmentRepositoryFixture(integrationCourseForgeDB, integrationRedis)
-	round, err := repo.QuerySelectionRound(context.Background(), roundID)
-	if err != nil || round == nil || !round.AcceptingAt(now) {
-		t.Fatalf("QuerySelectionRound() = %#v, %v", round, err)
+	prepareSelectionRuntime(t, repo, roundID)
+	admission, err := repo.QuerySelectionAdmission(
+		context.Background(), roundID, studentID, classID, now,
+	)
+	if err != nil || admission == nil || !admission.Eligible ||
+		admission.Round.TermID != termID || admission.Class.CourseID != courseID {
+		t.Fatalf("QuerySelectionAdmission() = %#v, %v", admission, err)
 	}
-	class, err := repo.QueryTeachingClass(context.Background(), roundID, classID)
-	if err != nil || class == nil {
-		t.Fatalf("QueryTeachingClass() = %#v, %v", class, err)
-	}
-	quota, err := repo.QueryStudentSelectionQuota(context.Background(), roundID, studentID)
-	if err != nil || quota == nil {
-		t.Fatalf("QueryStudentSelectionQuota() = %#v, %v", quota, err)
-	}
-
 	request := &enrollment.SelectionRequest{
 		RequestID:       requestID,
 		RoundID:         roundID,
@@ -73,7 +66,7 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		StudentID:       studentID,
 		CourseID:        courseID,
 		TeachingClassID: classID,
-		Credits:         class.Credits,
+		Credits:         admission.Class.Credits,
 		Source:          enrollment.ApplicationSourceWeb,
 	}
 	selectionApplication, err := enrollment.NewSelectionApplication(applicationID, request, now)
@@ -81,51 +74,29 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		t.Fatalf("NewSelectionApplication() error = %v", err)
 	}
 
-	reservation, err := repo.ReserveSelection(context.Background(), selectionApplication)
-	if err != nil {
-		t.Fatalf("ReserveSelection() error = %v", err)
+	if err := selectionApplication.Reserve(); err != nil {
+		t.Fatalf("Reserve() error = %v", err)
 	}
-	if reservation.Status != application.ReservationStatusAcquired ||
-		reservation.Application.State != enrollment.ApplicationStateReserved {
-		t.Fatalf("ReserveSelection() = %#v", reservation)
-	}
-	pendingRecord, err := repo.QuerySelectionByRequest(
-		context.Background(),
-		roundID,
-		studentID,
-		requestID,
-	)
-	if err != nil ||
-		pendingRecord == nil ||
-		pendingRecord.Application == nil ||
-		pendingRecord.Application.ApplicationID != applicationID ||
-		pendingRecord.Application.State != enrollment.ApplicationStateReserved ||
-		pendingRecord.Publication != nil ||
-		pendingRecord.DurablyPersisted {
-		t.Fatalf("QuerySelectionByRequest(pending) = %#v, %v", pendingRecord, err)
-	}
-
-	assertRedisInt(t, fmt.Sprintf("courseforge:selection:quota:credit:%d:%d", roundID, studentID), 165)
-	assertRedisInt(t, fmt.Sprintf("courseforge:selection:quota:course:%d:%d", roundID, studentID), 5)
-	assertRedisInt(t, fmt.Sprintf("courseforge:selection:class:seat:%d", classID), 1)
-
-	result, err := reservation.Application.CompleteSelected(now.Add(2 * time.Second))
+	result, err := selectionApplication.CompleteSelected(now.Add(2 * time.Second))
 	if err != nil {
 		t.Fatalf("CompleteSelected() error = %v", err)
 	}
-	publication, err := repo.CompleteSelection(context.Background(), result)
+	publication, err := repo.CommitSelection(context.Background(), result)
 	if err != nil {
-		t.Fatalf("CompleteSelection() error = %v", err)
+		t.Fatalf("CommitSelection() error = %v", err)
 	}
 	if publication.DeliveryCursor == "" || publication.DeliveryConfirmed {
-		t.Fatalf("CompleteSelection() publication = %#v", publication)
+		t.Fatalf("CommitSelection() publication = %#v", publication)
 	}
-	reusedPublication, err := repo.CompleteSelection(context.Background(), result)
+	reusedPublication, err := repo.CommitSelection(context.Background(), result)
 	if err != nil ||
 		reusedPublication.DeliveryCursor != publication.DeliveryCursor ||
 		reusedPublication.Result.ApplicationID != applicationID {
-		t.Fatalf("CompleteSelection(retry) = %#v, %v", reusedPublication, err)
+		t.Fatalf("CommitSelection(retry) = %#v, %v", reusedPublication, err)
 	}
+	assertRedisInt(t, fmt.Sprintf("courseforge:selection:quota:credit:%d:%d", roundID, studentID), 165)
+	assertRedisInt(t, fmt.Sprintf("courseforge:selection:quota:course:%d:%d", roundID, studentID), 5)
+	assertRedisInt(t, fmt.Sprintf("courseforge:selection:class:seat:%d", classID), 1)
 	completedRecord, err := repo.QuerySelectionByRequest(
 		context.Background(),
 		roundID,
@@ -239,7 +210,7 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		t.Fatalf("selected course count = %d, want 1", persistedQuota.SelectedCourseCount)
 	}
 
-	// 删除 Redis 的短期结果和 pending，验证幂等查询会回退 MySQL 唯一申请记录。
+	// 删除 Redis 的短期结果后，提交链路不得回源 MySQL；最终申请仍可通过状态接口查询。
 	if err := integrationRedisClient.Del(
 		context.Background(),
 		fmt.Sprintf(
@@ -258,20 +229,24 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		studentID,
 		requestID,
 	)
-	if err != nil ||
-		persistedRecord == nil ||
-		persistedRecord.Application == nil ||
-		persistedRecord.Application.ApplicationID != applicationID ||
-		persistedRecord.Application.State != enrollment.ApplicationStateSelected ||
-		persistedRecord.Publication != nil ||
-		!persistedRecord.DurablyPersisted {
-		t.Fatalf("QuerySelectionByRequest(MySQL) = %#v, %v", persistedRecord, err)
+	if err != nil || persistedRecord != nil {
+		t.Fatalf("QuerySelectionByRequest(after Redis deletion) = %#v, %v, want nil", persistedRecord, err)
+	}
+	if err := integrationRedisClient.Del(
+		context.Background(), fmt.Sprintf("courseforge:selection:round:%d:open_version", roundID),
+	).Err(); err != nil {
+		t.Fatalf("delete Redis round gate: %v", err)
+	}
+	if _, err := repo.QuerySelectionAdmission(
+		context.Background(), roundID, studentID, classID, now,
+	); !errors.Is(err, enrollment.ErrRoundNotOpen) {
+		t.Fatalf("QuerySelectionAdmission(without Redis gate) error = %v, want round not open", err)
 	}
 }
 
 // TestEnrollmentRepositoryConcurrentReservationDoesNotOversell 验证100个学生
 // 并发抢10个名额时，Redis原子预占严格限制成功数且不会出现负库存。
-func TestEnrollmentRepositoryConcurrentReservationDoesNotOversell(t *testing.T) {
+func TestEnrollmentRepositoryConcurrentCommitDoesNotOversell(t *testing.T) {
 	const (
 		studentCount = 100
 		capacity     = 10
@@ -356,12 +331,8 @@ func TestEnrollmentRepositoryConcurrentReservationDoesNotOversell(t *testing.T) 
 				currentStudentID,
 				requestIDs[index],
 			),
-			fmt.Sprintf(
-				"courseforge:selection:course:%d:%d:%d",
-				termID,
-				currentStudentID,
-				courseID,
-			),
+			fmt.Sprintf("courseforge:selection:student:courses:%d:%d", roundID, currentStudentID),
+			fmt.Sprintf("courseforge:selection:student:schedule:%d:%d", roundID, currentStudentID),
 		)
 	}
 	if err := integrationRedisClient.Del(context.Background(), redisKeys...).Err(); err != nil {
@@ -371,13 +342,14 @@ func TestEnrollmentRepositoryConcurrentReservationDoesNotOversell(t *testing.T) 
 		_ = integrationRedisClient.Del(context.Background(), redisKeys...).Err()
 	})
 
-	type reservationResult struct {
-		reservation *application.SelectionReservation
+	type commitResult struct {
+		publication *application.SelectionResultPublication
 		err         error
 	}
 	repo := newEnrollmentRepositoryFixture(integrationCourseForgeDB, integrationRedis)
+	prepareSelectionRuntime(t, repo, roundID)
 	start := make(chan struct{})
-	results := make(chan reservationResult, studentCount)
+	results := make(chan commitResult, studentCount)
 	var workers sync.WaitGroup
 	workers.Add(studentCount)
 	for index := 0; index < studentCount; index++ {
@@ -401,38 +373,45 @@ func TestEnrollmentRepositoryConcurrentReservationDoesNotOversell(t *testing.T) 
 				now,
 			)
 			if err != nil {
-				results <- reservationResult{err: err}
+				results <- commitResult{err: err}
 				return
 			}
-			reservation, err := repo.ReserveSelection(context.Background(), application)
-			results <- reservationResult{reservation: reservation, err: err}
+			if err := application.Reserve(); err != nil {
+				results <- commitResult{err: err}
+				return
+			}
+			selectionResult, err := application.CompleteSelected(now.Add(time.Second))
+			if err != nil {
+				results <- commitResult{err: err}
+				return
+			}
+			publication, err := repo.CommitSelection(context.Background(), selectionResult)
+			results <- commitResult{publication: publication, err: err}
 		}()
 	}
 	close(start)
 	workers.Wait()
 	close(results)
 
-	var acquired, full int
+	var committed, full int
 	for result := range results {
 		switch {
 		case result.err == nil:
-			if result.reservation == nil ||
-				result.reservation.Status != application.ReservationStatusAcquired ||
-				result.reservation.Application == nil ||
-				result.reservation.Application.State != enrollment.ApplicationStateReserved {
-				t.Fatalf("unexpected successful reservation: %#v", result.reservation)
+			if result.publication == nil || result.publication.Result == nil ||
+				result.publication.Result.State != enrollment.ApplicationStateSelected {
+				t.Fatalf("unexpected successful commit: %#v", result.publication)
 			}
-			acquired++
+			committed++
 		case errors.Is(result.err, enrollment.ErrTeachingClassFull):
 			full++
 		default:
 			t.Fatalf("unexpected concurrent reservation error: %v", result.err)
 		}
 	}
-	if acquired != capacity || full != studentCount-capacity {
+	if committed != capacity || full != studentCount-capacity {
 		t.Fatalf(
-			"concurrent reservation results = acquired:%d full:%d, want %d/%d",
-			acquired,
+			"concurrent commit results = committed:%d full:%d, want %d/%d",
+			committed,
 			full,
 			capacity,
 			studentCount-capacity,
@@ -494,27 +473,11 @@ func TestEnrollmentRepositoryDropAndProjectionRepair(t *testing.T) {
 		t.Fatalf("seed enrollment: %v", err)
 	}
 
-	redisKeys := []string{
-		fmt.Sprintf("courseforge:selection:quota:credit:%d:%d", roundID, studentID),
-		fmt.Sprintf("courseforge:selection:quota:course:%d:%d", roundID, studentID),
-		fmt.Sprintf("courseforge:selection:class:seat:%d", classID),
-		fmt.Sprintf("courseforge:selection:course:%d:%d:%d", termID, studentID, courseID),
-		fmt.Sprintf("courseforge:selection:dropped:%s", enrollmentID),
-	}
-	if err := integrationRedisClient.Del(context.Background(), redisKeys...).Err(); err != nil {
-		t.Fatalf("cleanup drop Redis: %v", err)
-	}
-	t.Cleanup(func() { _ = integrationRedisClient.Del(context.Background(), redisKeys...).Err() })
-	if err := integrationRedisClient.MSet(context.Background(),
-		redisKeys[0], 165,
-		redisKeys[1], 5,
-		redisKeys[2], 1,
-		redisKeys[3], applicationID,
-	).Err(); err != nil {
-		t.Fatalf("seed drop Redis: %v", err)
-	}
-
 	repo := newEnrollmentRepositoryFixture(db, integrationRedis)
+	prepareSelectionRuntime(t, repo, roundID)
+	droppedKey := fmt.Sprintf("courseforge:selection:dropped:%s", enrollmentID)
+	_ = integrationRedisClient.Del(context.Background(), droppedKey).Err()
+	t.Cleanup(func() { _ = integrationRedisClient.Del(context.Background(), droppedKey).Err() })
 	target, err := repo.QueryStudentEnrollment(context.Background(), enrollmentID, studentID)
 	if err != nil || target == nil {
 		t.Fatalf("QueryStudentEnrollment() = %#v, %v", target, err)
@@ -545,10 +508,14 @@ func TestEnrollmentRepositoryDropAndProjectionRepair(t *testing.T) {
 	); err != nil {
 		t.Fatalf("MarkProjectionRepairCompleted() error = %v", err)
 	}
-	assertRedisInt(t, redisKeys[0], 200)
-	assertRedisInt(t, redisKeys[1], 6)
-	assertRedisInt(t, redisKeys[2], 2)
-	if exists := integrationRedisClient.Exists(context.Background(), redisKeys[3]).Val(); exists != 0 {
+	assertRedisInt(t, fmt.Sprintf("courseforge:selection:quota:credit:%d:%d", roundID, studentID), 200)
+	assertRedisInt(t, fmt.Sprintf("courseforge:selection:quota:course:%d:%d", roundID, studentID), 6)
+	assertRedisInt(t, fmt.Sprintf("courseforge:selection:class:seat:%d", classID), 2)
+	if exists := integrationRedisClient.HExists(
+		context.Background(),
+		fmt.Sprintf("courseforge:selection:student:courses:%d:%d", roundID, studentID),
+		fmt.Sprintf("%d", courseID),
+	).Val(); exists {
 		t.Fatalf("course guard still exists after drop")
 	}
 }
@@ -616,9 +583,9 @@ func TestEnrollmentRepositoryWaitlistLifecycle(t *testing.T) {
 	}
 }
 
-// TestEnrollmentRepositoryLoadsEligibilitySnapshot 验证基础设施层能一次性装配
-// 学生状态、年级、专业、先修成绩和课表，并交给纯领域策略判断。
-func TestEnrollmentRepositoryLoadsEligibilitySnapshot(t *testing.T) {
+// TestEnrollmentRepositoryLoadsWarmupSnapshot 验证预热数据源能批量装配
+// 学生状态、年级、专业、先修成绩和教学班课表，并交给纯领域策略判断。
+func TestEnrollmentRepositoryLoadsWarmupSnapshot(t *testing.T) {
 	const (
 		majorID              = uint64(994001)
 		studentID            = uint64(994001)
@@ -679,21 +646,34 @@ func TestEnrollmentRepositoryLoadsEligibilitySnapshot(t *testing.T) {
 	}
 
 	repo := newEnrollmentRepositoryFixture(db, integrationRedis)
-	snapshot, err := repo.QueryEligibilitySnapshot(
-		context.Background(), studentID, termID, courseID, classID,
-	)
+	snapshot, err := repo.LoadRoundWarmupSnapshot(context.Background(), roundID)
 	if err != nil {
-		t.Fatalf("QueryEligibilitySnapshot() error = %v", err)
+		t.Fatalf("LoadRoundWarmupSnapshot() error = %v", err)
 	}
-	if len(snapshot.Prerequisites) != 1 || len(snapshot.Achievements) != 1 ||
-		len(snapshot.MajorScopes) != 1 || len(snapshot.TargetSchedules) != 1 {
+	students, err := repo.ListRoundWarmupStudents(context.Background(), roundID, 0, 10)
+	if err != nil {
+		t.Fatalf("ListRoundWarmupStudents() error = %v", err)
+	}
+	if len(snapshot.Classes) != 1 || len(students) != 1 ||
+		len(snapshot.Classes[0].Prerequisites) != 1 ||
+		len(snapshot.Classes[0].MajorScopes) != 1 ||
+		len(snapshot.Classes[0].Schedules) != 1 ||
+		len(students[0].Achievements) != 1 {
 		t.Fatalf("eligibility snapshot = %#v", snapshot)
 	}
-	if err := (enrollment.EligibilityPolicy{}).Evaluate(snapshot); err != nil {
-		t.Fatalf("EligibilityPolicy.Evaluate() error = %v", err)
+	facts := &enrollment.EligibilitySnapshot{
+		Student:          &students[0].Profile,
+		MinimumGradeYear: snapshot.Classes[0].MinimumGradeYear,
+		MaximumGradeYear: snapshot.Classes[0].MaximumGradeYear,
+		MajorScopes:      snapshot.Classes[0].MajorScopes,
+		Prerequisites:    snapshot.Classes[0].Prerequisites,
+		Achievements:     students[0].Achievements,
 	}
-	snapshot.Achievements = nil
-	if err := (enrollment.EligibilityPolicy{}).Evaluate(snapshot); !errors.Is(err, enrollment.ErrPrerequisiteNotMet) {
+	if err := (enrollment.StaticEligibilityPolicy{}).Evaluate(facts); err != nil {
+		t.Fatalf("StaticEligibilityPolicy.Evaluate() error = %v", err)
+	}
+	facts.Achievements = nil
+	if err := (enrollment.StaticEligibilityPolicy{}).Evaluate(facts); !errors.Is(err, enrollment.ErrPrerequisiteNotMet) {
 		t.Fatalf("missing prerequisite error = %v", err)
 	}
 }
@@ -793,7 +773,7 @@ func seedEnrollmentIntegrationData(
 
 func cleanupEnrollmentRedis(
 	t *testing.T,
-	roundID, termID, studentID, courseID, classID uint64,
+	roundID, studentID, classID uint64,
 	requestID string,
 ) {
 	t.Helper()
@@ -803,7 +783,9 @@ func cleanupEnrollmentRedis(
 		fmt.Sprintf("courseforge:selection:class:seat:%d", classID),
 		fmt.Sprintf("courseforge:selection:pending:%d:%d", roundID, studentID),
 		fmt.Sprintf("courseforge:selection:result:%d:%d:%s", roundID, studentID, requestID),
-		fmt.Sprintf("courseforge:selection:course:%d:%d:%d", termID, studentID, courseID),
+		fmt.Sprintf("courseforge:selection:student:schedule:%d:%d", roundID, studentID),
+		fmt.Sprintf("courseforge:selection:student:courses:%d:%d", roundID, studentID),
+		fmt.Sprintf("courseforge:selection:class:schedule:%d", classID),
 		"courseforge:selection:result:stream",
 	}
 	if err := integrationRedisClient.Del(context.Background(), keys...).Err(); err != nil {
@@ -812,6 +794,81 @@ func cleanupEnrollmentRedis(
 	t.Cleanup(func() {
 		_ = integrationRedisClient.Del(context.Background(), keys...).Err()
 	})
+}
+
+func prepareSelectionRuntime(
+	t *testing.T,
+	repo *enrollmentRepositoryFixture,
+	roundID uint64,
+) {
+	t.Helper()
+	ctx := context.Background()
+	snapshot, err := repo.LoadRoundWarmupSnapshot(ctx, roundID)
+	if err != nil {
+		t.Fatalf("LoadRoundWarmupSnapshot() error = %v", err)
+	}
+	students, err := repo.ListRoundWarmupStudents(ctx, roundID, 0, 2000)
+	if err != nil {
+		t.Fatalf("ListRoundWarmupStudents() error = %v", err)
+	}
+	version := fmt.Sprintf("integration-%d", time.Now().UnixNano())
+	const ttl = 24 * time.Hour
+	if err := repo.WriteSnapshot(ctx, snapshot, version, ttl); err != nil {
+		t.Fatalf("WriteSnapshot() error = %v", err)
+	}
+	policy := enrollment.StaticEligibilityPolicy{}
+	indexed := make([]application.EligibilityIndexStudent, 0, len(students))
+	for _, student := range students {
+		eligibleClassIDs := make([]uint64, 0, len(snapshot.Classes))
+		for _, class := range snapshot.Classes {
+			facts := &enrollment.EligibilitySnapshot{
+				Student: &student.Profile, MinimumGradeYear: class.MinimumGradeYear,
+				MaximumGradeYear: class.MaximumGradeYear, MajorScopes: class.MajorScopes,
+				Prerequisites: class.Prerequisites, Achievements: student.Achievements,
+			}
+			if policy.Evaluate(facts) == nil {
+				eligibleClassIDs = append(eligibleClassIDs, class.ID)
+			}
+		}
+		indexed = append(indexed, application.EligibilityIndexStudent{
+			StudentID: student.Profile.ID, EligibleClassIDs: eligibleClassIDs,
+			Quota: student.Quota, Enrollments: student.Enrollments,
+		})
+	}
+	if err := repo.WriteStudents(ctx, roundID, version, indexed, ttl); err != nil {
+		t.Fatalf("WriteStudents() error = %v", err)
+	}
+	status := application.RoundWarmupStatus{
+		RoundID: roundID, Version: version, State: application.RoundWarmupStateReady,
+		StartedAt: time.Now(),
+	}
+	if err := repo.Activate(ctx, status, ttl, ttl); err != nil {
+		t.Fatalf("Activate() error = %v", err)
+	}
+	if err := repo.MarkOpen(ctx, roundID, version); err != nil {
+		t.Fatalf("MarkOpen() error = %v", err)
+	}
+
+	keys := []string{
+		fmt.Sprintf("courseforge:selection:warmup:%d:active_version", roundID),
+		fmt.Sprintf("courseforge:selection:warmup:%d:status", roundID),
+		fmt.Sprintf("courseforge:selection:round:%d:open_version", roundID),
+		fmt.Sprintf("courseforge:selection:round:%d:%s", roundID, version),
+	}
+	for _, class := range snapshot.Classes {
+		keys = append(keys,
+			fmt.Sprintf("courseforge:selection:class:%d:%s:%d", roundID, version, class.ID),
+			fmt.Sprintf("courseforge:selection:class:schedule:%d", class.ID),
+		)
+	}
+	for _, student := range students {
+		keys = append(keys,
+			fmt.Sprintf("courseforge:selection:eligible:%d:%s:%d", roundID, version, student.Profile.ID),
+			fmt.Sprintf("courseforge:selection:student:schedule:%d:%d", roundID, student.Profile.ID),
+			fmt.Sprintf("courseforge:selection:student:courses:%d:%d", roundID, student.Profile.ID),
+		)
+	}
+	t.Cleanup(func() { _ = integrationRedisClient.Del(context.Background(), keys...).Err() })
 }
 
 func assertRedisInt(t *testing.T, key string, want int64) {

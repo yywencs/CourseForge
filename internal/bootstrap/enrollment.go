@@ -19,6 +19,7 @@ import (
 type enrollmentModule struct {
 	routes            *enrollmenthttp.Routes
 	scheduledHandlers []taskqueue.ScheduledHandler
+	eligibilityIndex  *enrollmentrepo.EligibilityIndex
 }
 
 func newEnrollmentModule(runtime *apiRuntime, authMiddleware gin.HandlerFunc) *enrollmentModule {
@@ -43,8 +44,12 @@ func newEnrollmentModule(runtime *apiRuntime, authMiddleware gin.HandlerFunc) *e
 	)
 
 	selectionAdmission := enrollmentapp.NewSelectionAdmissionService(
-		stores.Queries,
+		stores.EligibilityIndex,
+	)
+	roundWarmupService := enrollmentapp.NewRoundWarmupService(
 		stores.Eligibility,
+		stores.EligibilityIndex,
+		ids,
 	)
 	enrollmentUsecase := enrollmentapp.NewEnrollmentUsecase(
 		stores.Queries,
@@ -75,6 +80,7 @@ func newEnrollmentModule(runtime *apiRuntime, authMiddleware gin.HandlerFunc) *e
 
 	selectionLimiter := middleware.NewSelectionRateLimiter(runtime.cfg.Dcc.RateLimit)
 	return &enrollmentModule{
+		eligibilityIndex: stores.EligibilityIndex,
 		routes: enrollmenthttp.NewRoutes(
 			enrollmentUsecase,
 			dropEnrollmentUsecase,
@@ -83,6 +89,11 @@ func newEnrollmentModule(runtime *apiRuntime, authMiddleware gin.HandlerFunc) *e
 			selectionLimiter.Handle,
 		),
 		scheduledHandlers: []taskqueue.ScheduledHandler{
+			taskqueue.NewScheduledHandler(
+				enrollmentasync.TaskTypeRoundWarmup,
+				"",
+				enrollmentasync.NewRoundWarmupJob(roundWarmupService).ProcessTask,
+			),
 			taskqueue.NewScheduledHandler(
 				enrollmentasync.TaskTypeSelectionResultPublish,
 				"@every 1s",

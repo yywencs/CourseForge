@@ -6,6 +6,7 @@ import (
 
 	applicationcatalog "github.com/yywencs/courseforge/internal/catalog/application"
 	"github.com/yywencs/courseforge/internal/catalog/transport/http/dto"
+	"github.com/yywencs/courseforge/internal/platform/http/middleware"
 	"github.com/yywencs/courseforge/server/http/common"
 
 	"github.com/gin-gonic/gin"
@@ -51,9 +52,15 @@ func (h *CatalogRoutes) ListCatalog(c *gin.Context) {
 		common.Error(c, http.StatusBadRequest, "选课轮次编号不正确")
 		return
 	}
+	studentID, authenticated := middleware.AuthenticatedSubjectID(c)
+	if h.authMiddleware != nil && (!authenticated || studentID == 0) {
+		common.Error(c, http.StatusUnauthorized, "请先登录")
+		return
+	}
 	items, err := h.service.ListStudentCatalog(c.Request.Context(), applicationcatalog.StudentCatalogQuery{
-		RoundID: roundID,
-		Keyword: c.Query("keyword"),
+		RoundID:   roundID,
+		StudentID: studentID,
+		Keyword:   c.Query("keyword"),
 	})
 	if err != nil {
 		common.Error(c, http.StatusInternalServerError, "课程目录暂时无法加载")

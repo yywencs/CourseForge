@@ -24,6 +24,7 @@ const (
 	SelectionOutcomeClassFull           SelectionOutcome = "class_full"
 	SelectionOutcomeDuplicate           SelectionOutcome = "duplicate"
 	SelectionOutcomePrerequisiteNotMet  SelectionOutcome = "prerequisite_not_met"
+	SelectionOutcomeEligibilityNotMet   SelectionOutcome = "eligibility_not_met"
 	SelectionOutcomeMajorNotAllowed     SelectionOutcome = "major_not_allowed"
 	SelectionOutcomeGradeNotAllowed     SelectionOutcome = "grade_not_allowed"
 	SelectionOutcomeScheduleConflict    SelectionOutcome = "schedule_conflict"

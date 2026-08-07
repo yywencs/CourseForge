@@ -120,6 +120,31 @@ func TestEligibilityPolicyRejectsExistingEnrollment(t *testing.T) {
 	}
 }
 
+func TestStaticEligibilityPolicyDoesNotEvaluateScheduleConflict(t *testing.T) {
+	snapshot := eligibleSnapshot()
+	snapshot.EnrolledSchedules[0] = ScheduleSlot{
+		DayOfWeek: 1, StartWeek: 8, EndWeek: 18, StartSection: 2, EndSection: 3,
+	}
+	if err := (StaticEligibilityPolicy{}).Evaluate(snapshot); err != nil {
+		t.Fatalf("Evaluate() error = %v, want nil", err)
+	}
+}
+
+func TestDynamicEligibilityPolicyOnlyEvaluatesMutableFacts(t *testing.T) {
+	snapshot := eligibleSnapshot()
+	snapshot.Student.State = StudentStateSuspended
+	if err := (DynamicEligibilityPolicy{}).Evaluate(snapshot); err != nil {
+		t.Fatalf("Evaluate() error = %v, want nil", err)
+	}
+
+	snapshot.EnrolledSchedules[0] = ScheduleSlot{
+		DayOfWeek: 1, StartWeek: 8, EndWeek: 18, StartSection: 2, EndSection: 3,
+	}
+	if err := (DynamicEligibilityPolicy{}).Evaluate(snapshot); !errors.Is(err, ErrScheduleConflict) {
+		t.Fatalf("Evaluate() error = %v, want %v", err, ErrScheduleConflict)
+	}
+}
+
 func TestScheduleSlotConflictsRequiresOverlappingWeeksAndSections(t *testing.T) {
 	base := ScheduleSlot{
 		DayOfWeek: 3, StartWeek: 2, EndWeek: 10, StartSection: 3, EndSection: 4,

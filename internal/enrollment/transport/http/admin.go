@@ -37,16 +37,18 @@ func (r selectionRoundRequest) command() enrollmentapp.SelectionRoundCommand {
 }
 
 type selectionRoundResponse struct {
-	ID         uint64                         `json:"id"`
-	TermID     uint64                         `json:"term_id"`
-	RoundCode  string                         `json:"round_code"`
-	RoundName  string                         `json:"round_name"`
-	StartTime  time.Time                      `json:"start_time"`
-	EndTime    time.Time                      `json:"end_time"`
-	State      enrollment.SelectionRoundState `json:"state"`
-	ClassCount int64                          `json:"class_count"`
-	CreateTime time.Time                      `json:"create_time"`
-	UpdateTime time.Time                      `json:"update_time"`
+	ID            uint64                         `json:"id"`
+	TermID        uint64                         `json:"term_id"`
+	RoundCode     string                         `json:"round_code"`
+	RoundName     string                         `json:"round_name"`
+	StartTime     time.Time                      `json:"start_time"`
+	EndTime       time.Time                      `json:"end_time"`
+	State         enrollment.SelectionRoundState `json:"state"`
+	ClassCount    int64                          `json:"class_count"`
+	CreateTime    time.Time                      `json:"create_time"`
+	UpdateTime    time.Time                      `json:"update_time"`
+	WarmupState   enrollmentapp.RoundWarmupState `json:"warmup_state,omitempty"`
+	WarmupVersion string                         `json:"warmup_version,omitempty"`
 }
 
 type roundClassBindingResponse struct {
@@ -65,9 +67,50 @@ func (h *RoundAdminRoutes) RegisterAdminRoutes(group *gin.RouterGroup) {
 	rounds.POST("", h.createRound)
 	rounds.PUT("/:round_id", h.updateRound)
 	rounds.DELETE("/:round_id", h.deleteRound)
+	rounds.POST("/:round_id/warmup", h.warmupRound)
+	rounds.GET("/:round_id/warmup", h.getWarmupStatus)
+	rounds.POST("/:round_id/open", h.openRound)
 	rounds.GET("/:round_id/teaching-classes", h.listRoundClasses)
 	rounds.POST("/:round_id/teaching-classes/:teaching_class_id", h.bindRoundClass)
 	rounds.DELETE("/:round_id/teaching-classes/:teaching_class_id", h.unbindRoundClass)
+}
+
+func (h *RoundAdminRoutes) warmupRound(c *gin.Context) {
+	roundID, ok := adminID(c, "round_id")
+	if !ok {
+		return
+	}
+	if err := h.service.RequestWarmup(c.Request.Context(), roundID); err != nil {
+		handleRoundManagementError(c, err)
+		return
+	}
+	common.Success(c, gin.H{"queued": true})
+}
+
+func (h *RoundAdminRoutes) getWarmupStatus(c *gin.Context) {
+	roundID, ok := adminID(c, "round_id")
+	if !ok {
+		return
+	}
+	status, err := h.service.WarmupStatus(c.Request.Context(), roundID)
+	if err != nil {
+		handleRoundManagementError(c, err)
+		return
+	}
+	common.Success(c, status)
+}
+
+func (h *RoundAdminRoutes) openRound(c *gin.Context) {
+	roundID, ok := adminID(c, "round_id")
+	if !ok {
+		return
+	}
+	round, err := h.service.OpenRound(c.Request.Context(), roundID)
+	if err != nil {
+		handleRoundManagementError(c, err)
+		return
+	}
+	common.Success(c, roundAggregateResponse(round))
 }
 
 func (h *RoundAdminRoutes) listRounds(c *gin.Context) {
@@ -86,6 +129,7 @@ func (h *RoundAdminRoutes) listRounds(c *gin.Context) {
 			ID: item.ID, TermID: item.TermID, RoundCode: item.RoundCode, RoundName: item.RoundName,
 			StartTime: item.StartTime, EndTime: item.EndTime, State: item.State,
 			ClassCount: item.ClassCount, CreateTime: item.CreateTime, UpdateTime: item.UpdateTime,
+			WarmupState: item.WarmupState, WarmupVersion: item.WarmupVersion,
 		})
 	}
 	common.Success(c, gin.H{"items": responses})
@@ -223,7 +267,8 @@ func handleRoundManagementError(c *gin.Context, err error) {
 	case errors.Is(err, enrollment.ErrNotFound):
 		common.Error(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, enrollment.ErrConflict), errors.Is(err, enrollment.ErrRoundInUse),
-		errors.Is(err, enrollment.ErrTermMismatch):
+		errors.Is(err, enrollment.ErrTermMismatch),
+		errors.Is(err, enrollmentapp.ErrRoundWarmupRunning):
 		common.Error(c, http.StatusConflict, err.Error())
 	case errors.Is(err, enrollment.ErrInvalidSelectionRound), errors.Is(err, enrollment.ErrInvalidTimeRange):
 		common.Error(c, http.StatusBadRequest, err.Error())

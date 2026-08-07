@@ -261,6 +261,7 @@ func handleSelectionError(
 		errors.Is(err, enrollment.ErrPrerequisiteNotMet),
 		errors.Is(err, enrollment.ErrMajorNotAllowed),
 		errors.Is(err, enrollment.ErrGradeNotAllowed),
+		errors.Is(err, enrollment.ErrEligibilityNotMet),
 		errors.Is(err, enrollment.ErrScheduleConflict),
 		errors.Is(err, enrollment.ErrWaitlistAlreadyExists),
 		errors.Is(err, enrollment.ErrWaitlistNotRequired),

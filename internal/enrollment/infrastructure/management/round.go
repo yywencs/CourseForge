@@ -103,7 +103,7 @@ func (r *Repository) SaveRound(ctx context.Context, round *enrollment.SelectionR
 		Updates(map[string]interface{}{
 			"term_id": round.TermID, "round_code": round.RoundCode, "round_name": round.RoundName,
 			"start_time": round.StartTime, "end_time": round.EndTime,
-			"update_time": gorm.Expr("GREATEST(DATE_ADD(update_time, INTERVAL 1 MILLISECOND), NOW(3))"),
+			"update_time": gorm.Expr("GREATEST(DATE_ADD(update_time, INTERVAL 1000 MICROSECOND), NOW(3))"),
 		})
 	return requireConditionalWrite(result)
 }
@@ -192,4 +192,26 @@ func (r *Repository) RemoveRoundClass(ctx context.Context, roundID, teachingClas
 		return enrollment.ErrNotFound
 	}
 	return nil
+}
+
+// OpenRound 在同一事务中开放轮次及其绑定的教学班。
+func (r *Repository) OpenRound(ctx context.Context, round *enrollment.SelectionRound) error {
+	db := r.dbFor(ctx)
+	classResult := db.Table("teaching_class").
+		Where("state = ? AND id IN (?)", string(enrollment.TeachingClassStatePlanned),
+			db.Table("selection_round_class").Select("teaching_class_id").Where("round_id = ?", round.ID)).
+		Updates(map[string]interface{}{
+			"state":       string(enrollment.TeachingClassStateOpen),
+			"update_time": gorm.Expr("GREATEST(DATE_ADD(update_time, INTERVAL 1000 MICROSECOND), NOW(3))"),
+		})
+	if classResult.Error != nil {
+		return normalizeDBError(classResult.Error)
+	}
+	result := db.Model(&roundRow{}).
+		Where("id = ? AND state = ?", round.ID, string(enrollment.SelectionRoundStatePlanned)).
+		Updates(map[string]interface{}{
+			"state":       string(round.State),
+			"update_time": gorm.Expr("GREATEST(DATE_ADD(update_time, INTERVAL 1000 MICROSECOND), NOW(3))"),
+		})
+	return requireConditionalWrite(result)
 }

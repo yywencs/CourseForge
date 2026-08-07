@@ -41,6 +41,19 @@ func TestCourseChangeProtectsCoreFieldsAfterTeachingStarts(t *testing.T) {
 	}
 }
 
+func TestCourseChangeProtectsCoreFieldsAfterClassIsBound(t *testing.T) {
+	course, err := NewCourse(CourseDetails{CourseCode: "CS-101", CourseName: "程序设计", Credits: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = course.Change(CourseDetails{CourseCode: "CS-101", CourseName: "程序设计", Credits: 4}, CourseUsage{
+		RoundBoundTeachingClassCount: 1,
+	})
+	if !errors.Is(err, ErrCourseCoreLocked) {
+		t.Fatalf("Change() error = %v, want %v", err, ErrCourseCoreLocked)
+	}
+}
+
 func TestCourseEnsureDeletableUsesDependencyFacts(t *testing.T) {
 	course := Course{ID: 1}
 	if err := course.EnsureDeletable(CourseUsage{CourseVideoCount: 1}); !errors.Is(err, ErrCourseInUse) {
@@ -205,8 +218,8 @@ func TestTeachingClassChangePlanOwnsStateAndBindingRules(t *testing.T) {
 	class.State = TeachingClassStatePlanned
 	changed := validTeachingClassPlan()
 	changed.TermID = 202602
-	if err := class.ChangePlan(changed, TeachingClassUsage{RoundBindingCount: 1}); !errors.Is(err, ErrTeachingClassTermLocked) {
-		t.Fatalf("bound ChangePlan() error = %v, want %v", err, ErrTeachingClassTermLocked)
+	if err := class.ChangePlan(changed, TeachingClassUsage{RoundBindingCount: 1}); !errors.Is(err, ErrTeachingClassNotEditable) {
+		t.Fatalf("bound ChangePlan() error = %v, want %v", err, ErrTeachingClassNotEditable)
 	}
 }
 

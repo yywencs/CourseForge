@@ -13,26 +13,25 @@ import (
 func newCatalogService(
 	repository applicationcatalog.Repository,
 	cfg config.ObjectStorageConfig,
+	options ...applicationcatalog.ServiceOption,
 ) (*applicationcatalog.Service, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	if !cfg.Enabled {
 		// 对象存储关闭时保留课程目录能力，仅视频上传和播放返回服务不可用。
-		return applicationcatalog.NewService(repository), nil
+		return applicationcatalog.NewService(repository, options...), nil
 	}
 	storage, err := catalogstorage.NewS3Store(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return applicationcatalog.NewService(
-		repository,
-		applicationcatalog.WithVideoStorage(storage, applicationcatalog.VideoPolicy{
-			UploadURLTTL:      cfg.UploadURLTTL,
-			PlaybackURLTTL:    cfg.PlaybackURLTTL,
-			MaxVideoSizeBytes: cfg.MaxVideoSizeBytes,
-		}),
-	), nil
+	options = append(options, applicationcatalog.WithVideoStorage(storage, applicationcatalog.VideoPolicy{
+		UploadURLTTL:      cfg.UploadURLTTL,
+		PlaybackURLTTL:    cfg.PlaybackURLTTL,
+		MaxVideoSizeBytes: cfg.MaxVideoSizeBytes,
+	}))
+	return applicationcatalog.NewService(repository, options...), nil
 }
 
 func newCatalogScheduledHandlers(

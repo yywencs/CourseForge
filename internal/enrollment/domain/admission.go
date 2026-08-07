@@ -78,18 +78,56 @@ type EligibilitySnapshot struct {
 	EnrolledSchedules []ScheduleSlot
 }
 
-type EligibilityPolicy struct{}
+// StaticEligibilityPolicy 判断只随学生档案或教学班规则变化的资格条件。
+// 这些条件适合在选课轮次开放前批量计算并写入缓存。
+type StaticEligibilityPolicy struct{}
+
+// DynamicEligibilityPolicy 判断会随选课行为实时变化的资格条件。
+// 课表冲突和重复选课必须在提交时再次判断，不能只依赖预热结果。
+type DynamicEligibilityPolicy struct{}
+
+// EligibilityPolicy 组合静态与动态资格策略，保留完整的同步校验入口。
+type EligibilityPolicy struct {
+	static  StaticEligibilityPolicy
+	dynamic DynamicEligibilityPolicy
+}
 
 // EnsureNoExistingEnrollment 判断学生是否已经在同一学期修读目标课程。
 // 查询事实由应用层提供，是否允许再次选择由领域策略决定。
-func (EligibilityPolicy) EnsureNoExistingEnrollment(exists bool) error {
+func (DynamicEligibilityPolicy) EnsureNoExistingEnrollment(exists bool) error {
 	if exists {
 		return ErrDuplicateSelection
 	}
 	return nil
 }
 
-func (EligibilityPolicy) Evaluate(snapshot *EligibilitySnapshot) error {
+// EnsureNoScheduleConflict 判断 Redis 实时课表索引是否检测到时间冲突。
+func (DynamicEligibilityPolicy) EnsureNoScheduleConflict(conflicts bool) error {
+	if conflicts {
+		return ErrScheduleConflict
+	}
+	return nil
+}
+
+// SelectionQuotaAvailability 是提交时剩余额度的最小领域事实。
+type SelectionQuotaAvailability struct {
+	CreditRemaining Credit
+	CourseRemaining int64
+}
+
+// Validate 校验本次选课是否仍在剩余学分和门数额度内。
+func (a SelectionQuotaAvailability) Validate(credits Credit) error {
+	if !credits.Valid() || a.CreditRemaining < credits {
+		return ErrCreditQuotaExceeded
+	}
+	if a.CourseRemaining <= 0 {
+		return ErrCourseQuotaExceeded
+	}
+	return nil
+}
+
+// Evaluate 校验学籍状态、年级、专业范围与先修课要求。
+func (StaticEligibilityPolicy) Evaluate(snapshot *EligibilitySnapshot) error {
 	if snapshot == nil || snapshot.Student == nil || snapshot.Student.ID == 0 {
 		return ErrInvalidParams
 	}
@@ -109,6 +147,14 @@ func (EligibilityPolicy) Evaluate(snapshot *EligibilitySnapshot) error {
 	if !prerequisitesSatisfied(snapshot.Prerequisites, snapshot.Achievements) {
 		return ErrPrerequisiteNotMet
 	}
+	return nil
+}
+
+// Evaluate 校验目标教学班与学生已选课程之间的时间冲突。
+func (DynamicEligibilityPolicy) Evaluate(snapshot *EligibilitySnapshot) error {
+	if snapshot == nil {
+		return ErrInvalidParams
+	}
 	for _, target := range snapshot.TargetSchedules {
 		for _, selected := range snapshot.EnrolledSchedules {
 			if target.Conflicts(selected) {
@@ -117,6 +163,19 @@ func (EligibilityPolicy) Evaluate(snapshot *EligibilitySnapshot) error {
 		}
 	}
 	return nil
+}
+
+// EnsureNoExistingEnrollment 判断学生是否已经在同一学期修读目标课程。
+func (p EligibilityPolicy) EnsureNoExistingEnrollment(exists bool) error {
+	return p.dynamic.EnsureNoExistingEnrollment(exists)
+}
+
+// Evaluate 依次执行静态资格与动态资格校验。
+func (p EligibilityPolicy) Evaluate(snapshot *EligibilitySnapshot) error {
+	if err := p.static.Evaluate(snapshot); err != nil {
+		return err
+	}
+	return p.dynamic.Evaluate(snapshot)
 }
 
 func majorAllowed(majorID uint64, scopes []MajorScope) bool {

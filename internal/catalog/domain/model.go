@@ -17,6 +17,7 @@ type CourseDetails struct {
 type CourseUsage struct {
 	TeachingClassCount           int64
 	NonPlannedTeachingClassCount int64
+	RoundBoundTeachingClassCount int64
 	CourseVideoCount             int64
 	PrerequisiteCount            int64
 	StudentHistoryCount          int64
@@ -342,7 +343,7 @@ func (c *Course) Change(details CourseDetails, usage CourseUsage) error {
 	}
 	coreChanged := c.CourseCode != details.CourseCode ||
 		c.CourseName != details.CourseName || c.Credits != details.Credits
-	if coreChanged && usage.NonPlannedTeachingClassCount > 0 {
+	if coreChanged && (usage.NonPlannedTeachingClassCount > 0 || usage.RoundBoundTeachingClassCount > 0) {
 		return ErrCourseCoreLocked
 	}
 	c.CourseCode = details.CourseCode
@@ -456,15 +457,15 @@ func (c *TeachingClass) ChangePlan(plan TeachingClassPlan, usage TeachingClassUs
 	if c.State != TeachingClassStatePlanned {
 		return ErrTeachingClassNotEditable
 	}
+	if usage.RoundBindingCount > 0 {
+		return ErrTeachingClassNotEditable
+	}
 	plan, err := normalizeTeachingClassPlan(plan)
 	if err != nil {
 		return err
 	}
 	if plan.Capacity < c.SelectedCount {
 		return ErrInvalidTeachingClass
-	}
-	if c.TermID != plan.TermID && usage.RoundBindingCount > 0 {
-		return ErrTeachingClassTermLocked
 	}
 	c.ClassCode = plan.ClassCode
 	c.TermID = plan.TermID

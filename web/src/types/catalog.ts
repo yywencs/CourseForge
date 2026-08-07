@@ -102,8 +102,23 @@ export interface SelectionRound {
   end_time: string
   state: SelectionRoundState
   class_count: number
+	warmup_state?: RoundWarmupState
+	warmup_version?: string
   create_time?: string
   update_time?: string
+}
+
+export type RoundWarmupState = 'queued' | 'running' | 'ready' | 'failed'
+
+export interface RoundWarmupStatus {
+	round_id: number
+	version: string
+	state: RoundWarmupState
+	student_count: number
+	eligible_count: number
+	started_at: string
+	finished_at?: string
+	error_message?: string
 }
 
 export interface RoundClassBinding {

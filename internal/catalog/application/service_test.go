@@ -13,6 +13,33 @@ import (
 	"github.com/google/uuid"
 )
 
+type studentEligibilityFilterStub struct {
+	classIDs []uint64
+	ready    bool
+}
+
+func (s studentEligibilityFilterStub) ListEligibleClassIDs(
+	context.Context, uint64, uint64,
+) ([]uint64, bool, error) {
+	return s.classIDs, s.ready, nil
+}
+
+func TestListStudentCatalogAppliesReadyEligibilityIndex(t *testing.T) {
+	repository := &repositoryStub{}
+	service := NewService(repository, WithStudentEligibilityFilter(studentEligibilityFilterStub{
+		classIDs: []uint64{11, 12}, ready: true,
+	}))
+	if _, err := service.ListStudentCatalog(context.Background(), StudentCatalogQuery{
+		RoundID: 3, StudentID: 7,
+	}); err != nil {
+		t.Fatalf("ListStudentCatalog() error = %v", err)
+	}
+	query := repository.studentCatalogQuery
+	if !query.EligibilityFiltered || len(query.EligibleClassIDs) != 2 || query.EligibleClassIDs[0] != 11 {
+		t.Fatalf("repository query = %+v", query)
+	}
+}
+
 func TestCourseVideoUploadCompletesAfterObjectVerification(t *testing.T) {
 	repository := &videoRepositoryStub{repositoryStub: repositoryStub{
 		course: &domain.Course{ID: 1, CourseCode: "CS-101", CourseName: "程序设计", Credits: 3},
@@ -469,9 +496,10 @@ type repositoryStub struct {
 	saveCourseCalled bool
 	saveClassCalled  bool
 
-	expiredUploads    []domain.CourseVideoUpload
-	listCleanupBefore time.Time
-	listCleanupLimit  int
+	expiredUploads      []domain.CourseVideoUpload
+	listCleanupBefore   time.Time
+	listCleanupLimit    int
+	studentCatalogQuery StudentCatalogQuery
 }
 
 type videoRepositoryStub struct {
@@ -716,7 +744,8 @@ func (r *repositoryStub) ListExpiredCourseVideoUploads(_ context.Context, cleanu
 func (r *repositoryStub) ListTeachingClasses(context.Context, uint64, string) ([]TeachingClassView, error) {
 	return nil, nil
 }
-func (r *repositoryStub) ListStudentCatalog(context.Context, StudentCatalogQuery) ([]TeachingClassView, error) {
+func (r *repositoryStub) ListStudentCatalog(_ context.Context, query StudentCatalogQuery) ([]TeachingClassView, error) {
+	r.studentCatalogQuery = query
 	return nil, nil
 }
 func (r *repositoryStub) GetTeachingClass(context.Context, uint64) (*TeachingClassView, error) {

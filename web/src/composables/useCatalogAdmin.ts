@@ -12,6 +12,9 @@ import {
   listRoundClasses,
   listSelectionRounds,
   listTeachingClasses,
+	getSelectionRoundWarmup,
+	requestSelectionRoundWarmup,
+	openSelectionRound,
   unbindRoundClass,
   updateCourse,
   updateSelectionRound,
@@ -21,6 +24,7 @@ import type {
   Course,
   CourseDraft,
   RoundClassBinding,
+	RoundWarmupStatus,
   SelectionRound,
   SelectionRoundDraft,
   TeachingClass,
@@ -32,6 +36,7 @@ export function useCatalogAdmin() {
   const teachingClasses = shallowRef<TeachingClass[]>([])
   const rounds = shallowRef<SelectionRound[]>([])
   const bindings = shallowRef<RoundClassBinding[]>([])
+	const warmupStatuses = shallowRef<Record<number, RoundWarmupStatus | null>>({})
   const loadingCount = shallowRef(0)
   const activeRoundId = shallowRef(0)
   const isLoading = computed(() => loadingCount.value > 0)
@@ -55,6 +60,10 @@ export function useCatalogAdmin() {
       courses.value = courseResult.items
       teachingClasses.value = classResult.items
       rounds.value = roundResult.items
+		warmupStatuses.value = Object.fromEntries(roundResult.items.map((round) => [round.id, round.warmup_state ? {
+			round_id: round.id, version: round.warmup_version ?? '', state: round.warmup_state,
+			student_count: 0, eligible_count: 0, started_at: '',
+		} : null]))
     })
   }
 
@@ -88,6 +97,25 @@ export function useCatalogAdmin() {
     rounds.value = rounds.value.filter((item) => item.id !== id)
   }
 
+	async function warmupRound(id: number): Promise<void> {
+		await tracked(() => requestSelectionRoundWarmup(id))
+		warmupStatuses.value = { ...warmupStatuses.value, [id]: {
+			round_id: id, version: '', state: 'queued', student_count: 0,
+			eligible_count: 0, started_at: new Date().toISOString(),
+		} }
+	}
+
+	async function refreshWarmupStatus(id: number): Promise<RoundWarmupStatus | null> {
+		const status = await tracked(() => getSelectionRoundWarmup(id))
+		warmupStatuses.value = { ...warmupStatuses.value, [id]: status }
+		return status
+	}
+
+	async function openRound(id: number): Promise<void> {
+		await tracked(() => openSelectionRound(id))
+		rounds.value = (await listSelectionRounds()).items
+	}
+
   async function loadBindings(roundId: number): Promise<void> {
     activeRoundId.value = roundId
     bindings.value = (await tracked(() => listRoundClasses(roundId))).items
@@ -108,6 +136,7 @@ export function useCatalogAdmin() {
     teachingClasses: readonly(teachingClasses),
     rounds: readonly(rounds),
     bindings: readonly(bindings),
+		warmupStatuses: readonly(warmupStatuses),
     activeRoundId: readonly(activeRoundId),
     isLoading,
     refreshAll,
@@ -117,6 +146,9 @@ export function useCatalogAdmin() {
     removeTeachingClass,
     saveRound,
     removeRound,
+		warmupRound,
+		refreshWarmupStatus,
+		openRound,
     loadBindings,
     addBinding,
     removeBinding,

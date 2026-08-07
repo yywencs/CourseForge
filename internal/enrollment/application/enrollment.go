@@ -97,8 +97,7 @@ func (u *EnrollmentUsecase) ListEnrollments(
 }
 
 // SelectCourse 执行最小选课链路：
-// 资格预检 → 原子占用额度/名额并创建申请 → 抢占处理权
-// → 完成结果 → 确认可靠投递。
+// 资格预检 → 原子完成选课决策与结果出站 → 确认可靠投递。
 func (u *EnrollmentUsecase) SelectCourse(
 	ctx context.Context,
 	command *SelectCourseCommand,
@@ -144,7 +143,7 @@ func (u *EnrollmentUsecase) SelectCourse(
 		if existing.Publication != nil {
 			return u.publishCompleted(ctx, existing.Publication)
 		}
-		return u.processReservedSelection(ctx, existing.Application)
+		return u.commitSelection(ctx, existing.Application)
 	}
 
 	now := u.now()
@@ -162,19 +161,7 @@ func (u *EnrollmentUsecase) SelectCourse(
 		return nil, err
 	}
 
-	reservation, err := u.appRepo.ReserveSelection(ctx, application)
-	if err != nil {
-		return nil, err
-	}
-	if reservation == nil || reservation.Application == nil {
-		return nil, enrollment.ErrRecordNotFound
-	}
-	application = reservation.Application
-
-	if reservation.Status == ReservationStatusCompleted {
-		return u.publishCompleted(ctx, reservation.Publication)
-	}
-	return u.processReservedSelection(ctx, application)
+	return u.commitSelection(ctx, application)
 }
 
 func selectionOutcome(err error) SelectionOutcome {
@@ -205,6 +192,8 @@ func selectionOutcome(err error) SelectionOutcome {
 		return SelectionOutcomeMajorNotAllowed
 	case errors.Is(err, enrollment.ErrGradeNotAllowed):
 		return SelectionOutcomeGradeNotAllowed
+	case errors.Is(err, enrollment.ErrEligibilityNotMet):
+		return SelectionOutcomeEligibilityNotMet
 	case errors.Is(err, enrollment.ErrScheduleConflict):
 		return SelectionOutcomeScheduleConflict
 	case errors.Is(err, enrollment.ErrIdempotencyConflict):
@@ -218,19 +207,27 @@ func selectionOutcome(err error) SelectionOutcome {
 	}
 }
 
-func (u *EnrollmentUsecase) processReservedSelection(
+// commitSelection 在内存中完成领域状态迁移，再由存储端以单次原子操作提交资源扣减、
+// 最终结果和 Redis Stream 出站记录。若幂等查询返回尚未提交的 reserved 申请，
+// 这里也可以继续完成提交。
+func (u *EnrollmentUsecase) commitSelection(
 	ctx context.Context,
 	application *enrollment.SelectionApplication,
 ) (*SelectionReceipt, error) {
 	if application == nil {
 		return nil, enrollment.ErrRecordNotFound
 	}
+	if application.State == enrollment.ApplicationStateCreated {
+		if err := application.Reserve(); err != nil {
+			return nil, err
+		}
+	}
 	result, err := application.CompleteSelected(u.now())
 	if err != nil {
 		return nil, err
 	}
 
-	publication, err := u.appRepo.CompleteSelection(ctx, result)
+	publication, err := u.appRepo.CommitSelection(ctx, result)
 	if err != nil {
 		return nil, err
 	}

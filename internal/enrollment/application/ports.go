@@ -7,33 +7,20 @@ import (
 	"github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
-// EligibilityQuery loads the facts needed by the pure domain eligibility policy.
-type EligibilityQuery interface {
-	QueryEligibilitySnapshot(
-		context.Context,
-		uint64,
-		uint64,
-		uint64,
-		uint64,
-	) (*enrollment.EligibilitySnapshot, error)
-}
-
-// SelectionAdmissionQuery supplies the business facts needed to admit a request.
+// SelectionAdmissionQuery 从选课实时索引读取一次准入所需的完整快照。
 type SelectionAdmissionQuery interface {
-	QuerySelectionRound(context.Context, uint64) (*enrollment.SelectionRound, error)
-	QueryTeachingClass(context.Context, uint64, uint64) (*enrollment.TeachingClass, error)
-	QueryStudentSelectionQuota(
+	QuerySelectionAdmission(
 		context.Context,
 		uint64,
 		uint64,
-	) (*enrollment.StudentSelectionQuota, error)
-	HasExistingEnrollment(context.Context, uint64, uint64, uint64) (bool, error)
+		uint64,
+		time.Time,
+	) (*SelectionAdmissionSnapshot, error)
 }
 
 // SelectionQuery contains the read operations consumed by enrollment use cases.
 // Cache/database lookup order is an adapter concern and is intentionally absent here.
 type SelectionQuery interface {
-	SelectionAdmissionQuery
 	QuerySelectionByRequest(
 		context.Context,
 		uint64,
@@ -54,13 +41,9 @@ type SelectionQuery interface {
 	) (*enrollment.EnrollmentPage, error)
 }
 
-// SelectionStore persists the selection application lifecycle atomically.
+// SelectionStore 原子提交选课结果及其可靠投递记录。
 type SelectionStore interface {
-	ReserveSelection(
-		context.Context,
-		*enrollment.SelectionApplication,
-	) (*SelectionReservation, error)
-	CompleteSelection(
+	CommitSelection(
 		context.Context,
 		*enrollment.SelectionResult,
 	) (*SelectionResultPublication, error)

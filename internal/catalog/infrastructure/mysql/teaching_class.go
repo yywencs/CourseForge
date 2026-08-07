@@ -125,6 +125,9 @@ func (r *Repository) ListStudentCatalog(ctx context.Context, query applicationca
 		Joins("JOIN course AS c ON c.id = tc.course_id").
 		Joins("LEFT JOIN course_video AS cv ON cv.course_id = c.id AND cv.video_kind = ? AND cv.sort_order = 0 AND cv.status = ?", string(catalog.CourseVideoKindPreview), string(catalog.CourseVideoStatusReady)).
 		Where("src.round_id = ? AND src.state = ? AND sr.state = ? AND sr.start_time <= NOW(3) AND sr.end_time > NOW(3) AND tc.state = ?", query.RoundID, "open", "open", string(catalog.TeachingClassStateOpen))
+	if query.EligibilityFiltered {
+		db = db.Where("tc.id IN ?", query.EligibleClassIDs)
+	}
 	if keyword := strings.TrimSpace(query.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
 		db = db.Where("tc.class_code LIKE ? OR c.course_code LIKE ? OR c.course_name LIKE ? OR tc.teacher_name LIKE ?", like, like, like, like)
@@ -253,7 +256,7 @@ func (r *Repository) SaveTeachingClass(ctx context.Context, class *catalog.Teach
 			"class_code": class.ClassCode, "term_id": class.TermID, "course_id": class.CourseID,
 			"teacher_name": class.TeacherName, "location": class.Location, "capacity": class.Capacity,
 			"minimum_grade_year": class.MinimumGradeYear, "maximum_grade_year": class.MaximumGradeYear,
-			"update_time": gorm.Expr("GREATEST(DATE_ADD(update_time, INTERVAL 1 MILLISECOND), NOW(3))"),
+			"update_time": gorm.Expr("GREATEST(DATE_ADD(update_time, INTERVAL 1000 MICROSECOND), NOW(3))"),
 		})
 	if err := requireConditionalWrite(result); err != nil {
 		return err

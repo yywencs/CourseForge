@@ -1,6 +1,8 @@
 package bootstrap
 
 import (
+	"time"
+
 	enrollmentapp "github.com/yywencs/courseforge/internal/enrollment/application"
 	enrollmentasync "github.com/yywencs/courseforge/internal/enrollment/async"
 	enrollmentobservability "github.com/yywencs/courseforge/internal/enrollment/infrastructure/observability"
@@ -77,6 +79,10 @@ func newEnrollmentModule(runtime *apiRuntime, authMiddleware gin.HandlerFunc) *e
 		stores.Projections,
 		observer,
 	)
+	countProjectionUsecase := enrollmentapp.NewEnrollmentCountProjectionUsecase(
+		stores.CountProjections,
+		7*24*time.Hour,
+	)
 
 	selectionLimiter := middleware.NewSelectionRateLimiter(runtime.cfg.Dcc.RateLimit)
 	return &enrollmentModule{
@@ -93,6 +99,22 @@ func newEnrollmentModule(runtime *apiRuntime, authMiddleware gin.HandlerFunc) *e
 				enrollmentasync.TaskTypeRoundWarmup,
 				"",
 				enrollmentasync.NewRoundWarmupJob(roundWarmupService).ProcessTask,
+			),
+			taskqueue.NewScheduledHandler(
+				enrollmentasync.TaskTypeEnrollmentCountProjection,
+				"@every 1s",
+				enrollmentasync.NewEnrollmentCountProjectionJob(
+					countProjectionUsecase,
+					500,
+				).ProcessTask,
+			),
+			taskqueue.NewScheduledHandler(
+				enrollmentasync.TaskTypeEnrollmentCountCleanup,
+				"@every 1h",
+				enrollmentasync.NewEnrollmentCountCleanupJob(
+					countProjectionUsecase,
+					1000,
+				).ProcessTask,
 			),
 			taskqueue.NewScheduledHandler(
 				enrollmentasync.TaskTypeSelectionResultPublish,

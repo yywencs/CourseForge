@@ -176,6 +176,44 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 			enrollmentCount,
 		)
 	}
+	var pendingCountDelta int64
+	if err := integrationCourseForgeDB.Table("enrollment_count_delta").
+		Where(
+			"event_id = ? AND processed_at IS NULL",
+			fmt.Sprintf("selection:%d:%s", studentID, applicationID),
+		).
+		Count(&pendingCountDelta).Error; err != nil {
+		t.Fatalf("query pending enrollment count delta: %v", err)
+	}
+	if pendingCountDelta != 1 {
+		t.Fatalf("pending enrollment count delta = %d, want 1", pendingCountDelta)
+	}
+	projected, err := repo.ProjectPendingEnrollmentCounts(
+		context.Background(),
+		500,
+		time.Now(),
+	)
+	if err != nil || projected < 1 {
+		t.Fatalf("ProjectPendingEnrollmentCounts() = %d, %v", projected, err)
+	}
+	var selectedCount uint32
+	if err := integrationCourseForgeDB.Table("teaching_class").
+		Select("selected_count").
+		Where("id = ?", classID).
+		Scan(&selectedCount).Error; err != nil {
+		t.Fatalf("query projected selected count: %v", err)
+	}
+	if selectedCount != 1 {
+		t.Fatalf("projected selected count = %d, want 1", selectedCount)
+	}
+	projected, err = repo.ProjectPendingEnrollmentCounts(
+		context.Background(),
+		500,
+		time.Now(),
+	)
+	if err != nil || projected != 0 {
+		t.Fatalf("idempotent ProjectPendingEnrollmentCounts() = %d, %v, want 0", projected, err)
+	}
 	applicationRecord, err := repo.QuerySelectionApplication(
 		context.Background(), applicationID, studentID,
 	)
@@ -508,6 +546,22 @@ func TestEnrollmentRepositoryDropAndProjectionRepair(t *testing.T) {
 	); err != nil {
 		t.Fatalf("MarkProjectionRepairCompleted() error = %v", err)
 	}
+	projected, err := repo.ProjectPendingEnrollmentCounts(
+		context.Background(),
+		500,
+		time.Now(),
+	)
+	if err != nil || projected < 1 {
+		t.Fatalf("ProjectPendingEnrollmentCounts(drop) = %d, %v", projected, err)
+	}
+	var selectedCount uint32
+	if err := db.Table("teaching_class").Select("selected_count").
+		Where("id = ?", classID).Scan(&selectedCount).Error; err != nil {
+		t.Fatalf("query selected count after drop projection: %v", err)
+	}
+	if selectedCount != 0 {
+		t.Fatalf("selected count after drop projection = %d, want 0", selectedCount)
+	}
 	assertRedisInt(t, fmt.Sprintf("courseforge:selection:quota:credit:%d:%d", roundID, studentID), 200)
 	assertRedisInt(t, fmt.Sprintf("courseforge:selection:quota:course:%d:%d", roundID, studentID), 6)
 	assertRedisInt(t, fmt.Sprintf("courseforge:selection:class:seat:%d", classID), 2)
@@ -748,6 +802,12 @@ func seedEnrollmentIntegrationData(
 		}
 	}
 	t.Cleanup(func() {
+		db.Exec(
+			`DELETE ecd FROM enrollment_count_delta ecd
+			 JOIN selection_event se ON se.event_id = ecd.event_id
+			 WHERE se.student_id = ?`,
+			studentID,
+		)
 		db.Exec(
 			`DELETE epr FROM enrollment_projection_repair epr
 			 JOIN student_course_enrollment sce ON sce.enrollment_id = epr.enrollment_id

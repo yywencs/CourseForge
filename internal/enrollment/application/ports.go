@@ -69,6 +69,12 @@ type ProjectionRepairStore interface {
 	CountPendingProjectionRepairs(context.Context) (int64, error)
 }
 
+// EnrollmentCountProjectionStore 原子批量应用教学班已选人数增量，并清理历史增量。
+type EnrollmentCountProjectionStore interface {
+	ProjectPendingEnrollmentCounts(context.Context, int, time.Time) (int, error)
+	DeleteProcessedEnrollmentCountDeltas(context.Context, time.Time, int) (int64, error)
+}
+
 type WaitlistStore interface {
 	JoinWaitlist(context.Context, *enrollment.WaitlistEntry) (*enrollment.WaitlistEntry, error)
 	QueryWaitlist(context.Context, string, uint64) (*enrollment.WaitlistEntry, error)

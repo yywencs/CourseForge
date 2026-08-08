@@ -126,17 +126,14 @@ func (r *EnrollmentStore) DropEnrollment(
 		if quota.RowsAffected != 1 {
 			return enrollment.ErrInvalidEnrollmentState
 		}
-		class := tx.Table("teaching_class").
-			Where("id = ? AND selected_count > 0", target.TeachingClassID).
-			Updates(map[string]interface{}{
-				"selected_count": gorm.Expr("selected_count - 1"),
-				"update_time":    now,
-			})
-		if class.Error != nil {
-			return class.Error
-		}
-		if class.RowsAffected != 1 {
-			return enrollment.ErrInvalidEnrollmentState
+		if err := appendEnrollmentCountDelta(
+			tx,
+			"drop:"+target.EnrollmentID,
+			target.TeachingClassID,
+			-1,
+			now,
+		); err != nil {
+			return err
 		}
 		eventPayload, err := json.Marshal(newDroppedEnrollmentEventPayload(target))
 		if err != nil {

@@ -267,6 +267,9 @@ func prepareCourseSelectionData(
 		`DELETE epr FROM enrollment_projection_repair epr
 		  JOIN student_course_enrollment sce ON sce.enrollment_id = epr.enrollment_id
 		 WHERE sce.student_id BETWEEN ? AND ?`,
+		`DELETE ecd FROM enrollment_count_delta ecd
+		  JOIN selection_event se ON se.event_id = ecd.event_id
+		 WHERE se.student_id BETWEEN ? AND ?`,
 		`DELETE FROM selection_waitlist WHERE student_id BETWEEN ? AND ?`,
 		`DELETE FROM selection_event WHERE student_id BETWEEN ? AND ?`,
 		`DELETE FROM student_course_enrollment WHERE student_id BETWEEN ? AND ?`,

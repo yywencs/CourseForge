@@ -508,6 +508,21 @@ CREATE TABLE `selection_event` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='选课事件审计，同时作为RabbitMQ消费幂等凭据';
 
+CREATE TABLE `enrollment_count_delta` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `event_id` varchar(64) NOT NULL COMMENT '产生增量的业务事件ID',
+  `teaching_class_id` bigint unsigned NOT NULL COMMENT '教学班ID',
+  `delta` tinyint NOT NULL COMMENT '选课为1，退课为-1',
+  `processed_at` datetime(3) DEFAULT NULL COMMENT '计数投影完成时间',
+  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_enrollment_count_delta_event` (`event_id`),
+  KEY `idx_enrollment_count_delta_pending` (`processed_at`, `id`),
+  CONSTRAINT `chk_enrollment_count_delta_value`
+    CHECK (`delta` IN (-1, 1))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='教学班已选人数增量；批量投影到teaching_class.selected_count';
+
 CREATE TABLE `enrollment_projection_repair` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `repair_id` varchar(64) NOT NULL COMMENT '修复任务业务ID',

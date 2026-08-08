@@ -42,6 +42,10 @@ type RepairStore struct {
 	db *gorm.DB
 }
 
+type CountProjectionStore struct {
+	db *gorm.DB
+}
+
 type WaitlistStore struct {
 	db *gorm.DB
 }
@@ -56,6 +60,7 @@ type Stores struct {
 	Enrollments      *EnrollmentStore
 	Projections      *ProjectionStore
 	Repairs          *RepairStore
+	CountProjections *CountProjectionStore
 	Waitlist         *WaitlistStore
 	EligibilityIndex *EligibilityIndex
 }
@@ -71,19 +76,21 @@ func NewStores(db *gorm.DB, redis *cache.Cache, ids IDGenerator) *Stores {
 		Enrollments:      &EnrollmentStore{db: db},
 		Projections:      &ProjectionStore{redis: redis},
 		Repairs:          &RepairStore{db: db},
+		CountProjections: &CountProjectionStore{db: db},
 		Waitlist:         &WaitlistStore{db: db},
 		EligibilityIndex: eligibilityIndex,
 	}
 }
 
 var (
-	_ application.SelectionQuery          = (*QueryStore)(nil)
-	_ application.RoundWarmupSource       = (*EligibilityStore)(nil)
-	_ application.EligibilityWarmupIndex  = (*EligibilityIndex)(nil)
-	_ application.SelectionAdmissionQuery = (*EligibilityIndex)(nil)
-	_ application.SelectionStore          = (*SelectionStore)(nil)
-	_ application.EnrollmentStore         = (*EnrollmentStore)(nil)
-	_ application.EnrollmentProjection    = (*ProjectionStore)(nil)
-	_ application.ProjectionRepairStore   = (*RepairStore)(nil)
-	_ application.WaitlistStore           = (*WaitlistStore)(nil)
+	_ application.SelectionQuery                 = (*QueryStore)(nil)
+	_ application.RoundWarmupSource              = (*EligibilityStore)(nil)
+	_ application.EligibilityWarmupIndex         = (*EligibilityIndex)(nil)
+	_ application.SelectionAdmissionQuery        = (*EligibilityIndex)(nil)
+	_ application.SelectionStore                 = (*SelectionStore)(nil)
+	_ application.EnrollmentStore                = (*EnrollmentStore)(nil)
+	_ application.EnrollmentProjection           = (*ProjectionStore)(nil)
+	_ application.ProjectionRepairStore          = (*RepairStore)(nil)
+	_ application.EnrollmentCountProjectionStore = (*CountProjectionStore)(nil)
+	_ application.WaitlistStore                  = (*WaitlistStore)(nil)
 )

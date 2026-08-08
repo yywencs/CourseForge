@@ -20,6 +20,7 @@ type enrollmentRepositoryFixture struct {
 	*enrollmentrepo.EnrollmentStore
 	*enrollmentrepo.ProjectionStore
 	*enrollmentrepo.RepairStore
+	*enrollmentrepo.CountProjectionStore
 	*enrollmentrepo.WaitlistStore
 	*enrollmentrepo.EligibilityIndex
 }
@@ -30,14 +31,15 @@ func newEnrollmentRepositoryFixture(
 ) *enrollmentRepositoryFixture {
 	stores := enrollmentrepo.NewStores(db, redis, identifier.NewOrderIDGenerator())
 	return &enrollmentRepositoryFixture{
-		QueryStore:       stores.Queries,
-		EligibilityStore: stores.Eligibility,
-		SelectionStore:   stores.Selections,
-		ResultStore:      stores.Results,
-		EnrollmentStore:  stores.Enrollments,
-		ProjectionStore:  stores.Projections,
-		RepairStore:      stores.Repairs,
-		WaitlistStore:    stores.Waitlist,
-		EligibilityIndex: stores.EligibilityIndex,
+		QueryStore:           stores.Queries,
+		EligibilityStore:     stores.Eligibility,
+		SelectionStore:       stores.Selections,
+		ResultStore:          stores.Results,
+		EnrollmentStore:      stores.Enrollments,
+		ProjectionStore:      stores.Projections,
+		RepairStore:          stores.Repairs,
+		CountProjectionStore: stores.CountProjections,
+		WaitlistStore:        stores.Waitlist,
+		EligibilityIndex:     stores.EligibilityIndex,
 	}
 }

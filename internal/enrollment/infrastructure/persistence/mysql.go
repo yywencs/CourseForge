@@ -24,7 +24,8 @@ type persistedApplication struct {
 }
 
 // SaveSelectionResult 将 Redis 已完成的选课结果幂等写入 MySQL。
-// Redis 已经完成热路径预占，MySQL 仍通过条件更新再次守住额度和容量下限。
+// Redis 已经原子守住实时额度与容量；MySQL 在同一事务写入选课事实、学生额度镜像和
+// 教学班计数增量，避免每条消费消息竞争同一教学班计数行。
 func (r *ResultStore) SaveSelectionResult(
 	ctx context.Context,
 	result *enrollment.SelectionResult,
@@ -56,7 +57,7 @@ func (r *ResultStore) SaveSelectionResult(
 		}
 
 		if result.State == enrollment.ApplicationStateSelected {
-			if err := persistSelectedResources(tx, result); err != nil {
+			if err := persistSelectedQuota(tx, result); err != nil {
 				return err
 			}
 		}
@@ -87,6 +88,15 @@ func (r *ResultStore) SaveSelectionResult(
 				"create_time": time.Now(),
 				"update_time": time.Now(),
 			}).Error; err != nil {
+				return err
+			}
+			if err := appendEnrollmentCountDelta(
+				tx,
+				fmt.Sprintf("selection:%d:%s", result.StudentID, result.ApplicationID),
+				result.TeachingClassID,
+				1,
+				result.CompletedAt,
+			); err != nil {
 				return err
 			}
 		}
@@ -121,7 +131,7 @@ func (r *ResultStore) SaveSelectionResult(
 	return nil
 }
 
-func persistSelectedResources(tx *gorm.DB, result *enrollment.SelectionResult) error {
+func persistSelectedQuota(tx *gorm.DB, result *enrollment.SelectionResult) error {
 	credit := creditToDecimal(result.Credits)
 	quotaUpdate := tx.Table("student_selection_quota").
 		Where(
@@ -144,24 +154,22 @@ func persistSelectedResources(tx *gorm.DB, result *enrollment.SelectionResult) e
 		return enrollment.ErrCreditQuotaExceeded
 	}
 
-	classUpdate := tx.Table("teaching_class").
-		Where(
-			"id = ? AND term_id = ? AND course_id = ? AND selected_count < capacity",
-			result.TeachingClassID,
-			result.TermID,
-			result.CourseID,
-		).
-		Updates(map[string]interface{}{
-			"selected_count": gorm.Expr("selected_count + 1"),
-			"update_time":    time.Now(),
-		})
-	if classUpdate.Error != nil {
-		return classUpdate.Error
-	}
-	if classUpdate.RowsAffected != 1 {
-		return enrollment.ErrTeachingClassFull
-	}
 	return nil
+}
+
+func appendEnrollmentCountDelta(
+	tx *gorm.DB,
+	eventID string,
+	teachingClassID uint64,
+	delta int8,
+	createdAt time.Time,
+) error {
+	return tx.Table("enrollment_count_delta").Create(map[string]interface{}{
+		"event_id":          eventID,
+		"teaching_class_id": teachingClassID,
+		"delta":             delta,
+		"create_time":       createdAt,
+	}).Error
 }
 
 func createSelectionApplication(tx *gorm.DB, result *enrollment.SelectionResult) error {

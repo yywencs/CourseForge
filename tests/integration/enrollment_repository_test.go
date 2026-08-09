@@ -13,12 +13,18 @@ import (
 	application "github.com/yywencs/courseforge/internal/enrollment/application"
 	enrollmentasync "github.com/yywencs/courseforge/internal/enrollment/async"
 	"github.com/yywencs/courseforge/internal/enrollment/domain"
+	enrollmentintegration "github.com/yywencs/courseforge/internal/enrollment/integration"
+	notificationasync "github.com/yywencs/courseforge/internal/notification/async"
+	"github.com/yywencs/courseforge/internal/notification/domain"
+	notificationmysql "github.com/yywencs/courseforge/internal/notification/infrastructure/mysql"
+	outboxdispatcher "github.com/yywencs/courseforge/internal/platform/outbox/dispatcher"
+	outboxrepo "github.com/yywencs/courseforge/internal/platform/outbox/mysql"
+	outboxrelay "github.com/yywencs/courseforge/internal/platform/outbox/relay"
 	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
-	"github.com/yywencs/courseforge/pkg/xrand"
 )
 
 // TestEnrollmentRepositoryMinimalMainChain 使用真实 MySQL 和 Redis 验证：
-// 原子选课提交/Stream → RabbitMQ Confirm → MySQL幂等落库。
+// 原子选课提交/Stream → Consumer Group → MySQL幂等落库 → XACK。
 func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 	const (
 		majorID       = uint64(990001)
@@ -85,12 +91,13 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CommitSelection() error = %v", err)
 	}
-	if publication.DeliveryCursor == "" || publication.DeliveryConfirmed {
+	if publication.StreamID == "" || !publication.StreamRecorded ||
+		publication.DurablyPersisted {
 		t.Fatalf("CommitSelection() publication = %#v", publication)
 	}
 	reusedPublication, err := repo.CommitSelection(context.Background(), result)
 	if err != nil ||
-		reusedPublication.DeliveryCursor != publication.DeliveryCursor ||
+		reusedPublication.StreamID != publication.StreamID ||
 		reusedPublication.Result.ApplicationID != applicationID {
 		t.Fatalf("CommitSelection(retry) = %#v, %v", reusedPublication, err)
 	}
@@ -118,51 +125,83 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 		t.Fatalf("selection result stream length = %d, want 1", length)
 	}
 
-	// 使用独立 topic 跑真实 RabbitMQ，避免集成测试之间相互消费消息。
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	topic := "courseforge.integration.selection-result." + xrand.RandomNumeric(12)
-	trackIntegrationRabbitMQTopology(t, topic)
-	connection, err := rabbitmq.NewConnection(integrationRabbitMQConfig)
+	trackIntegrationRabbitMQTopology(t, enrollmentintegration.SelectionNotificationTopic)
+	rabbitConnection, err := rabbitmq.NewConnection(integrationRabbitMQConfig)
 	if err != nil {
-		t.Fatalf("connect selection-result RabbitMQ: %v", err)
+		t.Fatalf("connect selection notification RabbitMQ: %v", err)
 	}
-	consumer := rabbitmq.NewRabbitMQConsumer(
-		connection,
-		rabbitmq.WithPrefetch(100),
-		rabbitmq.WithQueueBatchSize(map[string]int{topic + "_queue": 100}),
-		rabbitmq.WithQueueBatchWait(map[string]time.Duration{
-			topic + "_queue": 10 * time.Millisecond,
-		}),
+	notificationConsumer := rabbitmq.NewRabbitMQConsumer(
+		rabbitConnection,
+		rabbitmq.WithPrefetch(20),
+		rabbitmq.WithRetryPolicy(1, []time.Duration{50 * time.Millisecond}),
 	)
-	t.Cleanup(consumer.Shutdown)
-	consumer.RegisterListener(topic, enrollmentasync.NewSelectionResultListener(repo))
-	if err := consumer.Start(ctx); err != nil {
-		t.Fatalf("start selection-result consumer: %v", err)
+	notificationWriter := &notificationWriterProbe{
+		delegate: notificationmysql.NewRepository(integrationCourseForgeDB),
+		saved:    make(chan struct{}, 4),
 	}
+	notificationConsumer.RegisterListener(
+		enrollmentintegration.SelectionNotificationTopic,
+		notificationasync.NewSelectionListener(notificationWriter),
+	)
+	if err := notificationConsumer.Start(ctx); err != nil {
+		t.Fatalf("start selection notification consumer: %v", err)
+	}
+	rabbitPublisher, err := rabbitmq.NewRabbitMQPublisher(rabbitConnection, 2)
+	if err != nil {
+		t.Fatalf("create selection notification publisher: %v", err)
+	}
+	outboxRepository := outboxrepo.NewRepository(integrationCourseForgeDB)
+	relay := outboxrelay.New(
+		outboxdispatcher.NewOutboxDispatcher(
+			outboxRepository,
+			rabbitmq.NewPublisher(rabbitPublisher),
+		),
+		outboxrelay.WithBacklogReader(outboxRepository),
+	)
+	if err := relay.Start(ctx); err != nil {
+		t.Fatalf("start selection notification Outbox relay: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+		defer stopCancel()
+		_ = relay.Stop(stopCtx)
+		notificationConsumer.Shutdown()
+	})
 
-	rabbitPublisher, err := rabbitmq.NewRabbitMQPublisher(connection, 1)
-	if err != nil {
-		t.Fatalf("create selection-result publisher: %v", err)
-	}
-	publisherConfig := *integrationRabbitMQConfig
-	publisherConfig.Topic.SelectionResult = topic
-	selectionPublisher := enrollmentasync.NewSelectionResultPublisher(
+	streamConsumer := enrollmentasync.NewSelectionStreamConsumer(
+		integrationRedis,
 		repo,
-		rabbitmq.NewPublisher(rabbitPublisher, &publisherConfig),
+		enrollmentasync.SelectionStreamConsumerConfig{
+			Group:        "courseforge-integration-selection-persistence",
+			ConsumerBase: "integration",
+			Concurrency:  1,
+			BatchSize:    100,
+			BatchWait:    10 * time.Millisecond,
+			BlockTimeout: 100 * time.Millisecond,
+			ClaimIdle:    time.Second,
+		},
 	)
-	if err := selectionPublisher.Publish(ctx, publication); err != nil {
-		t.Fatalf("publish selection result with confirm: %v", err)
+	if err := streamConsumer.Start(ctx); err != nil {
+		t.Fatalf("start selection Stream consumer: %v", err)
 	}
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+		defer stopCancel()
+		_ = streamConsumer.Stop(stopCtx)
+	})
+
+	// Redis Stream 已记录结果；MySQL 消费落库是异步的，因此轮询最终状态。
+	waitForSelectionResultPersisted(t, ctx, applicationID)
+	waitForSelectionNotification(t, ctx, applicationID, studentID, 1)
+	waitForNotificationWrite(t, ctx, notificationWriter.saved)
 	if length := integrationRedisClient.XLen(
 		context.Background(),
 		"courseforge:selection:result:stream",
 	).Val(); length != 0 {
-		t.Fatalf("selection result stream length after confirm = %d, want 0", length)
+		t.Fatalf("selection result stream length after MySQL commit = %d, want 0", length)
 	}
-
-	// RabbitMQ Confirm 只代表 Broker 收到消息；MySQL 消费落库是异步的，因此轮询结果。
-	waitForSelectionResultPersisted(t, ctx, applicationID)
 
 	// 重复消费同一标准结果不应产生第二份申请单或选课记录。
 	if err := repo.SaveSelectionResult(context.Background(), result); err != nil {
@@ -183,6 +222,23 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 			enrollmentCount,
 		)
 	}
+
+	// 模拟 RabbitMQ 已接收但 Outbox published 状态未能保存：Relay 会再次发布，
+	// 通知消费者必须依靠 event_id 唯一键保持业务效果恰好一次。
+	eventID := fmt.Sprintf("selection:%d:%s", studentID, applicationID)
+	waitForOutboxRetryPublished(t, ctx, eventID, 1)
+	if err := integrationCourseForgeDB.Table("outbox_event").
+		Where("event_id = ?", eventID).
+		Updates(map[string]any{
+			"state":         "pending",
+			"next_retry_at": time.Now().Add(-time.Second),
+			"published_at":  nil,
+		}).Error; err != nil {
+		t.Fatalf("reset Outbox event for duplicate delivery: %v", err)
+	}
+	waitForOutboxRetryPublished(t, ctx, eventID, 2)
+	waitForNotificationWrite(t, ctx, notificationWriter.saved)
+	waitForSelectionNotification(t, ctx, applicationID, studentID, 1)
 	var pendingCountDelta int64
 	if err := integrationCourseForgeDB.Table("enrollment_count_delta").
 		Where(
@@ -322,6 +378,18 @@ func TestEnrollmentRepositoryConcurrentCommitDoesNotOversell(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
+		integrationCourseForgeDB.Exec(
+			"DELETE FROM student_notification WHERE student_id >= ? AND student_id < ?",
+			studentID,
+			studentID+studentCount,
+		)
+		integrationCourseForgeDB.Exec(
+			`DELETE oe FROM outbox_event oe
+			 JOIN selection_application sa ON sa.application_id = oe.aggregate_id
+			 WHERE sa.student_id >= ? AND sa.student_id < ?`,
+			studentID,
+			studentID+studentCount,
+		)
 		integrationCourseForgeDB.Exec(
 			`DELETE delta FROM enrollment_count_delta AS delta
 			 JOIN selection_event AS event ON event.event_id = delta.event_id
@@ -514,6 +582,89 @@ func TestEnrollmentRepositoryConcurrentCommitDoesNotOversell(t *testing.T) {
 			eventCount,
 			capacity,
 		)
+	}
+}
+
+func waitForSelectionNotification(
+	t *testing.T,
+	ctx context.Context,
+	applicationID string,
+	studentID uint64,
+	want int64,
+) {
+	t.Helper()
+	eventID := fmt.Sprintf("selection:%d:%s", studentID, applicationID)
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var count int64
+		err := integrationCourseForgeDB.Table("student_notification").
+			Where("event_id = ? AND student_id = ?", eventID, studentID).
+			Count(&count).Error
+		if err == nil && count == want {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatalf("wait for selection notification count %d: count=%d error=%v", want, count, err)
+		}
+	}
+}
+
+type notificationWriterProbe struct {
+	delegate interface {
+		Save(context.Context, *notification.Notification) error
+	}
+	saved chan struct{}
+}
+
+func (w *notificationWriterProbe) Save(
+	ctx context.Context,
+	n *notification.Notification,
+) error {
+	if err := w.delegate.Save(ctx, n); err != nil {
+		return err
+	}
+	w.saved <- struct{}{}
+	return nil
+}
+
+func waitForNotificationWrite(t *testing.T, ctx context.Context, writes <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-writes:
+	case <-ctx.Done():
+		t.Fatalf("wait for selection notification consumer: %v", ctx.Err())
+	}
+}
+
+func waitForOutboxRetryPublished(
+	t *testing.T,
+	ctx context.Context,
+	eventID string,
+	minimumRetryCount uint32,
+) {
+	t.Helper()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var row struct {
+			State      string
+			RetryCount uint32
+		}
+		err := integrationCourseForgeDB.Table("outbox_event").
+			Select("state, retry_count").
+			Where("event_id = ?", eventID).
+			Take(&row).Error
+		if err == nil && row.State == "published" && row.RetryCount >= minimumRetryCount {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatalf("wait for duplicate Outbox publish: row=%#v error=%v", row, err)
+		}
 	}
 }
 
@@ -857,6 +1008,13 @@ func seedEnrollmentIntegrationData(
 		}
 	}
 	t.Cleanup(func() {
+		db.Exec("DELETE FROM student_notification WHERE student_id = ?", studentID)
+		db.Exec(
+			`DELETE oe FROM outbox_event oe
+			 JOIN selection_application sa ON sa.application_id = oe.aggregate_id
+			 WHERE sa.student_id = ?`,
+			studentID,
+		)
 		db.Exec(
 			`DELETE ecd FROM enrollment_count_delta ecd
 			 JOIN selection_event se ON se.event_id = ecd.event_id

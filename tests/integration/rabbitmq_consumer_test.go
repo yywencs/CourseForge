@@ -275,7 +275,7 @@ func newIntegrationTopicPublisher(t *testing.T, connection *amqp.Connection) *ra
 	if err != nil {
 		t.Fatalf("NewRabbitMQPublisher() error = %v, want nil", err)
 	}
-	return rabbitmq.NewPublisher(rabbitPublisher, integrationRabbitMQConfig)
+	return rabbitmq.NewPublisher(rabbitPublisher)
 }
 
 func waitIntegrationListenerCall(t *testing.T, ctx context.Context, calls <-chan integrationListenerCall) integrationListenerCall {

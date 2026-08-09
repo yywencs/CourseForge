@@ -67,8 +67,9 @@ func TestSelectionResultPayloadPreservesWireContract(t *testing.T) {
 func TestSelectionPublicationPayloadPreservesRedisContract(t *testing.T) {
 	completedAt := time.Date(2026, time.September, 1, 8, 0, 1, 0, time.UTC)
 	publication := &application.SelectionResultPublication{
-		DeliveryCursor:    "1-0",
-		DeliveryConfirmed: true,
+		StreamID:         "1-0",
+		StreamRecorded:   true,
+		DurablyPersisted: true,
 		Result: &enrollment.SelectionResult{
 			ApplicationID:   "application-001",
 			RequestID:       "request-001",
@@ -91,8 +92,35 @@ func TestSelectionPublicationPayloadPreservesRedisContract(t *testing.T) {
 	}
 	encoded := string(raw)
 	if !strings.Contains(encoded, `"stream_id":"1-0"`) ||
-		!strings.Contains(encoded, `"broker_confirmed":true`) ||
+		!strings.Contains(encoded, `"stream_recorded":true`) ||
+		!strings.Contains(encoded, `"mysql_persisted":true`) ||
 		!strings.Contains(encoded, `"result":{"application_id":`) {
 		t.Fatalf("publication wire contract changed: %s", encoded)
+	}
+	if strings.Contains(encoded, "broker_confirmed") {
+		t.Fatalf("new publication retained obsolete broker field: %s", encoded)
+	}
+}
+
+func TestSelectionPublicationPayloadReadsLegacyBrokerField(t *testing.T) {
+	raw := []byte(`{
+		"stream_id":"1-0",
+		"broker_confirmed":true,
+		"mysql_persisted":false,
+		"result":{
+			"application_id":"application-001","request_id":"request-001",
+			"round_id":101,"term_id":202601,"student_id":10001,
+			"course_id":20001,"teaching_class_id":30001,"credits":35,
+			"source":"web","state":"selected",
+			"applied_at":"2026-09-01T08:00:00Z",
+			"completed_at":"2026-09-01T08:00:01Z"
+		}
+	}`)
+	var payload selectionResultPublicationPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if publication := payload.toApplication(); !publication.StreamRecorded {
+		t.Fatal("legacy broker confirmation was not migrated to stream-recorded state")
 	}
 }

@@ -337,7 +337,7 @@ rabbitmq:
 
 # CourseForge 工程问题与解决记录
 
-> 更新时间：2026-07-30
+> 更新时间：2026-08-09
 
 ## 1. Redis-first 选课结果的可靠落库
 
@@ -348,40 +348,46 @@ rabbitmq:
 
 1. Redis Lua 原子校验学生额度、重复课程和教学班名额；
 2. 同一段 Lua 保存标准申请结果并写入 Redis Stream；
-3. RabbitMQ 发布使用持久化消息、mandatory 路由检查和 Publisher Confirm；
-4. 消费者使用 MySQL 事务与唯一约束幂等落库；
-5. Asynq 定时扫描 Stream，补发尚未确认的结果。
+3. HTTP 在 Redis 返回 Stream ID 后立即返回，不等待 RabbitMQ 或 MySQL；
+4. 常驻 Consumer Group 使用 `XREADGROUP` 聚合消息并批量写入 MySQL；
+5. MySQL 提交后原子执行 `XACK + XDEL`，未确认消息通过 `XAUTOCLAIM` 恢复；
+6. MySQL 使用事务、`event_id` 唯一约束和消费批次凭据消化重复投递；
+7. 无法解析或确定性冲突的消息原子转移到独立 Redis DLQ Stream。
 
-真实依赖集成测试覆盖完整链路、重复消费、恢复投递和多人并发抢同一教学班时不超卖。
+真实依赖集成测试覆盖 Stream Consumer Group 完整链路、重复消费和多人并发抢同一教学班
+时不超卖；单元测试覆盖 MySQL 成功后确认、瞬时错误保留在 PEL 和毒消息进入 DLQ。
 
-## 2. Publisher 全局锁导致消息发布串行化
+## 2. 历史问题：Publisher 全局锁导致消息发布串行化
 
 RabbitMQ Confirm 与 mandatory return 必须正确关联，但如果所有发布共用一个 Channel
 并在等待网络确认时持有全局锁，并发请求会在 Publisher 处串行排队。
 
 当前 Publisher 使用有界 Channel 池。每次发布独占一个 slot，同一 slot 内顺序等待
 Confirm，不同 slot 可以并行；池满时遵守调用方 Context。单元测试和真实 RabbitMQ
-集成测试共同覆盖并发发布、Broker Confirm 和不可路由消息。
+集成测试共同覆盖并发发布、Broker Confirm 和不可路由消息。选课链路现已移除这一跳，
+该 Publisher 只供通用 MySQL Outbox 的跨业务事件使用。
 
-## 3. 单消费者限制异步落库吞吐
+## 3. Redis Stream 批量消费者与崩溃恢复
 
-一个 Topic 只有一个 Channel、一个消费 goroutine 且 `prefetch=1` 时，异步落库吞吐
-容易低于入口流量。
+正式落库不再依赖每秒扫描 100 条的补偿任务，也不再经过 RabbitMQ。每个 API 实例加入
+同一个 Consumer Group，消费者名称包含实例主机名和进程号；单个消费者在收到首条消息后
+最多等待 `batch_wait` 聚合批次，减少 MySQL 事务固定开销。
 
-通用 Consumer 支持队列级并发映射，每个消费者使用独立 AMQP Channel：
+当前配置为：
 
 ```yaml
-rabbitmq:
-  listener:
-    simple:
-      prefetch: 1
-      default_concurrency: 1
-      concurrency:
-        selection_result_queue: 8
+enrollment:
+  selection_stream:
+    group: courseforge-selection-persistence
+    concurrency: 2
+    batch_size: 200
+    batch_wait: 10ms
+    block_timeout: 1s
+    claim_idle: 30s
 ```
 
-集成测试验证同一队列的三个独立 Channel 能同时进入阻塞 Listener；重试测试验证临时
-错误 Nack 后重新入队，永久错误则 Reject。
+MySQL 瞬时错误不会 ACK，消息保留在 PEL；消费者崩溃超过 `claim_idle` 后由存活实例使用
+`XAUTOCLAIM` 领取。MySQL 已提交但确认前崩溃会产生至少一次重投，由数据库幂等边界处理。
 
 ## 4. 通用 Outbox 与业务解耦
 
@@ -389,6 +395,25 @@ rabbitmq:
 事件：`outbox_event` 保存 topic、聚合标识和 JSON payload，通用 Dispatcher 负责抢占、
 Publisher Confirm、失败退避以及过期 publishing 租约恢复。新模块只需在自己的事务中
 调用 `Append`，无需复制消息可靠性代码。
+
+选课 Stream 消费者首次取得事件后，在保存申请单、正式选课和计数增量的同一事务内追加
+`selection.result.persisted` Outbox。常驻 Relay 在有积压时连续驱动 Dispatcher，空闲时每
+100ms 轮询一次；Dispatcher 批内并发发布，实际并发由 RabbitMQ Publisher Channel 池限制，
+等待 Broker Confirm 后标记 `published`。Asynq 不参与正常通知发送。
+通知消费者只有在 `student_notification` 写入成功后才 ACK，并通过 `event_id` 唯一键容忍
+“RabbitMQ 已投递但 Outbox 状态更新失败”和“通知已提交但 ACK 丢失”产生的重复消息。
+
+该链路增加以下容量与可靠性指标：
+
+- `courseforge_outbox_backlog{state="pending|publishing|failed"}`；
+- `courseforge_outbox_oldest_pending_age_seconds`；
+- `courseforge_outbox_relay_cycles_total{result}` 与 `relay_processed_total`；
+- `courseforge_notification_persistence_total{type,result}`；
+- 已有的 `courseforge_rabbitmq_publish_total`、`consume_total`。
+
+建议告警条件为最老 Outbox 超过 30 秒、failed 持续增长、通知消费错误连续出现，以及 RabbitMQ
+通知主队列、重试队列或 DLQ 出现持续积压。RabbitMQ 队列深度使用 Broker 自身指标，避免
+应用侧轮询管理接口形成第二套不一致统计。
 
 ## 5. 选课业务闭环
 

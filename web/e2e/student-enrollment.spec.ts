@@ -153,7 +153,7 @@ test('student submits a selection and keeps tracking its application', async ({
             state: 'selected',
             applied_at: '2026-07-30T10:00:00Z',
             completed_at: '2026-07-30T10:00:01Z',
-            broker_confirmed: true,
+            stream_recorded: true,
             mysql_persisted: true,
           },
         },
@@ -168,7 +168,7 @@ test('student submits a selection and keeps tracking its application', async ({
           data: {
             application_id: 'application-1',
             state: 'selected',
-            broker_confirmed: true,
+            stream_recorded: true,
             mysql_persisted: false,
           },
         },

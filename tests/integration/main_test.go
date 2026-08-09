@@ -92,9 +92,6 @@ func TestMain(m *testing.M) {
 		Port:      rabbitMQPort,
 		Username:  envOrDefault("COURSEFORGE_INTEGRATION_RABBITMQ_USER", defaultIntegrationRabbitMQUser),
 		Password:  envOrDefault("COURSEFORGE_INTEGRATION_RABBITMQ_PASSWORD", defaultIntegrationRabbitMQPassword),
-		Topic: config.RabbitMQTopicConfig{
-			SelectionResult: "selection_result",
-		},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

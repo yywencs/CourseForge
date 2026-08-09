@@ -8,13 +8,29 @@ import (
 
 // Config 对应整个 config.yaml 文件的根节点
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Auth     AuthConfig     `mapstructure:"auth"`
-	Data     DataConfig     `mapstructure:"data"`
-	Log      LogConfig      `mapstructure:"log"`
-	RabbitMQ RabbitMQConfig `mapstructure:"rabbitmq"`
-	Asynq    AsynqConfig    `mapstructure:"asynq"`
-	Dcc      DccConfig      `mapstructure:"dcc"`
+	Server     ServerConfig     `mapstructure:"server"`
+	Auth       AuthConfig       `mapstructure:"auth"`
+	Data       DataConfig       `mapstructure:"data"`
+	Log        LogConfig        `mapstructure:"log"`
+	RabbitMQ   RabbitMQConfig   `mapstructure:"rabbitmq"`
+	Asynq      AsynqConfig      `mapstructure:"asynq"`
+	Enrollment EnrollmentConfig `mapstructure:"enrollment"`
+	Dcc        DccConfig        `mapstructure:"dcc"`
+}
+
+type EnrollmentConfig struct {
+	SelectionStream SelectionStreamConfig `mapstructure:"selection_stream"`
+}
+
+type SelectionStreamConfig struct {
+	Group        string        `mapstructure:"group"`
+	ConsumerBase string        `mapstructure:"consumer_base"`
+	Concurrency  int           `mapstructure:"concurrency"`
+	BatchSize    int64         `mapstructure:"batch_size"`
+	BatchWait    time.Duration `mapstructure:"batch_wait"`
+	BlockTimeout time.Duration `mapstructure:"block_timeout"`
+	ClaimIdle    time.Duration `mapstructure:"claim_idle"`
+	DeadLetter   string        `mapstructure:"dead_letter"`
 }
 
 type AuthConfig struct {
@@ -161,7 +177,6 @@ type RabbitMQConfig struct {
 	Password  string                  `mapstructure:"password"`
 	Publisher RabbitMQPublisherConfig `mapstructure:"publisher"`
 	Listener  RabbitMQListener        `mapstructure:"listener"`
-	Topic     RabbitMQTopicConfig     `mapstructure:"topic"`
 }
 
 type RabbitMQPublisherConfig struct {
@@ -180,17 +195,6 @@ type RabbitMQSimple struct {
 	BatchWait          map[string]time.Duration `mapstructure:"batch_wait"`
 	MaxRetries         int                      `mapstructure:"max_retries"`
 	RetryDelays        []time.Duration          `mapstructure:"retry_delays"`
-}
-
-type RabbitMQTopicConfig struct {
-	SelectionResult string `mapstructure:"selection_result"`
-}
-
-func (c RabbitMQTopicConfig) Validate() error {
-	if strings.TrimSpace(c.SelectionResult) == "" {
-		return fmt.Errorf("selection_result is required")
-	}
-	return nil
 }
 
 // --- Asynq 部分 ---

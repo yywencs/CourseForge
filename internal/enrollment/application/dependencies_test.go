@@ -22,7 +22,7 @@ func (*recordingEnrollmentObserver) WaitlistPromotionCompleted(WaitlistPromotion
 func (*recordingEnrollmentObserver) ProjectionRepairBacklogObserved(int64)                    {}
 
 func TestEnrollmentUsecaseReportsOutcomeThroughObserverPort(t *testing.T) {
-	usecase, _, _, _ := newSuccessfulEnrollmentUsecase(t)
+	usecase, _, _ := newSuccessfulEnrollmentUsecase(t)
 	observer := &recordingEnrollmentObserver{}
 	usecase.observer = observer
 
@@ -36,7 +36,7 @@ func TestEnrollmentUsecaseReportsOutcomeThroughObserverPort(t *testing.T) {
 }
 
 func TestEnrollmentUsecaseUsesInjectedIDGenerator(t *testing.T) {
-	usecase, _, _, _ := newSuccessfulEnrollmentUsecase(t)
+	usecase, _, _ := newSuccessfulEnrollmentUsecase(t)
 	generationErr := errors.New("id generator unavailable")
 	usecase.ids = fixedIDGenerator{err: generationErr}
 

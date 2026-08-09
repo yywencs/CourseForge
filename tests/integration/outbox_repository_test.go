@@ -33,6 +33,13 @@ func TestOutboxRepositoryClaimRetryAndPublish(t *testing.T) {
 			Where("event_id = ?", eventID).
 			Delete(nil)
 	})
+	backlog, err := repository.ReadBacklog(context.Background())
+	if err != nil {
+		t.Fatalf("ReadBacklog() error = %v", err)
+	}
+	if backlog.Pending < 1 || backlog.OldestPending == nil {
+		t.Fatalf("ReadBacklog() = %#v, want at least one pending event", backlog)
+	}
 
 	claimed, err := repository.ClaimPending(
 		context.Background(),

@@ -21,14 +21,14 @@ type selectCourseRequest struct {
 }
 
 type selectCourseResponse struct {
-	ApplicationID   string                      `json:"application_id"`
-	State           enrollment.ApplicationState `json:"state"`
-	BrokerConfirmed bool                        `json:"broker_confirmed"`
-	MySQLPersisted  bool                        `json:"mysql_persisted"`
+	ApplicationID  string                      `json:"application_id"`
+	State          enrollment.ApplicationState `json:"state"`
+	StreamRecorded bool                        `json:"stream_recorded"`
+	MySQLPersisted bool                        `json:"mysql_persisted"`
 }
 
 // SelectCourse 处理 POST /api/v1/enrollments。
-// 返回成功表示 Redis 已完成选课决策且 RabbitMQ 已 Confirm，MySQL 仍可能异步落库中。
+// 返回成功表示 Redis 已原子完成选课决策并写入 Stream，MySQL 仍可能异步落库中。
 func (s *Routes) SelectCourse(c *gin.Context) {
 	if s.enrollmentUsecase == nil {
 		common.Error(c, 503, "enrollment service is not configured")
@@ -58,10 +58,10 @@ func (s *Routes) SelectCourse(c *gin.Context) {
 		return
 	}
 	common.Success(c, selectCourseResponse{
-		ApplicationID:   receipt.ApplicationID,
-		State:           receipt.State,
-		BrokerConfirmed: receipt.DeliveryConfirmed,
-		MySQLPersisted:  receipt.DurablyPersisted,
+		ApplicationID:  receipt.ApplicationID,
+		State:          receipt.State,
+		StreamRecorded: receipt.StreamRecorded,
+		MySQLPersisted: receipt.DurablyPersisted,
 	})
 }
 
@@ -77,7 +77,7 @@ type applicationResponse struct {
 	Failure         *failureReasonResponse      `json:"failure,omitempty"`
 	AppliedAt       time.Time                   `json:"applied_at"`
 	CompletedAt     *time.Time                  `json:"completed_at,omitempty"`
-	BrokerConfirmed bool                        `json:"broker_confirmed"`
+	StreamRecorded  bool                        `json:"stream_recorded"`
 	MySQLPersisted  bool                        `json:"mysql_persisted"`
 }
 
@@ -108,7 +108,7 @@ func (s *Routes) QueryApplication(c *gin.Context) {
 		Failure:         toFailureReasonResponse(application.Failure),
 		AppliedAt:       application.AppliedAt,
 		CompletedAt:     application.CompletedAt,
-		BrokerConfirmed: record.DeliveryConfirmed,
+		StreamRecorded:  record.StreamRecorded,
 		MySQLPersisted:  record.DurablyPersisted,
 	})
 }

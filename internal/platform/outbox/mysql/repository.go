@@ -26,27 +26,41 @@ func NewRepository(db *gorm.DB) *Repository {
 // Append stores an event as pending. To preserve Outbox atomicity, construct
 // Repository with the *gorm.DB received by the caller's business transaction.
 func (r *Repository) Append(ctx context.Context, event *outbox.NewEvent) error {
+	return r.AppendBatch(ctx, []*outbox.NewEvent{event})
+}
+
+// AppendBatch writes integration events with one bulk INSERT. The repository
+// must be constructed from the business transaction's *gorm.DB so these rows
+// cannot commit independently from the corresponding aggregate changes.
+func (r *Repository) AppendBatch(ctx context.Context, events []*outbox.NewEvent) error {
 	if r == nil || r.db == nil {
 		return errors.New("outbox repository database is nil")
 	}
-	if err := event.Validate(); err != nil {
-		return err
+	if len(events) == 0 {
+		return nil
 	}
 	now := time.Now()
-	return r.db.WithContext(ctx).Table("outbox_event").Create(map[string]any{
-		"event_id":       event.EventID,
-		"aggregate_type": event.AggregateType,
-		"aggregate_id":   event.AggregateID,
-		"topic":          event.Topic,
-		"event_type":     event.EventType,
-		"payload":        string(event.Payload),
-		"state":          string(outbox.StatePending),
-		"retry_count":    0,
-		"next_retry_at":  now,
-		"last_error":     "",
-		"create_time":    now,
-		"update_time":    now,
-	}).Error
+	rows := make([]map[string]any, 0, len(events))
+	for _, event := range events {
+		if err := event.Validate(); err != nil {
+			return err
+		}
+		rows = append(rows, map[string]any{
+			"event_id":       event.EventID,
+			"aggregate_type": event.AggregateType,
+			"aggregate_id":   event.AggregateID,
+			"topic":          event.Topic,
+			"event_type":     event.EventType,
+			"payload":        string(event.Payload),
+			"state":          string(outbox.StatePending),
+			"retry_count":    0,
+			"next_retry_at":  now,
+			"last_error":     "",
+			"create_time":    now,
+			"update_time":    now,
+		})
+	}
+	return r.db.WithContext(ctx).Table("outbox_event").CreateInBatches(rows, len(rows)).Error
 }
 
 type eventRow struct {
@@ -204,6 +218,33 @@ func (r *Repository) MarkFailed(
 		return fmt.Errorf("mark outbox event %d failed affected %d rows", eventID, result.RowsAffected)
 	}
 	return nil
+}
+
+func (r *Repository) ReadBacklog(ctx context.Context) (*outbox.Backlog, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("outbox repository database is nil")
+	}
+	var row struct {
+		Pending       int64      `gorm:"column:pending"`
+		Publishing    int64      `gorm:"column:publishing"`
+		Failed        int64      `gorm:"column:failed"`
+		OldestPending *time.Time `gorm:"column:oldest_pending"`
+	}
+	err := r.db.WithContext(ctx).Table("outbox_event").Select(`
+		COALESCE(SUM(state = 'pending'), 0) AS pending,
+		COALESCE(SUM(state = 'publishing'), 0) AS publishing,
+		COALESCE(SUM(state = 'failed'), 0) AS failed,
+		MIN(CASE WHEN state IN ('pending', 'failed') THEN create_time END) AS oldest_pending
+	`).Scan(&row).Error
+	if err != nil {
+		return nil, fmt.Errorf("read outbox backlog: %w", err)
+	}
+	return &outbox.Backlog{
+		Pending:       row.Pending,
+		Publishing:    row.Publishing,
+		Failed:        row.Failed,
+		OldestPending: row.OldestPending,
+	}, nil
 }
 
 func (r eventRow) toEntity() *outbox.Event {

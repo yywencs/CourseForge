@@ -6,7 +6,9 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-var Log *zap.Logger
+// Log 在运行时由 Init 替换；默认使用 no-op logger，避免后台组件在测试或
+// 初始化失败清理路径中记录日志时触发空指针。
+var Log = zap.NewNop()
 
 // Config 定义配置结构体
 type Config struct {

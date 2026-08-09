@@ -47,4 +47,44 @@ describe('enrollment tracker', () => {
     store.finishWaitlist(first.requestId)
     expect(store.pendingWaitlist).toHaveLength(0)
   })
+
+  it('stores the Redis Stream receipt state from the public API contract', () => {
+    const store = useEnrollmentTrackerStore()
+    const pending = store.begin(course)
+
+    store.complete(course, pending, {
+      application_id: 'application-1',
+      state: 'selected',
+      stream_recorded: true,
+      mysql_persisted: false,
+    })
+
+    expect(store.applications[0]?.streamRecorded).toBe(true)
+    expect(
+      window.localStorage.getItem('courseforge.tracked-applications'),
+    ).not.toContain('brokerConfirmed')
+  })
+
+  it('migrates legacy local application state when the store starts', () => {
+    window.localStorage.setItem(
+      'courseforge.tracked-applications',
+      JSON.stringify([
+        {
+          applicationId: 'application-legacy',
+          requestId: 'request-legacy',
+          teachingClassId: course.id,
+          courseName: course.courseName,
+          courseCode: course.courseCode,
+          state: 'selected',
+          brokerConfirmed: true,
+          mysqlPersisted: false,
+          submittedAt: '2026-08-09T00:00:00Z',
+        },
+      ]),
+    )
+    setActivePinia(createPinia())
+
+    const store = useEnrollmentTrackerStore()
+    expect(store.applications[0]?.streamRecorded).toBe(true)
+  })
 })

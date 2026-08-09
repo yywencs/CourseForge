@@ -31,6 +31,10 @@ type selectionVerificationSnapshot struct {
 	DistinctRequests     int64
 	Enrollments          int64
 	EnrollmentStudents   int64
+	OutboxEvents         int64
+	OutboxPublished      int64
+	OutboxUnpublished    int64
+	Notifications        int64
 	RedisSeats           int64
 	RedisPending         int64
 }
@@ -171,6 +175,43 @@ func readSelectionVerificationSnapshot(
 		return snapshot, fmt.Errorf("查询正式选课最终状态: %w", err)
 	}
 
+	if err := database.QueryRowContext(
+		ctx,
+		`SELECT
+			COUNT(*),
+			COALESCE(SUM(oe.state = 'published'), 0),
+			COALESCE(SUM(oe.state <> 'published'), 0)
+		 FROM outbox_event oe
+		 JOIN selection_application sa ON sa.application_id = oe.aggregate_id
+		 WHERE oe.aggregate_type = 'selection_application'
+		   AND oe.topic = 'enrollment.selection.notification'
+		   AND sa.round_id = ?
+		   AND sa.teaching_class_id = ?
+		   AND sa.student_id BETWEEN ? AND ?`,
+		config.RoundID,
+		config.TeachingClassID,
+		config.StudentIDStart,
+		studentIDEnd,
+	).Scan(
+		&snapshot.OutboxEvents,
+		&snapshot.OutboxPublished,
+		&snapshot.OutboxUnpublished,
+	); err != nil {
+		return snapshot, fmt.Errorf("查询选课通知 Outbox 最终状态: %w", err)
+	}
+
+	if err := database.QueryRowContext(
+		ctx,
+		`SELECT COUNT(DISTINCT event_id)
+		 FROM student_notification
+		 WHERE type = 'selection_result'
+		   AND student_id BETWEEN ? AND ?`,
+		config.StudentIDStart,
+		studentIDEnd,
+	).Scan(&snapshot.Notifications); err != nil {
+		return snapshot, fmt.Errorf("查询选课通知最终状态: %w", err)
+	}
+
 	seatKey := fmt.Sprintf("courseforge:selection:class:seat:%d", config.TeachingClassID)
 	seats, err := redisClient.Get(ctx, seatKey).Int64()
 	if err != nil {
@@ -277,6 +318,10 @@ func (s selectionVerificationSnapshot) validate(expected int64) error {
 		s.DistinctRequests != expected ||
 		s.Enrollments != expected ||
 		s.EnrollmentStudents != expected ||
+		s.OutboxEvents != expected ||
+		s.OutboxPublished != expected ||
+		s.OutboxUnpublished != 0 ||
+		s.Notifications != expected ||
 		s.ClassSelected != expected ||
 		s.RedisSeats != expectedSeats ||
 		s.RedisPending != 0 {
@@ -323,6 +368,8 @@ func printVerificationReport(report verificationReport) {
 	fmt.Printf("  class selected:    %d\n", report.Selection.ClassSelected)
 	fmt.Printf("  applications:      %d\n", report.Selection.Applications)
 	fmt.Printf("  enrollments:       %d\n", report.Selection.Enrollments)
+	fmt.Printf("  Outbox published:  %d/%d\n", report.Selection.OutboxPublished, report.Selection.OutboxEvents)
+	fmt.Printf("  notifications:     %d\n", report.Selection.Notifications)
 	fmt.Printf("  Redis seats:       %d\n", report.Selection.RedisSeats)
 	fmt.Printf("  Redis pending:     %d\n", report.Selection.RedisPending)
 	fmt.Println("  result:             passed")

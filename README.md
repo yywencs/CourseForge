@@ -15,11 +15,13 @@ CourseForge 是一个面向高校选课场景的课程管理与高并发选课�
 
 - 学生登录、课程查询、选课、退课和候补。
 - 管理员登录，以及课程、教学班和选课轮次维护。
-- Redis Lua 原子选课，防止高并发下超卖。
-- RabbitMQ 异步落库、延迟重试和死信队列。
+- Redis Lua 原子选课并写入 Stream，防止高并发下超卖和结果丢失。
+- Redis Stream Consumer Group 批量落库、崩溃恢复和死信隔离。
+- 选课落库事务内写 MySQL Outbox，RabbitMQ 至少一次投递并幂等生成站内通知。
+- RabbitMQ 同时承载跨业务事件、延迟重试和死信队列。
 - 课程预览视频分片上传、断点续传、播放和无主对象清理。
 - 历史弹幕分段查询，以及基于 WebSocket 和 Redis Pub/Sub 的多实例实时弹幕。
-- Prometheus 指标和选课、WebSocket 压测工具。
+- Prometheus 覆盖选课、Outbox Relay、通知持久化和中间件指标，并提供选课、WebSocket 压测工具。
 
 三机环境的选课压测参数、统计口径和历次结果见 [性能测试记录](docs/benchmark-results.md)。
 

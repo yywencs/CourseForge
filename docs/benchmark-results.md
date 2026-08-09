@@ -2,6 +2,14 @@
 
 本文记录可复现的正式性能测试结果。每轮测试必须保留代码提交、机器拓扑、配置、请求规模、延迟、实际落库吞吐和最终一致性结果，避免只用入口 QPS 代替完整链路能力。
 
+> 架构变更说明：下列 2026-08-09 选课数据来自 `Redis Lua → RabbitMQ → MySQL` 历史链路。当前代码已改为 `Redis Lua → Redis Stream Consumer Group → MySQL`，HTTP 不再等待 RabbitMQ Confirm；历史数据用于说明优化过程，不能作为新链路的最终容量结论，新结果需重新压测后补充。
+
+新链路复测必须同时等待 `selection_application`、`student_course_enrollment`、通知 Outbox
+`published` 和 `student_notification` 数量全部收敛。压测工具最终校验已纳入这四项，并在
+准备阶段清理对应学生区间的通知与 Outbox，避免旧轮次数据污染结果。复测还应记录
+Stream 落库吞吐、Relay 发布吞吐、最老 Outbox 年龄、RabbitMQ 通知队列/DLQ 深度以及通知
+落库吞吐，端到端可持续容量取这些阶段中最小值。
+
 ## 2026-08-09：批量消费落库基线
 
 ### 环境

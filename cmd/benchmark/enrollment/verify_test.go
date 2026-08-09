@@ -15,6 +15,9 @@ func TestSelectionVerificationSnapshotAcceptsConvergedState(t *testing.T) {
 		DistinctRequests:     500,
 		Enrollments:          500,
 		EnrollmentStudents:   500,
+		OutboxEvents:         500,
+		OutboxPublished:      500,
+		Notifications:        500,
 		RedisSeats:           0,
 	}
 
@@ -23,6 +26,27 @@ func TestSelectionVerificationSnapshotAcceptsConvergedState(t *testing.T) {
 	}
 	if err := snapshot.validate(500); err != nil {
 		t.Fatalf("validate() error = %v", err)
+	}
+}
+
+func TestSelectionVerificationSnapshotWaitsForNotificationConvergence(t *testing.T) {
+	snapshot := selectionVerificationSnapshot{
+		Capacity:             500,
+		ClassSelected:        500,
+		Applications:         500,
+		SelectedApplications: 500,
+		DistinctStudents:     500,
+		DistinctRequests:     500,
+		Enrollments:          500,
+		EnrollmentStudents:   500,
+		OutboxEvents:         500,
+		OutboxPublished:      490,
+		OutboxUnpublished:    10,
+		Notifications:        480,
+		RedisSeats:           0,
+	}
+	if err := snapshot.validate(500); err == nil {
+		t.Fatal("validate() error = nil, want notification state-not-converged error")
 	}
 }
 

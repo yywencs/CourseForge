@@ -30,11 +30,26 @@ function persist<T>(key: string, value: T[]): void {
   window.localStorage.setItem(key, JSON.stringify(value))
 }
 
+type StoredTrackedApplication = Omit<TrackedApplication, 'streamRecorded'> & {
+  brokerConfirmed?: boolean
+  streamRecorded?: boolean
+}
+
+function readTrackedApplications(): TrackedApplication[] {
+  return readArray<StoredTrackedApplication>(trackedStorageKey).map((stored) => {
+    const { brokerConfirmed, ...application } = stored
+    return {
+      ...application,
+      streamRecorded: stored.streamRecorded ?? brokerConfirmed ?? false,
+    }
+  })
+}
+
 export const useEnrollmentTrackerStore = defineStore(
   'enrollment-tracker',
   () => {
     const applications = shallowRef<TrackedApplication[]>(
-      readArray<TrackedApplication>(trackedStorageKey),
+      readTrackedApplications(),
     )
     const pendingSelections = shallowRef<PendingSelection[]>(
       readArray<PendingSelection>(pendingStorageKey),
@@ -75,7 +90,7 @@ export const useEnrollmentTrackerStore = defineStore(
         courseName: course.courseName,
         courseCode: course.courseCode,
         state: receipt.state,
-        brokerConfirmed: receipt.broker_confirmed,
+        streamRecorded: receipt.stream_recorded,
         mysqlPersisted: receipt.mysql_persisted,
         submittedAt: pending.createdAt,
       }
@@ -132,7 +147,7 @@ export const useEnrollmentTrackerStore = defineStore(
           ? {
               ...item,
               state: application.state,
-              brokerConfirmed: application.broker_confirmed,
+              streamRecorded: application.stream_recorded,
               mysqlPersisted: application.mysql_persisted,
               failure: application.failure,
             }

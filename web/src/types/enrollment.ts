@@ -49,7 +49,7 @@ export interface SelectCourseRequest {
 export interface SelectionReceipt {
   application_id: string
   state: ApplicationState
-  broker_confirmed: boolean
+  stream_recorded: boolean
   mysql_persisted: boolean
 }
 
@@ -65,7 +65,7 @@ export interface SelectionApplication {
   failure?: FailureReason
   applied_at: string
   completed_at?: string
-  broker_confirmed: boolean
+  stream_recorded: boolean
   mysql_persisted: boolean
 }
 
@@ -125,7 +125,7 @@ export interface TrackedApplication {
   courseName: string
   courseCode: string
   state: ApplicationState
-  brokerConfirmed: boolean
+  streamRecorded: boolean
   mysqlPersisted: boolean
   submittedAt: string
   failure?: FailureReason

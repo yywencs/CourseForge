@@ -14,10 +14,7 @@ import (
 	"github.com/yywencs/courseforge/internal/platform/cache"
 )
 
-const (
-	selectionRequestResultTTL    = 7 * 24 * time.Hour
-	selectionResultRecoveryBatch = 100
-)
+const selectionRequestResultTTL = 7 * 24 * time.Hour
 
 const commitSelectionScript = `
 	local active_version_key = KEYS[1]
@@ -140,7 +137,8 @@ const commitSelectionScript = `
 	local stream_id = redis.call('XADD', stream_key, '*', 'event', result_json)
 	local publication = {
 		stream_id = stream_id,
-		broker_confirmed = false,
+		stream_recorded = true,
+		mysql_persisted = false,
 		result = result
 	}
 	local stored_publication = cjson.encode(publication)
@@ -149,29 +147,6 @@ const commitSelectionScript = `
 	redis.call('SET', result_key, stored_publication, 'EX', result_ttl)
 	redis.call('SET', application_key, stored_publication, 'EX', result_ttl)
 	return {0, stored_publication}
-`
-
-const markSelectionResultPublishedScript = `
-	local raw = redis.call('GET', KEYS[1])
-	if not raw then
-		return -1
-	end
-	local ok, publication = pcall(cjson.decode, raw)
-	if not ok or not publication.result or
-	   publication.result.application_id ~= ARGV[1] or
-	   publication.stream_id ~= ARGV[2] then
-		return -2
-	end
-		publication.broker_confirmed = true
-		local stored = cjson.encode(publication)
-		redis.call('SET', KEYS[1], stored, 'KEEPTTL')
-		redis.call('SET', KEYS[3], stored, 'KEEPTTL')
-		redis.call('XDEL', KEYS[2], ARGV[2])
-	return 1
-`
-
-const querySelectionResultStreamScript = `
-	return redis.call('XRANGE', KEYS[1], '-', '+', 'COUNT', ARGV[1])
 `
 
 const querySelectionByRequestScript = `
@@ -194,6 +169,20 @@ const clearPersistedSelectionScript = `
 	local ok, application = pcall(cjson.decode, pending)
 	if not ok or application.application_id ~= ARGV[1] then
 		return -1
+	end
+	for index = 2, 3 do
+		local raw = redis.call('GET', KEYS[index])
+		if raw then
+			local publication_ok, publication = pcall(cjson.decode, raw)
+			if not publication_ok or not publication.result or
+			   publication.result.application_id ~= ARGV[1] then
+				return -2
+			end
+			publication.stream_recorded = true
+			publication.broker_confirmed = nil
+			publication.mysql_persisted = true
+			redis.call('SET', KEYS[index], cjson.encode(publication), 'KEEPTTL')
+		end
 	end
 	redis.call('DEL', KEYS[1])
 	return 1
@@ -433,8 +422,9 @@ func (r *QueryStore) querySelectionByRequestFromRedis(
 			return nil, err
 		}
 		return &applicationapi.SelectionRequestRecord{
-			Application: applicationFromResult(publication.Result),
-			Publication: publication,
+			Application:      applicationFromResult(publication.Result),
+			Publication:      publication,
+			DurablyPersisted: publication.DurablyPersisted,
 		}, nil
 	default:
 		return nil, fmt.Errorf("未知Redis选课幂等查询状态: %d", status)
@@ -466,9 +456,9 @@ func (r *QueryStore) querySelectionApplicationFromRedis(
 			return nil, err
 		}
 		return &applicationapi.SelectionApplicationRecord{
-			Application:       applicationFromResult(publication.Result),
-			DeliveryConfirmed: publication.DeliveryConfirmed,
-			DurablyPersisted:  false,
+			Application:      applicationFromResult(publication.Result),
+			StreamRecorded:   publication.StreamRecorded,
+			DurablyPersisted: publication.DurablyPersisted,
 		}, nil
 	}
 
@@ -482,92 +472,6 @@ func (r *QueryStore) querySelectionApplicationFromRedis(
 	return &applicationapi.SelectionApplicationRecord{
 		Application: payload.toEntity(),
 	}, nil
-}
-
-func (r *SelectionStore) QueryPendingSelectionResults(
-	ctx context.Context,
-	limit int64,
-) ([]*applicationapi.SelectionResultPublication, error) {
-	if limit <= 0 || limit > selectionResultRecoveryBatch {
-		limit = selectionResultRecoveryBatch
-	}
-	raw, err := r.redis.Eval(
-		ctx,
-		querySelectionResultStreamScript,
-		[]string{selectionResultStreamKey},
-		limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	entries, ok := raw.([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("未知选课结果Stream响应: %#v", raw)
-	}
-	publications := make([]*applicationapi.SelectionResultPublication, 0, len(entries))
-	for _, rawEntry := range entries {
-		entry, ok := rawEntry.([]interface{})
-		if !ok || len(entry) != 2 {
-			return nil, fmt.Errorf("非法选课Stream记录: %#v", rawEntry)
-		}
-		streamID, ok := entry[0].(string)
-		if !ok {
-			return nil, fmt.Errorf("非法选课Stream ID: %#v", entry[0])
-		}
-		fields, ok := entry[1].([]interface{})
-		if !ok || len(fields) != 2 || fields[0] != "event" {
-			return nil, fmt.Errorf("非法选课Stream字段: %#v", entry[1])
-		}
-		eventJSON, ok := fields[1].(string)
-		if !ok {
-			return nil, fmt.Errorf("非法选课Stream载荷: %#v", fields[1])
-		}
-		var payload selectionResultPayload
-		if err := json.Unmarshal([]byte(eventJSON), &payload); err != nil {
-			return nil, fmt.Errorf("解析选课Stream结果: %w", err)
-		}
-		result := payload.toDomain()
-		publication := &applicationapi.SelectionResultPublication{
-			DeliveryCursor:    streamID,
-			DeliveryConfirmed: false,
-			Result:            result,
-		}
-		if err := publication.Validate(); err != nil {
-			return nil, err
-		}
-		publications = append(publications, publication)
-	}
-	return publications, nil
-}
-
-func (r *SelectionStore) MarkSelectionResultPublished(
-	ctx context.Context,
-	publication *applicationapi.SelectionResultPublication,
-) error {
-	if err := publication.Validate(); err != nil {
-		return err
-	}
-	result := publication.Result
-	raw, err := r.redis.Eval(
-		ctx,
-		markSelectionResultPublishedScript,
-		[]string{
-			requestResultKey(result.RoundID, result.StudentID, result.RequestID),
-			selectionResultStreamKey,
-			applicationLookupKey(result.ApplicationID),
-		},
-		result.ApplicationID,
-		publication.DeliveryCursor,
-	)
-	if err != nil {
-		return err
-	}
-	status, ok := raw.(int64)
-	if !ok || status < 0 {
-		return fmt.Errorf("标记选课结果已发布失败: status=%v", raw)
-	}
-	publication.DeliveryConfirmed = true
-	return nil
 }
 
 func (r *ResultStore) clearPersistedSelections(
@@ -589,7 +493,11 @@ func (r *ResultStore) clearPersistedSelections(
 		commands = append(commands, pipeline.Eval(
 			ctx,
 			clearPersistedSelectionScript,
-			[]string{pendingApplicationKey(result.RoundID, result.StudentID)},
+			[]string{
+				pendingApplicationKey(result.RoundID, result.StudentID),
+				requestResultKey(result.RoundID, result.StudentID, result.RequestID),
+				applicationLookupKey(result.ApplicationID),
+			},
 			result.ApplicationID,
 		))
 	}

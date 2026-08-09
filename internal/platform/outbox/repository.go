@@ -27,4 +27,9 @@ type Repository interface {
 
 type Writer interface {
 	Append(context.Context, *NewEvent) error
+	AppendBatch(context.Context, []*NewEvent) error
+}
+
+type BacklogReader interface {
+	ReadBacklog(context.Context) (*Backlog, error)
 }

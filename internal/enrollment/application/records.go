@@ -7,11 +7,11 @@ import (
 )
 
 // SelectionApplicationRecord is the application-layer read model for the
-// asynchronous selection workflow. Transport adapters retain legacy wire names.
+// asynchronous selection workflow.
 type SelectionApplicationRecord struct {
-	Application       *enrollment.SelectionApplication
-	DeliveryConfirmed bool
-	DurablyPersisted  bool
+	Application      *enrollment.SelectionApplication
+	StreamRecorded   bool
+	DurablyPersisted bool
 }
 
 // SelectionRequestRecord is the idempotency lookup result used by SelectCourse.
@@ -34,16 +34,16 @@ type SelectionAdmissionSnapshot struct {
 	CourseQuotaRemaining int64
 }
 
-// SelectionResultPublication is the reliable-delivery state consumed by the
-// application workflow and messaging adapter.
+// SelectionResultPublication 描述 Redis 原子提交返回的 Stream 游标和持久化进度。
 type SelectionResultPublication struct {
-	DeliveryCursor    string
-	DeliveryConfirmed bool
-	Result            *enrollment.SelectionResult
+	StreamID         string
+	StreamRecorded   bool
+	DurablyPersisted bool
+	Result           *enrollment.SelectionResult
 }
 
 func (p *SelectionResultPublication) Validate() error {
-	if p == nil || strings.TrimSpace(p.DeliveryCursor) == "" || p.Result == nil {
+	if p == nil || strings.TrimSpace(p.StreamID) == "" || !p.StreamRecorded || p.Result == nil {
 		return enrollment.ErrInvalidParams
 	}
 	return p.Result.Validate()

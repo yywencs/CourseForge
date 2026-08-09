@@ -1,11 +1,13 @@
 package enrollmentrepo
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/yywencs/courseforge/internal/enrollment/domain"
+	enrollmentintegration "github.com/yywencs/courseforge/internal/enrollment/integration"
 )
 
 func validBatchSelectionResult() *enrollment.SelectionResult {
@@ -56,5 +58,30 @@ func TestNormalizeSelectionResultsRejectsNil(t *testing.T) {
 	_, err := normalizeSelectionResults([]*enrollment.SelectionResult{nil})
 	if !errors.Is(err, enrollment.ErrInvalidParams) {
 		t.Fatalf("normalizeSelectionResults(nil) error = %v, want invalid params", err)
+	}
+}
+
+func TestNewSelectionNotificationEventsUsesSelectionEventAsIdempotencyKey(t *testing.T) {
+	result := validBatchSelectionResult()
+	events, err := newSelectionNotificationEvents([]*enrollment.SelectionResult{result})
+	if err != nil {
+		t.Fatalf("newSelectionNotificationEvents() error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events length = %d, want 1", len(events))
+	}
+	event := events[0]
+	if event.EventID != selectionResultEventID(result) ||
+		event.Topic != enrollmentintegration.SelectionNotificationTopic ||
+		event.EventType != enrollmentintegration.SelectionResultPersisted {
+		t.Fatalf("event identity = %#v", event)
+	}
+	var payload enrollmentintegration.SelectionNotification
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal event payload: %v", err)
+	}
+	if payload.StudentID != result.StudentID || payload.State != result.State ||
+		payload.ApplicationID != result.ApplicationID {
+		t.Fatalf("event payload = %#v", payload)
 	}
 }

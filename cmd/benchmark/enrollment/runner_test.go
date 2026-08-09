@@ -65,7 +65,7 @@ func TestBenchmarkRunnerExecuteBuildsDynamicSelectionRequest(t *testing.T) {
 		if !strings.HasPrefix(request.Header.Get("Authorization"), "Bearer ") {
 			t.Errorf("Authorization header = %q, want Bearer token", request.Header.Get("Authorization"))
 		}
-		return `{"code":0,"info":"success","data":{"application_id":"application-1","state":"selected","broker_confirmed":true,"mysql_persisted":false}}`
+		return `{"code":0,"info":"success","data":{"application_id":"application-1","state":"selected","stream_recorded":true,"mysql_persisted":false}}`
 	})
 
 	config := benchmarkConfig{
@@ -116,7 +116,7 @@ func TestBenchmarkRunnerPrecomputesTokensAndBodies(t *testing.T) {
 		JWTTokenTTL:     time.Hour,
 	}
 	runner := mustBenchmarkRunner(t, config, jsonResponseClient(func(*http.Request) string {
-		return `{"code":0,"info":"success","data":{"application_id":"application-1","state":"selected","broker_confirmed":true}}`
+		return `{"code":0,"info":"success","data":{"application_id":"application-1","state":"selected","stream_recorded":true}}`
 	}))
 	if len(runner.requests) != config.Users {
 		t.Fatalf("precomputed requests = %d, want %d", len(runner.requests), config.Users)
@@ -185,7 +185,7 @@ func TestBenchmarkRunnerClassifiesUnstructuredNon2xxAsHTTPError(t *testing.T) {
 
 func TestBenchmarkRunnerRejectsIncompleteSuccessPayload(t *testing.T) {
 	client := jsonResponseClient(func(*http.Request) string {
-		return `{"code":0,"info":"success","data":{"state":"selected","broker_confirmed":false}}`
+		return `{"code":0,"info":"success","data":{"state":"selected","stream_recorded":false}}`
 	})
 	config := benchmarkConfig{
 		BaseURL:         "http://example.test",
@@ -212,7 +212,7 @@ func TestBenchmarkRunnerSendsOneRequestPerStudent(t *testing.T) {
 	var calls atomic.Int64
 	client := jsonResponseClient(func(*http.Request) string {
 		calls.Add(1)
-		return `{"code":0,"info":"success","data":{"application_id":"application-1","state":"selected","broker_confirmed":true,"mysql_persisted":false}}`
+		return `{"code":0,"info":"success","data":{"application_id":"application-1","state":"selected","stream_recorded":true,"mysql_persisted":false}}`
 	})
 	config := benchmarkConfig{
 		BaseURL:         "http://example.test",
@@ -254,7 +254,7 @@ func TestBenchmarkRunnerIdempotencyScenarioSendsConcurrentRequests(t *testing.T)
 		requestIDsMu.Unlock()
 		bothStarted <- struct{}{}
 		<-release
-		return `{"code":0,"info":"success","data":{"application_id":"application-1","state":"selected","broker_confirmed":true,"mysql_persisted":false}}`
+		return `{"code":0,"info":"success","data":{"application_id":"application-1","state":"selected","stream_recorded":true,"mysql_persisted":false}}`
 	})
 	config := benchmarkConfig{
 		BaseURL:         "http://example.test",
@@ -301,7 +301,7 @@ func TestBenchmarkRunnerIdempotencyScenarioSendsConcurrentRequests(t *testing.T)
 
 func TestBenchmarkRunnerIdempotencyCountsTwoHTTPRequestsPerOperation(t *testing.T) {
 	client := jsonResponseClient(func(*http.Request) string {
-		return `{"code":0,"info":"success","data":{"application_id":"application-1","state":"selected","broker_confirmed":true,"mysql_persisted":false}}`
+		return `{"code":0,"info":"success","data":{"application_id":"application-1","state":"selected","stream_recorded":true,"mysql_persisted":false}}`
 	})
 	config := benchmarkConfig{
 		BaseURL:         "http://example.test",

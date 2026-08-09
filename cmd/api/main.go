@@ -23,11 +23,19 @@ func main() {
 
 	apiServer := app.APIServer()
 
-	// 先同步声明 RabbitMQ 的 Exchange、Queue 和 Binding，再启动 Outbox 调度器和
+	// 先同步声明 RabbitMQ 的 Exchange、Queue 和 Binding，再启动 Outbox Relay 和
 	// HTTP 服务，避免应用刚启动时消息先发布、队列尚未绑定而成为不可路由消息。
 	logger.Info("starting RabbitMQ consumer")
 	if err := app.RabbitMQConsumer().Start(ctx); err != nil {
 		log.Fatalf("start RabbitMQ consumer: %v", err)
+	}
+	logger.Info("starting MySQL Outbox relay")
+	if err := app.OutboxRelay().Start(ctx); err != nil {
+		log.Fatalf("start MySQL Outbox relay: %v", err)
+	}
+	logger.Info("starting selection Redis Stream consumer")
+	if err := app.SelectionStreamConsumer().Start(ctx); err != nil {
+		log.Fatalf("start selection Redis Stream consumer: %v", err)
 	}
 
 	logger.Info("starting realtime danmaku hub")
@@ -74,6 +82,16 @@ func main() {
 		logger.Error("realtime danmaku hub shutdown error", "error", err)
 	} else {
 		logger.Info("realtime danmaku hub shut down gracefully")
+	}
+	if err := app.SelectionStreamConsumer().Stop(shutdownCtx); err != nil {
+		logger.Error("selection Redis Stream consumer shutdown error", "error", err)
+	} else {
+		logger.Info("selection Redis Stream consumer shut down gracefully")
+	}
+	if err := app.OutboxRelay().Stop(shutdownCtx); err != nil {
+		logger.Error("MySQL Outbox relay shutdown error", "error", err)
+	} else {
+		logger.Info("MySQL Outbox relay shut down gracefully")
 	}
 
 	app.AsynqWorker().Shutdown()

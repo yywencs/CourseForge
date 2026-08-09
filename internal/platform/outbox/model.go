@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-const TaskTypeDispatch = "outbox:dispatch"
-
 type State string
 
 const (
@@ -41,6 +39,13 @@ type Event struct {
 	LastError     string
 	CreateTime    time.Time
 	UpdateTime    time.Time
+}
+
+type Backlog struct {
+	Pending       int64
+	Publishing    int64
+	Failed        int64
+	OldestPending *time.Time
 }
 
 // NewEvent is written in the same MySQL transaction as the business change.

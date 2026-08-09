@@ -50,6 +50,7 @@ func TestVerifyBenchmarkFinalStateAgainstMySQLAndRedis(t *testing.T) {
 	requestID := "benchmark-verify-request"
 	enrollmentID := "benchmark-verify-enrollment"
 	studentID := defaultBenchmarkStudentIDStart
+	eventID := fmt.Sprintf("selection:%d:%s", studentID, applicationID)
 	tx, err := database.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx() error = %v", err)
@@ -106,6 +107,34 @@ func TestVerifyBenchmarkFinalStateAgainstMySQLAndRedis(t *testing.T) {
 	); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("insert enrollment: %v", err)
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO outbox_event
+			(event_id, aggregate_type, aggregate_id, topic, event_type, payload,
+			 state, next_retry_at, published_at)
+		 VALUES (?, 'selection_application', ?, 'enrollment.selection.notification',
+			 'selection.result.persisted', JSON_OBJECT('student_id', ?),
+			 'published', NOW(3), NOW(3))`,
+		eventID,
+		applicationID,
+		studentID,
+	); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("insert selection notification Outbox: %v", err)
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO student_notification
+			(event_id, student_id, type, title, content, payload, occurred_at)
+		 VALUES (?, ?, 'selection_result', '选课成功', '测试通知',
+			 JSON_OBJECT('application_id', ?), NOW(3))`,
+		eventID,
+		studentID,
+		applicationID,
+	); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("insert selection notification: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("Commit() error = %v", err)

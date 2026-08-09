@@ -6,8 +6,8 @@ import (
 	"github.com/yywencs/courseforge/internal/enrollment/domain"
 )
 
-// selectionResultPayload is the version-preserving RabbitMQ integration
-// contract. Domain entities remain free of JSON serialization metadata.
+// selectionResultPayload 是 Redis Stream 中稳定的选课结果契约。
+// Domain entities remain free of JSON serialization metadata.
 type selectionResultPayload struct {
 	ApplicationID   string                       `json:"application_id"`
 	RequestID       string                       `json:"request_id"`

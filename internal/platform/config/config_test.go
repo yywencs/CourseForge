@@ -27,13 +27,19 @@ data:
 asynq:
   redis:
     password: file-asynq-password
+enrollment:
+  selection_stream:
+    group: file-selection-group
+    concurrency: 2
+    batch_size: 100
+    batch_wait: 10ms
+    block_timeout: 1s
+    claim_idle: 30s
 rabbitmq:
   username: file-user
   password: file-rabbitmq-password
   publisher:
     pool_size: 8
-  topic:
-    selection_result: file-selection-result
   listener:
     simple:
       prefetch: 1
@@ -41,11 +47,11 @@ rabbitmq:
       max_retries: 3
       retry_delays: [1s, 5s, 30s]
       concurrency:
-        selection_result_queue: 8
+        outbox_events_queue: 8
       batch_size:
-        selection_result_queue: 100
+        outbox_events_queue: 100
       batch_wait:
-        selection_result_queue: 10ms
+        outbox_events_queue: 10ms
 dcc:
   rate_limit:
     enabled: true
@@ -74,12 +80,12 @@ dcc:
 	t.Setenv("COURSEFORGE_DATA_MYSQL_COURSEFORGE_DSN", "env-courseforge-dsn")
 	t.Setenv("COURSEFORGE_DATA_REDIS_PASSWORD", "env-redis-password")
 	t.Setenv("COURSEFORGE_ASYNQ_REDIS_PASSWORD", "env-asynq-password")
+	t.Setenv("COURSEFORGE_ENROLLMENT_SELECTION_STREAM_BATCH_SIZE", "200")
 	t.Setenv("COURSEFORGE_RABBITMQ_USERNAME", "env-user")
 	t.Setenv("COURSEFORGE_RABBITMQ_PASSWORD", "env-rabbitmq-password")
 	t.Setenv("COURSEFORGE_RABBITMQ_PUBLISHER_POOL_SIZE", "6")
-	t.Setenv("COURSEFORGE_RABBITMQ_TOPIC_SELECTION_RESULT", "env-selection-result")
 	t.Setenv("COURSEFORGE_RABBITMQ_LISTENER_SIMPLE_DEFAULT_CONCURRENCY", "2")
-	t.Setenv("COURSEFORGE_RABBITMQ_LISTENER_SIMPLE_CONCURRENCY_SELECTION_RESULT_QUEUE", "6")
+	t.Setenv("COURSEFORGE_RABBITMQ_LISTENER_SIMPLE_CONCURRENCY_OUTBOX_EVENTS_QUEUE", "6")
 	t.Setenv("COURSEFORGE_DCC_RATE_LIMIT_ENABLED", "false")
 
 	InitViperConfig()
@@ -105,23 +111,28 @@ dcc:
 	if Conf.Asynq.Redis.Password != "env-asynq-password" {
 		t.Fatalf("asynq redis password = %q, want environment override", Conf.Asynq.Redis.Password)
 	}
+	if Conf.Enrollment.SelectionStream.Group != "file-selection-group" ||
+		Conf.Enrollment.SelectionStream.BatchSize != 200 ||
+		Conf.Enrollment.SelectionStream.BatchWait != 10*time.Millisecond {
+		t.Fatalf(
+			"selection stream config = %#v, want environment override",
+			Conf.Enrollment.SelectionStream,
+		)
+	}
 	if Conf.RabbitMQ.Username != "env-user" || Conf.RabbitMQ.Password != "env-rabbitmq-password" {
 		t.Fatalf("rabbitmq credentials were not overridden by environment")
 	}
 	if Conf.RabbitMQ.Publisher.PoolSize != 6 {
 		t.Fatalf("rabbitmq publisher pool size = %d, want 6", Conf.RabbitMQ.Publisher.PoolSize)
 	}
-	if Conf.RabbitMQ.Topic.SelectionResult != "env-selection-result" {
-		t.Fatalf("rabbitmq topic config = %#v, want environment overrides", Conf.RabbitMQ.Topic)
-	}
 	if Conf.RabbitMQ.Listener.Simple.Prefetch != 1 ||
 		Conf.RabbitMQ.Listener.Simple.DefaultConcurrency != 2 ||
 		Conf.RabbitMQ.Listener.Simple.MaxRetries != 3 ||
 		len(Conf.RabbitMQ.Listener.Simple.RetryDelays) != 3 ||
 		Conf.RabbitMQ.Listener.Simple.RetryDelays[1] != 5*time.Second ||
-		Conf.RabbitMQ.Listener.Simple.Concurrency["selection_result_queue"] != 6 ||
-		Conf.RabbitMQ.Listener.Simple.BatchSize["selection_result_queue"] != 100 ||
-		Conf.RabbitMQ.Listener.Simple.BatchWait["selection_result_queue"] != 10*time.Millisecond {
+		Conf.RabbitMQ.Listener.Simple.Concurrency["outbox_events_queue"] != 6 ||
+		Conf.RabbitMQ.Listener.Simple.BatchSize["outbox_events_queue"] != 100 ||
+		Conf.RabbitMQ.Listener.Simple.BatchWait["outbox_events_queue"] != 10*time.Millisecond {
 		t.Fatalf("rabbitmq listener config = %#v, want retry and concurrency settings",
 			Conf.RabbitMQ.Listener.Simple)
 	}
@@ -181,21 +192,6 @@ func TestObjectStorageConfigValidate(t *testing.T) {
 
 func validRateLimitPolicy() RateLimitPolicyConfig {
 	return RateLimitPolicyConfig{Requests: 10, Window: time.Second, Burst: 20}
-}
-
-func TestRabbitMQTopicConfigValidate(t *testing.T) {
-	valid := RabbitMQTopicConfig{
-		SelectionResult: "selection-result",
-	}
-	if err := valid.Validate(); err != nil {
-		t.Fatalf("Validate() error = %v, want nil", err)
-	}
-
-	missing := valid
-	missing.SelectionResult = ""
-	if err := missing.Validate(); err == nil || !strings.Contains(err.Error(), "selection_result is required") {
-		t.Fatalf("missing topic Validate() error = %v, want selection_result required", err)
-	}
 }
 
 func TestJWTAuthConfigResolvesAdministratorAudience(t *testing.T) {

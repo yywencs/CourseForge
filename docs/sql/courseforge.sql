@@ -495,7 +495,7 @@ CREATE TABLE `selection_event` (
   `event_payload` json NOT NULL COMMENT '标准事件载荷快照',
   `occurred_at` datetime(3) NOT NULL COMMENT '业务发生时间',
   `consume_batch_id` varchar(32) DEFAULT NULL
-    COMMENT '首次取得该事件的RabbitMQ消费批次；用于批量幂等占位',
+	COMMENT '首次取得该事件的Redis Stream消费批次；用于批量幂等占位',
   `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_selection_event_id` (`event_id`),
@@ -509,7 +509,7 @@ CREATE TABLE `selection_event` (
       )
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-  COMMENT='选课事件审计，同时作为RabbitMQ消费幂等凭据';
+  COMMENT='选课事件审计，同时作为Redis Stream消费幂等凭据';
 
 CREATE TABLE `enrollment_count_delta` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -577,3 +577,22 @@ CREATE TABLE `outbox_event` (
     CHECK (`state` IN ('pending', 'publishing', 'published', 'failed'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='事务Outbox，用于选课落库后的后续事件';
+
+CREATE TABLE `student_notification` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `event_id` varchar(64) NOT NULL COMMENT '来源集成事件ID，同时作为消费幂等键',
+  `student_id` bigint unsigned NOT NULL COMMENT '通知接收学生ID',
+  `type` varchar(32) NOT NULL COMMENT '通知类型',
+  `title` varchar(64) NOT NULL COMMENT '通知标题',
+  `content` varchar(512) NOT NULL COMMENT '通知正文',
+  `payload` json NOT NULL COMMENT '来源事件载荷快照',
+  `occurred_at` datetime(3) NOT NULL COMMENT '业务事件发生时间',
+  `read_at` datetime(3) DEFAULT NULL COMMENT '首次已读时间',
+  `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_student_notification_event` (`event_id`),
+  KEY `idx_student_notification_inbox` (`student_id`, `read_at`, `id`),
+  CONSTRAINT `chk_student_notification_type`
+    CHECK (`type` IN ('selection_result'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  COMMENT='学生站内通知；RabbitMQ至少一次消费并按事件ID幂等落库';

@@ -12,7 +12,7 @@ internal/
     domain/                 选课、正式选课、候补、轮次领域模型与规则
     application/            用例、应用端口、命令和查询模型
     infrastructure/         轮次管理及选课持久化适配器
-    async/                  RabbitMQ/Asynq 入站和出站适配器
+    async/                  Redis Stream 消费者与 Asynq 任务适配器
     transport/http/         API 与 Admin HTTP 入站适配器
   catalog/
     domain/                 课程、教学班规划领域模型与规则
@@ -61,6 +61,7 @@ Domain 对象不携带 JSON tag。Redis Stream、RabbitMQ、审计事件和 HTTP
 | 额度、申请、正式选课、候补和修复任务 | Enrollment | 不允许其他上下文直接写入 |
 | `user_account`、学生登录凭据 | Identity | Enrollment 只接收认证后的学生 ID |
 | `outbox_event` 及发布重试状态 | Platform Outbox | 业务上下文通过端口追加集成事件 |
+| `student_notification` | Notification | RabbitMQ 消费选课落库事件后按 `event_id` 幂等写入 |
 
 Catalog 的 `teachingClassRow.SelectedCount` 使用 GORM 只读字段声明，Catalog 的新增和更新
 操作都不会写入该列。Enrollment 通过带条件的原子更新增加或归还名额，保持原有并发语义。
@@ -72,6 +73,12 @@ Enrollment 所有的轮次、额度或申请数据。后续拆分为独立服务
 ## 运行时装配
 
 `internal/bootstrap` 创建数据库、Redis、RabbitMQ 和 Asynq 客户端，实例化各上下文的
-应用服务，并把上下文自己的 HTTP、RabbitMQ 和定时任务适配器注册到通用运行时。
+应用服务，并启动选课 Redis Stream Consumer Group、HTTP 和定时任务适配器。RabbitMQ
+保留给 MySQL Outbox 发布的跨业务集成事件，不再位于选课请求及核心落库链路。选课结果
+与通知 Outbox 在同一 MySQL 事务提交；进程内常驻 Relay 连续驱动通用 Dispatcher，
+Publisher Confirm 后更新发布状态，RabbitMQ 消费者按事件 ID 幂等写入学生站内通知。
+Relay 空闲时每 100ms 轮询，有积压时连续排空，并每 10 秒采样 pending、publishing、failed
+数量及最老待发布事件年龄。RabbitMQ 消费结果、通知新建/幂等重复/失败均记录 Prometheus
+指标；Broker 队列、重试队列和 DLQ 深度由 RabbitMQ 自身监控采集。
 `server/http/api` 和 `server/http/admin` 不持有具体业务用例，只遍历路由注册器；
 `platform/taskqueue` 同样只消费通用任务注册项，不反向依赖任何业务上下文。

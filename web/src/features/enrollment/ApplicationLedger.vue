@@ -89,7 +89,7 @@ function displayFailure(item: TrackedApplicationView): string | undefined {
       </div>
       <StateBadge :state="manualRecord.state" />
       <small>
-        申请{{ manualRecord.broker_confirmed ? '已受理' : '确认中' }} ·
+        申请{{ manualRecord.stream_recorded ? '已受理' : '确认中' }} ·
         结果{{ manualRecord.mysql_persisted ? '已完成' : '处理中' }}
       </small>
     </div>
@@ -104,7 +104,7 @@ function displayFailure(item: TrackedApplicationView): string | undefined {
         </div>
         <StateBadge :state="displayState(item)" />
         <div class="ledger-item__checks">
-          <span :class="{ 'is-done': item.live?.broker_confirmed ?? item.brokerConfirmed }">
+          <span :class="{ 'is-done': item.live?.stream_recorded ?? item.streamRecorded }">
             <CheckCircle2 :size="14" />
             申请已受理
           </span>

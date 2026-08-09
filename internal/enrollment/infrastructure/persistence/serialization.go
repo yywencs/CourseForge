@@ -87,9 +87,11 @@ func (p *selectionResultPayload) toDomain() *enrollment.SelectionResult {
 }
 
 type selectionResultPublicationPayload struct {
-	StreamID        string                  `json:"stream_id"`
-	BrokerConfirmed bool                    `json:"broker_confirmed"`
-	Result          *selectionResultPayload `json:"result"`
+	StreamID              string                  `json:"stream_id"`
+	StreamRecorded        bool                    `json:"stream_recorded"`
+	LegacyBrokerConfirmed *bool                   `json:"broker_confirmed,omitempty"`
+	MySQLPersisted        bool                    `json:"mysql_persisted"`
+	Result                *selectionResultPayload `json:"result"`
 }
 
 func newSelectionResultPublicationPayload(
@@ -99,9 +101,10 @@ func newSelectionResultPublicationPayload(
 		return nil
 	}
 	return &selectionResultPublicationPayload{
-		StreamID:        publication.DeliveryCursor,
-		BrokerConfirmed: publication.DeliveryConfirmed,
-		Result:          newSelectionResultPayload(publication.Result),
+		StreamID:       publication.StreamID,
+		StreamRecorded: publication.StreamRecorded,
+		MySQLPersisted: publication.DurablyPersisted,
+		Result:         newSelectionResultPayload(publication.Result),
 	}
 }
 
@@ -109,10 +112,15 @@ func (p *selectionResultPublicationPayload) toApplication() *application.Selecti
 	if p == nil {
 		return nil
 	}
+	streamRecorded := p.StreamRecorded
+	if p.LegacyBrokerConfirmed != nil {
+		streamRecorded = streamRecorded || *p.LegacyBrokerConfirmed
+	}
 	return &application.SelectionResultPublication{
-		DeliveryCursor:    p.StreamID,
-		DeliveryConfirmed: p.BrokerConfirmed,
-		Result:            p.Result.toDomain(),
+		StreamID:         p.StreamID,
+		StreamRecorded:   streamRecorded,
+		DurablyPersisted: p.MySQLPersisted,
+		Result:           p.Result.toDomain(),
 	}
 }
 

@@ -61,7 +61,7 @@ func (f *fakeWaitlistRepository) ReturnWaitlistToQueue(
 }
 
 func TestWaitlistUsecaseJoinsFullClass(t *testing.T) {
-	selector, queryRepo, _, now := newSuccessfulEnrollmentUsecase(t)
+	selector, queryRepo, now := newSuccessfulEnrollmentUsecase(t)
 	queryRepo.class.SelectedCount = queryRepo.class.Capacity
 	waitlistRepo := &fakeWaitlistRepository{}
 	usecase := NewWaitlistUsecase(

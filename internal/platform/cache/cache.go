@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -49,6 +50,9 @@ type rediser interface {
 	Ping(ctx context.Context) *redis.StatusCmd
 	Publish(ctx context.Context, channel string, message interface{}) *redis.IntCmd
 	Subscribe(ctx context.Context, channels ...string) *redis.PubSub
+	XGroupCreateMkStream(ctx context.Context, stream, group, start string) *redis.StatusCmd
+	XReadGroup(ctx context.Context, args *redis.XReadGroupArgs) *redis.XStreamSliceCmd
+	XAutoClaim(ctx context.Context, args *redis.XAutoClaimArgs) *redis.XAutoClaimCmd
 }
 
 type Item struct {
@@ -139,6 +143,12 @@ type Cache struct {
 type PubSubSubscription interface {
 	Channel(opts ...redis.ChannelOption) <-chan *redis.Message
 	Close() error
+}
+
+// StreamMessage 是从 Redis Stream 读取的一条原始消息。
+type StreamMessage struct {
+	ID     string
+	Values map[string]interface{}
 }
 
 func New(opt *Options) *Cache {
@@ -557,6 +567,165 @@ func (cd *Cache) Subscribe(
 		return nil, err
 	}
 	return subscription, nil
+}
+
+// EnsureStreamConsumerGroup 创建 Consumer Group；组已存在时按成功处理。
+// start 通常使用 "0"，确保部署切换前已经写入 Stream 的记录不会被跳过。
+func (cd *Cache) EnsureStreamConsumerGroup(
+	ctx context.Context,
+	stream string,
+	group string,
+	start string,
+) error {
+	if cd == nil || cd.opt == nil || cd.opt.Redis == nil {
+		return errRedisLocalCacheNil
+	}
+	err := cd.opt.Redis.XGroupCreateMkStream(ctx, stream, group, start).Err()
+	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+		return err
+	}
+	return nil
+}
+
+// ReadStreamGroup 阻塞读取 Consumer Group 中尚未投递的新消息。
+func (cd *Cache) ReadStreamGroup(
+	ctx context.Context,
+	stream string,
+	group string,
+	consumer string,
+	count int64,
+	block time.Duration,
+) ([]StreamMessage, error) {
+	if cd == nil || cd.opt == nil || cd.opt.Redis == nil {
+		return nil, errRedisLocalCacheNil
+	}
+	streams, err := cd.opt.Redis.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group:    group,
+		Consumer: consumer,
+		Streams:  []string{stream, ">"},
+		Count:    count,
+		Block:    block,
+	}).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return flattenStreamMessages(streams), nil
+}
+
+// ClaimStaleStreamMessages 领取超过 minIdle 仍未确认的消息，用于消费者崩溃恢复。
+func (cd *Cache) ClaimStaleStreamMessages(
+	ctx context.Context,
+	stream string,
+	group string,
+	consumer string,
+	minIdle time.Duration,
+	start string,
+	count int64,
+) ([]StreamMessage, string, error) {
+	if cd == nil || cd.opt == nil || cd.opt.Redis == nil {
+		return nil, start, errRedisLocalCacheNil
+	}
+	messages, next, err := cd.opt.Redis.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+		Stream:   stream,
+		Group:    group,
+		Consumer: consumer,
+		MinIdle:  minIdle,
+		Start:    start,
+		Count:    count,
+	}).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil, next, nil
+	}
+	if err != nil {
+		return nil, start, err
+	}
+	entries := make([]StreamMessage, 0, len(messages))
+	for _, message := range messages {
+		entries = append(entries, StreamMessage{ID: message.ID, Values: message.Values})
+	}
+	return entries, next, nil
+}
+
+// AcknowledgeStreamMessages 在 MySQL 提交后原子确认并删除 Stream 消息。
+func (cd *Cache) AcknowledgeStreamMessages(
+	ctx context.Context,
+	stream string,
+	group string,
+	ids ...string,
+) error {
+	if cd == nil || cd.opt == nil || cd.opt.Redis == nil {
+		return errRedisLocalCacheNil
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	args := make([]interface{}, 0, len(ids)+1)
+	args = append(args, group)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	const acknowledgeScript = `
+		local acknowledged = redis.call('XACK', KEYS[1], ARGV[1], unpack(ARGV, 2))
+		local deleted = redis.call('XDEL', KEYS[1], unpack(ARGV, 2))
+		return {acknowledged, deleted}
+	`
+	return cd.opt.Redis.Eval(ctx, acknowledgeScript, []string{stream}, args...).Err()
+}
+
+// DeadLetterStreamMessage 将无法处理的消息写入死信 Stream，再从原 Consumer Group
+// 确认并删除；三个动作由同一个 Lua 脚本原子完成。
+func (cd *Cache) DeadLetterStreamMessage(
+	ctx context.Context,
+	stream string,
+	group string,
+	deadLetterStream string,
+	message StreamMessage,
+	reason string,
+) error {
+	if cd == nil || cd.opt == nil || cd.opt.Redis == nil {
+		return errRedisLocalCacheNil
+	}
+	payload := ""
+	if value, exists := message.Values["event"]; exists {
+		payload = fmt.Sprint(value)
+	}
+	const deadLetterScript = `
+		redis.call(
+			'XADD', KEYS[2], '*',
+			'original_stream_id', ARGV[2],
+			'event', ARGV[3],
+			'error', ARGV[4]
+		)
+		redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+		redis.call('XDEL', KEYS[1], ARGV[2])
+		return 1
+	`
+	return cd.opt.Redis.Eval(
+		ctx,
+		deadLetterScript,
+		[]string{stream, deadLetterStream},
+		group,
+		message.ID,
+		payload,
+		reason,
+	).Err()
+}
+
+func flattenStreamMessages(streams []redis.XStream) []StreamMessage {
+	count := 0
+	for _, stream := range streams {
+		count += len(stream.Messages)
+	}
+	entries := make([]StreamMessage, 0, count)
+	for _, stream := range streams {
+		for _, message := range stream.Messages {
+			entries = append(entries, StreamMessage{ID: message.ID, Values: message.Values})
+		}
+	}
+	return entries
 }
 
 // Pipeline returns a Redis pipeline for batch operations.

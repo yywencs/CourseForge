@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/yywencs/courseforge/internal/platform/config"
 )
 
 type recordingEventPublisher struct {
@@ -100,21 +98,16 @@ func TestRabbitMQPublisherStopsWaitingForSlotWhenContextEnds(t *testing.T) {
 	}
 }
 
-// TestPublisherUsesConfiguredSelectionTopic 验证选课结果发布到配置指定的 Topic。
-func TestPublisherUsesConfiguredTopics(t *testing.T) {
+func TestPublisherPublishesGenericTopic(t *testing.T) {
 	client := &recordingEventPublisher{}
-	publisher := NewPublisher(client, &config.RabbitMQConfig{
-		Topic: config.RabbitMQTopicConfig{
-			SelectionResult: "configured-selection-result",
-		},
-	})
+	publisher := NewPublisher(client)
 	event := NewBaseEvent("payload")
 
-	if err := publisher.PublishSelectionResult(context.Background(), event); err != nil {
+	if err := publisher.PublishTopic(context.Background(), "course.changed", event); err != nil {
 		t.Fatalf("publish error = %v, want nil", err)
 	}
-	if len(client.topics) != 1 || client.topics[0] != "configured-selection-result" {
-		t.Fatalf("published topics = %#v, want configured selection topic", client.topics)
+	if len(client.topics) != 1 || client.topics[0] != "course.changed" {
+		t.Fatalf("published topics = %#v, want course.changed", client.topics)
 	}
 	if len(client.events) != 1 || client.events[0] != event {
 		t.Fatalf("published events = %#v, want original event", client.events)

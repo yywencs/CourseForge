@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yywencs/courseforge/internal/platform/config"
 	"github.com/yywencs/courseforge/internal/platform/observability/metrics"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -160,22 +159,13 @@ func (s *amqpPublisherSlot) close() error {
 // Publisher is a typed facade over the low-level RabbitMQPublisher.
 type Publisher struct {
 	client eventPublisher
-	topic  config.RabbitMQTopicConfig
 }
 
-// NewPublisher creates a typed publisher from config.
-func NewPublisher(client eventPublisher, cfg *config.RabbitMQConfig) *Publisher {
-	return &Publisher{
-		client: client,
-		topic:  cfg.Topic,
-	}
+// NewPublisher creates the generic domain-event publisher facade.
+func NewPublisher(client eventPublisher) *Publisher {
+	return &Publisher{client: client}
 }
 
 func (p *Publisher) PublishTopic(ctx context.Context, topic string, event *BaseEvent) error {
 	return p.client.Publish(ctx, topic, event)
-}
-
-// PublishSelectionResult 发布选课标准结果并等待 RabbitMQ Confirm。
-func (p *Publisher) PublishSelectionResult(ctx context.Context, event *BaseEvent) error {
-	return p.client.Publish(ctx, p.topic.SelectionResult, event)
 }

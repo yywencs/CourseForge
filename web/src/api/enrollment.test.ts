@@ -38,7 +38,7 @@ describe('enrollment API contract', () => {
     const receipt = {
       application_id: 'application-1',
       state: 'created' as const,
-      broker_confirmed: false,
+      stream_recorded: false,
       mysql_persisted: false,
     }
     const post = vi.spyOn(http, 'post').mockResolvedValue(okResponse(receipt))

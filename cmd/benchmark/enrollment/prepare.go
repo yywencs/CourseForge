@@ -260,6 +260,7 @@ func prepareCourseSelectionData(
 	defer tx.Rollback()
 
 	resetStatements := []string{
+		`DELETE FROM student_notification WHERE student_id BETWEEN ? AND ?`,
 		`DELETE oe FROM outbox_event oe
 		  JOIN selection_application sa ON sa.application_id = oe.aggregate_id
 		 WHERE oe.aggregate_type = 'selection_application'

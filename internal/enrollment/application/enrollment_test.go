@@ -70,44 +70,15 @@ func (f *fakeEnrollmentRepository) CommitSelection(
 ) (*SelectionResultPublication, error) {
 	f.committed = result
 	return &SelectionResultPublication{
-		DeliveryCursor: "1-0",
+		StreamID:       "1-0",
+		StreamRecorded: true,
 		Result:         result,
 	}, nil
 }
 
-func (f *fakeEnrollmentRepository) QueryPendingSelectionResults(
-	context.Context,
-	int64,
-) ([]*SelectionResultPublication, error) {
-	return nil, nil
-}
-
-func (f *fakeEnrollmentRepository) MarkSelectionResultPublished(
-	context.Context,
-	*SelectionResultPublication,
-) error {
-	return nil
-}
-
-type fakeSelectionPublisher struct {
-	publication *SelectionResultPublication
-	err         error
-}
-
-func (f *fakeSelectionPublisher) Publish(
-	_ context.Context,
-	publication *SelectionResultPublication,
-) error {
-	f.publication = publication
-	if f.err == nil {
-		publication.DeliveryConfirmed = true
-	}
-	return f.err
-}
-
 func newSuccessfulEnrollmentUsecase(
 	t *testing.T,
-) (*EnrollmentUsecase, *fakeEnrollmentRepository, *fakeSelectionPublisher, time.Time) {
+) (*EnrollmentUsecase, *fakeEnrollmentRepository, time.Time) {
 	t.Helper()
 	now := time.Date(2026, time.September, 1, 8, 30, 0, 0, time.Local)
 	repo := &fakeEnrollmentRepository{
@@ -135,23 +106,21 @@ func newSuccessfulEnrollmentUsecase(
 		},
 		active: true,
 	}
-	publisher := &fakeSelectionPublisher{}
 	admission := NewSelectionAdmissionService(repo)
 	usecase := NewEnrollmentUsecase(
 		repo,
 		repo,
-		publisher,
 		admission,
 		fixedIDGenerator{id: "application-001"},
 		noopEnrollmentObserver{},
 	)
 	usecase.now = func() time.Time { return now }
-	return usecase, repo, publisher, now
+	return usecase, repo, now
 }
 
-// TestEnrollmentUsecaseSelectCourse 验证最小主链路会原子提交结果并发布消息。
+// TestEnrollmentUsecaseSelectCourse 验证最小主链路原子提交结果和Stream后立即返回。
 func TestEnrollmentUsecaseSelectCourse(t *testing.T) {
-	usecase, repo, publisher, _ := newSuccessfulEnrollmentUsecase(t)
+	usecase, repo, _ := newSuccessfulEnrollmentUsecase(t)
 	receipt, err := usecase.SelectCourse(context.Background(), &SelectCourseCommand{
 		RequestID:       "request-001",
 		RoundID:         101,
@@ -164,23 +133,19 @@ func TestEnrollmentUsecaseSelectCourse(t *testing.T) {
 	}
 	if receipt.ApplicationID != "application-001" ||
 		receipt.State != enrollment.ApplicationStateSelected ||
-		!receipt.DeliveryConfirmed ||
+		!receipt.StreamRecorded ||
 		receipt.DurablyPersisted {
 		t.Fatalf("SelectCourse() receipt = %#v", receipt)
 	}
-	if repo.committed == nil || publisher.publication == nil {
-		t.Fatalf(
-			"main chain calls = committed:%v published:%v",
-			repo.committed != nil,
-			publisher.publication != nil,
-		)
+	if repo.committed == nil {
+		t.Fatal("selection result was not committed to Redis Stream")
 	}
 }
 
 // TestEnrollmentUsecaseRejectsBeforeReservation 验证重复课程和已关闭轮次不会进入Redis预占。
 func TestEnrollmentUsecaseRejectsBeforeReservation(t *testing.T) {
 	t.Run("duplicate course", func(t *testing.T) {
-		usecase, repo, _, _ := newSuccessfulEnrollmentUsecase(t)
+		usecase, repo, _ := newSuccessfulEnrollmentUsecase(t)
 		repo.existing = true
 		_, err := usecase.SelectCourse(context.Background(), &SelectCourseCommand{
 			RequestID:       "request-001",
@@ -198,7 +163,7 @@ func TestEnrollmentUsecaseRejectsBeforeReservation(t *testing.T) {
 	})
 
 	t.Run("closed round", func(t *testing.T) {
-		usecase, repo, _, _ := newSuccessfulEnrollmentUsecase(t)
+		usecase, repo, _ := newSuccessfulEnrollmentUsecase(t)
 		repo.round.State = enrollment.SelectionRoundStateClosed
 		_, err := usecase.SelectCourse(context.Background(), &SelectCourseCommand{
 			RequestID:       "request-001",
@@ -216,33 +181,29 @@ func TestEnrollmentUsecaseRejectsBeforeReservation(t *testing.T) {
 	})
 }
 
-// TestEnrollmentUsecaseKeepsRecoverableResult 验证RabbitMQ失败时向客户端返回处理中，
-// 结果仍由Repository保存在Redis Stream中等待补偿。
-func TestEnrollmentUsecaseKeepsRecoverableResult(t *testing.T) {
-	usecase, repo, publisher, _ := newSuccessfulEnrollmentUsecase(t)
-	publishErr := errors.New("confirm timeout")
-	publisher.err = publishErr
-
-	_, err := usecase.SelectCourse(context.Background(), &SelectCourseCommand{
+// TestEnrollmentUsecaseReturnsAfterStreamCommit 验证请求不再等待外部消息代理确认。
+func TestEnrollmentUsecaseReturnsAfterStreamCommit(t *testing.T) {
+	usecase, repo, _ := newSuccessfulEnrollmentUsecase(t)
+	receipt, err := usecase.SelectCourse(context.Background(), &SelectCourseCommand{
 		RequestID:       "request-001",
 		RoundID:         101,
 		StudentID:       10001,
 		TeachingClassID: 30001,
 		Source:          enrollment.ApplicationSourceWeb,
 	})
-	if !errors.Is(err, enrollment.ErrApplicationInProgress) ||
-		!errors.Is(err, publishErr) {
-		t.Fatalf("SelectCourse() error = %v, want in-progress wrapping publish error", err)
+	if err != nil {
+		t.Fatalf("SelectCourse() error = %v", err)
 	}
-	if repo.committed == nil || publisher.publication == nil {
-		t.Fatal("publish failure should happen after Redis result completion")
+	if repo.committed == nil || receipt == nil || !receipt.StreamRecorded ||
+		receipt.DurablyPersisted {
+		t.Fatalf("stream receipt = %#v committed=%v", receipt, repo.committed != nil)
 	}
 }
 
 // TestEnrollmentUsecaseReturnsPersistedIdempotentResultBeforeMutableChecks 验证相同请求在
 // 轮次关闭、正式选课记录已存在后重试，仍返回最初已落库结果。
 func TestEnrollmentUsecaseReturnsPersistedIdempotentResultBeforeMutableChecks(t *testing.T) {
-	usecase, repo, _, now := newSuccessfulEnrollmentUsecase(t)
+	usecase, repo, now := newSuccessfulEnrollmentUsecase(t)
 	completedAt := now.Add(time.Second)
 	repo.lookup = &SelectionRequestRecord{
 		Application: &enrollment.SelectionApplication{
@@ -276,7 +237,7 @@ func TestEnrollmentUsecaseReturnsPersistedIdempotentResultBeforeMutableChecks(t 
 	}
 	if receipt.ApplicationID != "application-001" ||
 		receipt.State != enrollment.ApplicationStateSelected ||
-		!receipt.DeliveryConfirmed ||
+		!receipt.StreamRecorded ||
 		!receipt.DurablyPersisted {
 		t.Fatalf("SelectCourse() receipt = %#v", receipt)
 	}
@@ -288,7 +249,7 @@ func TestEnrollmentUsecaseReturnsPersistedIdempotentResultBeforeMutableChecks(t 
 // TestEnrollmentUsecaseRejectsIdempotencyFingerprintConflict 验证相同 request_id
 // 不能重新绑定到另一个教学班。
 func TestEnrollmentUsecaseRejectsIdempotencyFingerprintConflict(t *testing.T) {
-	usecase, repo, _, now := newSuccessfulEnrollmentUsecase(t)
+	usecase, repo, now := newSuccessfulEnrollmentUsecase(t)
 	repo.lookup = &SelectionRequestRecord{
 		Application: &enrollment.SelectionApplication{
 			ApplicationID:   "application-001",
@@ -323,7 +284,7 @@ func TestEnrollmentUsecaseRejectsIdempotencyFingerprintConflict(t *testing.T) {
 // TestEnrollmentUsecaseResumesMatchingPendingBeforeMutableChecks 验证相同 request_id
 // 找到 Redis pending 后会继续原申请，而不会因轮次后来关闭而改变首次请求语义。
 func TestEnrollmentUsecaseResumesMatchingPendingBeforeMutableChecks(t *testing.T) {
-	usecase, repo, publisher, now := newSuccessfulEnrollmentUsecase(t)
+	usecase, repo, now := newSuccessfulEnrollmentUsecase(t)
 	repo.lookup = &SelectionRequestRecord{
 		Application: &enrollment.SelectionApplication{
 			ApplicationID:   "application-001",
@@ -351,14 +312,11 @@ func TestEnrollmentUsecaseResumesMatchingPendingBeforeMutableChecks(t *testing.T
 	if err != nil {
 		t.Fatalf("SelectCourse() error = %v", err)
 	}
-	if receipt.State != enrollment.ApplicationStateSelected ||
-		repo.committed == nil ||
-		publisher.publication == nil {
+	if receipt.State != enrollment.ApplicationStateSelected || repo.committed == nil {
 		t.Fatalf(
-			"pending resume = receipt:%#v committed:%v published:%v",
+			"pending resume = receipt:%#v committed:%v",
 			receipt,
 			repo.committed != nil,
-			publisher.publication != nil,
 		)
 	}
 }

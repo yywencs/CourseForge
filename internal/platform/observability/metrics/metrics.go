@@ -187,6 +187,54 @@ var (
 		[]string{"topic", "result"},
 	)
 
+	OutboxRelayCyclesTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricNamespace,
+			Subsystem: "outbox",
+			Name:      "relay_cycles_total",
+			Help:      "Total resident Outbox Relay polling cycles.",
+		},
+		[]string{"result"},
+	)
+
+	OutboxRelayProcessedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: metricNamespace,
+			Subsystem: "outbox",
+			Name:      "relay_processed_total",
+			Help:      "Total events claimed by the resident Outbox Relay.",
+		},
+	)
+
+	OutboxBacklog = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: metricNamespace,
+			Subsystem: "outbox",
+			Name:      "backlog",
+			Help:      "Current Outbox event count by non-terminal state.",
+		},
+		[]string{"state"},
+	)
+
+	OutboxOldestPendingAgeSeconds = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: metricNamespace,
+			Subsystem: "outbox",
+			Name:      "oldest_pending_age_seconds",
+			Help:      "Age in seconds of the oldest pending or failed Outbox event.",
+		},
+	)
+
+	NotificationPersistenceTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricNamespace,
+			Subsystem: "notification",
+			Name:      "persistence_total",
+			Help:      "Total notification persistence outcomes.",
+		},
+		[]string{"type", "result"},
+	)
+
 	RedisOpsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metricNamespace,
@@ -350,6 +398,11 @@ func init() {
 		DanmakuSubscriberReconnectTotal,
 		OutboxDispatchTotal,
 		OutboxDispatchDuration,
+		OutboxRelayCyclesTotal,
+		OutboxRelayProcessedTotal,
+		OutboxBacklog,
+		OutboxOldestPendingAgeSeconds,
+		NotificationPersistenceTotal,
 		RedisOpsTotal,
 		RedisOpDuration,
 		AsynqTaskTotal,

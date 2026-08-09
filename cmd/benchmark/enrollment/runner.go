@@ -27,10 +27,10 @@ type selectionResponse struct {
 	Code int    `json:"code"`
 	Info string `json:"info"`
 	Data struct {
-		ApplicationID   string `json:"application_id"`
-		State           string `json:"state"`
-		BrokerConfirmed bool   `json:"broker_confirmed"`
-		MySQLPersisted  bool   `json:"mysql_persisted"`
+		ApplicationID  string `json:"application_id"`
+		State          string `json:"state"`
+		StreamRecorded bool   `json:"stream_recorded"`
+		MySQLPersisted bool   `json:"mysql_persisted"`
 	} `json:"data"`
 }
 
@@ -256,7 +256,7 @@ func (r *benchmarkRunner) executeOnce(
 	}
 	if result.Data.ApplicationID == "" ||
 		result.Data.State != "selected" ||
-		!result.Data.BrokerConfirmed {
+		!result.Data.StreamRecorded {
 		return requestResult{latency: latency, outcome: outcomeDecodeError}
 	}
 	return requestResult{

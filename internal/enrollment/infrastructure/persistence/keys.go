@@ -2,7 +2,10 @@ package enrollmentrepo
 
 import "fmt"
 
-const selectionResultStreamKey = "courseforge:selection:result:stream"
+// SelectionResultStreamKey 保存 Redis 原子选课决策等待 MySQL 投影的事件。
+const SelectionResultStreamKey = "courseforge:selection:result:stream"
+
+const selectionResultStreamKey = SelectionResultStreamKey
 
 func studentCreditKey(roundID, studentID uint64) string {
 	return fmt.Sprintf("courseforge:selection:quota:credit:%d:%d", roundID, studentID)

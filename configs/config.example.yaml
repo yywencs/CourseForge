@@ -23,6 +23,17 @@ auth:
     clock_skew: 30s
     token_ttl: 2h
 
+enrollment:
+  selection_stream:
+    group: courseforge-selection-persistence
+    consumer_base: api
+    concurrency: 2
+    batch_size: 200
+    batch_wait: 10ms
+    block_timeout: 1s
+    claim_idle: 30s
+    dead_letter: courseforge:selection:result:stream:dlq
+
 rabbitmq:
   addresses: 127.0.0.1
   port: 5672
@@ -32,19 +43,13 @@ rabbitmq:
     pool_size: 8
   listener:
     simple:
-      prefetch: 200 # 必须不小于批量大小，允许消费者聚合后统一落库
+      prefetch: 200 # 通用 RabbitMQ 消费者的未确认消息上限
       default_concurrency: 1
+      concurrency:
+        enrollment.selection.notification_queue: 2
       # 临时错误最多延迟重试 3 次，之后转入 {topic}_dlq。
       max_retries: 3
       retry_delays: [1s, 5s, 30s]
-      concurrency:
-        selection_result_queue: 2
-      batch_size:
-        selection_result_queue: 100
-      batch_wait:
-        selection_result_queue: 10ms
-  topic:
-    selection_result: "selection_result"
 
 data:
   mysql:

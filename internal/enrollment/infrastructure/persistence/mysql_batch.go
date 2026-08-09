@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/yywencs/courseforge/internal/enrollment/domain"
+	enrollmentintegration "github.com/yywencs/courseforge/internal/enrollment/integration"
+	"github.com/yywencs/courseforge/internal/platform/outbox"
+	outboxrepo "github.com/yywencs/courseforge/internal/platform/outbox/mysql"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -101,7 +104,7 @@ func (r *ResultStore) SaveSelectionResults(
 		return txnErr
 	}
 
-	// MySQL 已提交后再批量清理 pending。若清理失败，RabbitMQ 重投会命中
+	// MySQL 已提交后再批量清理 pending。若清理失败，Stream 重投会命中
 	// selection_event 的幂等占位，不会再次更新额度或插入选课事实。
 	if err := r.clearPersistedSelections(ctx, results); err != nil {
 		return fmt.Errorf("批量清理Redis选课pending: %w", err)
@@ -325,15 +328,46 @@ func (r *ResultStore) persistClaimedSelectionResults(
 		CreateInBatches(applications, len(applications)).Error; err != nil {
 		return err
 	}
-	if len(enrollments) == 0 {
-		return nil
+	if len(enrollments) > 0 {
+		if err := tx.Table("student_course_enrollment").
+			CreateInBatches(enrollments, len(enrollments)).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("enrollment_count_delta").
+			CreateInBatches(deltas, len(deltas)).Error; err != nil {
+			return err
+		}
 	}
-	if err := tx.Table("student_course_enrollment").
-		CreateInBatches(enrollments, len(enrollments)).Error; err != nil {
+	events, err := newSelectionNotificationEvents(results)
+	if err != nil {
 		return err
 	}
-	return tx.Table("enrollment_count_delta").
-		CreateInBatches(deltas, len(deltas)).Error
+	return outboxrepo.NewRepository(tx).AppendBatch(tx.Statement.Context, events)
+}
+
+func newSelectionNotificationEvents(
+	results []*enrollment.SelectionResult,
+) ([]*outbox.NewEvent, error) {
+	events := make([]*outbox.NewEvent, 0, len(results))
+	for _, result := range results {
+		payload := enrollmentintegration.NewSelectionNotification(result)
+		if err := payload.Validate(); err != nil {
+			return nil, err
+		}
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("序列化选课通知事件: %w", err)
+		}
+		events = append(events, &outbox.NewEvent{
+			EventID:       selectionResultEventID(result),
+			AggregateType: enrollmentintegration.SelectionNotificationAggregate,
+			AggregateID:   result.ApplicationID,
+			Topic:         enrollmentintegration.SelectionNotificationTopic,
+			EventType:     enrollmentintegration.SelectionResultPersisted,
+			Payload:       encoded,
+		})
+	}
+	return events, nil
 }
 
 type quotaBatchKey struct {

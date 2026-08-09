@@ -4,7 +4,9 @@ import (
 	"github.com/hibiken/asynq"
 	danmakuredis "github.com/yywencs/courseforge/internal/danmaku/infrastructure/redis"
 	danmakuws "github.com/yywencs/courseforge/internal/danmaku/transport/websocket"
+	enrollmentasync "github.com/yywencs/courseforge/internal/enrollment/async"
 	"github.com/yywencs/courseforge/internal/platform/config"
+	outboxrelay "github.com/yywencs/courseforge/internal/platform/outbox/relay"
 	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
 	"github.com/yywencs/courseforge/internal/platform/taskqueue"
 	httpserver "github.com/yywencs/courseforge/server/http"
@@ -21,6 +23,8 @@ type HTTPApp struct {
 	adminServer       httpserver.Server
 	asynqWorker       *taskqueue.AsynqWorker
 	rabbitMQConsumer  *rabbitmq.RabbitMQConsumer
+	outboxRelay       *outboxrelay.Relay
+	selectionConsumer *enrollmentasync.SelectionStreamConsumer
 	danmakuHub        *danmakuws.Hub
 	danmakuSubscriber *danmakuredis.RealtimeSubscriber
 	asynqClient       *asynq.Client
@@ -45,6 +49,14 @@ func (a *HTTPApp) AsynqWorker() *taskqueue.AsynqWorker { return a.asynqWorker }
 
 // RabbitMQConsumer returns the API consumer.
 func (a *HTTPApp) RabbitMQConsumer() *rabbitmq.RabbitMQConsumer { return a.rabbitMQConsumer }
+
+// OutboxRelay returns the resident MySQL Outbox to RabbitMQ publisher.
+func (a *HTTPApp) OutboxRelay() *outboxrelay.Relay { return a.outboxRelay }
+
+// SelectionStreamConsumer returns the Redis Stream to MySQL projection worker.
+func (a *HTTPApp) SelectionStreamConsumer() *enrollmentasync.SelectionStreamConsumer {
+	return a.selectionConsumer
+}
 
 // DanmakuHub returns the API process-local realtime danmaku connection hub.
 func (a *HTTPApp) DanmakuHub() *danmakuws.Hub { return a.danmakuHub }

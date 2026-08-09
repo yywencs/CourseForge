@@ -41,6 +41,34 @@ func ObserveOutboxDispatch(topic, result string, duration time.Duration) {
 	OutboxDispatchDuration.WithLabelValues(topic, result).Observe(duration.Seconds())
 }
 
+func ObserveOutboxRelayCycle(processed int, err error) {
+	result := "success"
+	if err != nil {
+		result = "error"
+	}
+	OutboxRelayCyclesTotal.WithLabelValues(result).Inc()
+	if processed > 0 {
+		OutboxRelayProcessedTotal.Add(float64(processed))
+	}
+}
+
+func SetOutboxBacklog(pending, publishing, failed int64, oldestAge time.Duration) {
+	OutboxBacklog.WithLabelValues("pending").Set(float64(pending))
+	OutboxBacklog.WithLabelValues("publishing").Set(float64(publishing))
+	OutboxBacklog.WithLabelValues("failed").Set(float64(failed))
+	if oldestAge < 0 {
+		oldestAge = 0
+	}
+	OutboxOldestPendingAgeSeconds.Set(oldestAge.Seconds())
+}
+
+func IncNotificationPersistence(notificationType, result string) {
+	NotificationPersistenceTotal.WithLabelValues(
+		normalizeLabel(notificationType),
+		normalizeLabel(result),
+	).Inc()
+}
+
 func IncRabbitMQPublish(topic, result string) {
 	RabbitMQPublishTotal.WithLabelValues(normalizeLabel(topic), normalizeLabel(result)).Inc()
 }

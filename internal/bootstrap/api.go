@@ -25,6 +25,9 @@ import (
 	"github.com/yywencs/courseforge/internal/platform/database"
 	"github.com/yywencs/courseforge/internal/platform/http/middleware"
 	"github.com/yywencs/courseforge/internal/platform/observability/logger"
+	outboxdispatcher "github.com/yywencs/courseforge/internal/platform/outbox/dispatcher"
+	outboxrepo "github.com/yywencs/courseforge/internal/platform/outbox/mysql"
+	outboxrelay "github.com/yywencs/courseforge/internal/platform/outbox/relay"
 	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
 	"github.com/yywencs/courseforge/internal/platform/taskqueue"
 	apihttp "github.com/yywencs/courseforge/server/http/api"
@@ -63,6 +66,12 @@ func NewAPIApp() (*HTTPApp, error) {
 			runtime.close()
 		}
 	}()
+	registerNotificationListeners(runtime)
+	outboxRepository := outboxrepo.NewRepository(runtime.db)
+	relay := outboxrelay.New(outboxdispatcher.NewOutboxDispatcher(
+		outboxRepository,
+		runtime.publisher,
+	), outboxrelay.WithBacklogReader(outboxRepository))
 
 	identityRoutes, studentAuth, studentTokens, err := newStudentIdentity(runtime.db, cfg)
 	if err != nil {
@@ -116,6 +125,8 @@ func NewAPIApp() (*HTTPApp, error) {
 		apiServer:         apiServer,
 		asynqWorker:       asynqWorker,
 		rabbitMQConsumer:  runtime.consumer,
+		outboxRelay:       relay,
+		selectionConsumer: enrollmentModule.selectionStreamConsumer,
 		danmakuHub:        danmakuHub,
 		danmakuSubscriber: danmakuSubscriber,
 		asynqClient:       runtime.asynqClient,
@@ -154,7 +165,7 @@ func newAPIRuntime(cfg *config.Config) (*apiRuntime, error) {
 		redis:       redis,
 		asynqClient: asynqClient,
 		rabbitConn:  conn,
-		publisher:   rabbitmq.NewPublisher(rabbitPublisher, &cfg.RabbitMQ),
+		publisher:   rabbitmq.NewPublisher(rabbitPublisher),
 		consumer:    consumer,
 	}, nil
 }
@@ -241,13 +252,7 @@ func validateCommonHTTPConfig(cfg *config.Config) error {
 }
 
 func validateAPIConfig(cfg *config.Config) error {
-	if err := validateCommonHTTPConfig(cfg); err != nil {
-		return err
-	}
-	if err := cfg.RabbitMQ.Topic.Validate(); err != nil {
-		return fmt.Errorf("rabbitmq topic config: %w", err)
-	}
-	return nil
+	return validateCommonHTTPConfig(cfg)
 }
 
 func databaseReadinessCheck(db interface {

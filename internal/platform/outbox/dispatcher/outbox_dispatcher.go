@@ -10,14 +10,13 @@ import (
 	"github.com/yywencs/courseforge/internal/platform/observability/metrics"
 	"github.com/yywencs/courseforge/internal/platform/outbox"
 	"github.com/yywencs/courseforge/internal/platform/rabbitmq"
-
-	"github.com/hibiken/asynq"
 )
 
 const (
 	defaultOutboxBatchSize = 100
 	defaultOutboxLease     = time.Minute
 	maxOutboxRetryDelay    = 5 * time.Minute
+	maxOutboxBatchesPerRun = 10
 )
 
 type outboxPublisher interface {
@@ -41,31 +40,64 @@ func NewOutboxDispatcher(
 	}
 }
 
-func (d *OutboxDispatcher) ProcessTask(
-	ctx context.Context,
-	_ *asynq.Task,
-) error {
+// DispatchPending claims and publishes a bounded amount of currently eligible
+// work. The returned count lets the resident Relay drain continuously while
+// work exists and sleep only after the Outbox becomes empty.
+func (d *OutboxDispatcher) DispatchPending(ctx context.Context) (int, error) {
 	if d == nil || d.repository == nil || d.publisher == nil {
-		return errors.New("outbox dispatcher dependencies are incomplete")
+		return 0, errors.New("outbox dispatcher dependencies are incomplete")
 	}
-	now := d.now()
-	events, err := d.repository.ClaimPending(
-		ctx,
-		defaultOutboxBatchSize,
-		now,
-		defaultOutboxLease,
-	)
-	if err != nil {
-		return err
-	}
-
+	processed := 0
 	var dispatchErrors []error
-	for _, event := range events {
-		if err := d.dispatch(ctx, event); err != nil {
+	for batch := 0; batch < maxOutboxBatchesPerRun; batch++ {
+		events, err := d.repository.ClaimPending(
+			ctx,
+			defaultOutboxBatchSize,
+			d.now(),
+			defaultOutboxLease,
+		)
+		if err != nil {
 			dispatchErrors = append(dispatchErrors, err)
+			break
+		}
+		processed += len(events)
+		dispatchErrors = append(dispatchErrors, d.dispatchBatch(ctx, events)...)
+		if len(events) < defaultOutboxBatchSize {
+			break
 		}
 	}
-	return errors.Join(dispatchErrors...)
+	return processed, errors.Join(dispatchErrors...)
+}
+
+// dispatchBatch deliberately starts one goroutine per claimed event. The
+// RabbitMQ publisher's bounded channel pool supplies the actual concurrency
+// limit, so a batch can use every publisher slot without creating a second,
+// drifting concurrency setting in the Outbox layer.
+func (d *OutboxDispatcher) dispatchBatch(
+	ctx context.Context,
+	events []*outbox.Event,
+) []error {
+	if len(events) == 0 {
+		return nil
+	}
+	errorsByIndex := make([]error, len(events))
+	done := make(chan struct{}, len(events))
+	for index, event := range events {
+		go func() {
+			errorsByIndex[index] = d.dispatch(ctx, event)
+			done <- struct{}{}
+		}()
+	}
+	for range events {
+		<-done
+	}
+	result := make([]error, 0)
+	for _, err := range errorsByIndex {
+		if err != nil {
+			result = append(result, err)
+		}
+	}
+	return result
 }
 
 func (d *OutboxDispatcher) dispatch(

@@ -27,7 +27,7 @@ func TestRabbitMQPublisherRoutesEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRabbitMQPublisher() error = %v, want nil", err)
 	}
-	publisher := rabbitmq.NewPublisher(rabbitPublisher, integrationRabbitMQConfig)
+	publisher := rabbitmq.NewPublisher(rabbitPublisher)
 
 	// 第一次发布用于验证项目发布器能够自行声明 Exchange；因为此时没有绑定队列，
 	// mandatory return 必须让调用方收到错误，Outbox 才不会误标 completed。

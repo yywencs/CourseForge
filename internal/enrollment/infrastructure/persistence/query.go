@@ -83,9 +83,9 @@ func (r *QueryStore) QuerySelectionApplication(
 			return nil, convertErr
 		}
 		return &applicationapi.SelectionApplicationRecord{
-			Application:       application,
-			DeliveryConfirmed: true,
-			DurablyPersisted:  true,
+			Application:      application,
+			StreamRecorded:   true,
+			DurablyPersisted: true,
 		}, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {

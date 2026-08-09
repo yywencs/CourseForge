@@ -123,20 +123,20 @@ func TestRabbitMQConsumerUsesQueueConcurrencyMap(t *testing.T) {
 		WithPrefetch(2),
 		WithDefaultConcurrency(2),
 		WithQueueConcurrency(map[string]int{
-			"selection_result_queue": 8,
-			"outbox_events_queue":    4,
+			"notification_queue":  8,
+			"outbox_events_queue": 4,
 		}),
-		WithQueueBatchSize(map[string]int{"selection_result_queue": 100}),
+		WithQueueBatchSize(map[string]int{"notification_queue": 100}),
 		WithQueueBatchWait(map[string]time.Duration{
-			"selection_result_queue": 10 * time.Millisecond,
+			"notification_queue": 10 * time.Millisecond,
 		}),
 	)
 
 	if got := consumer.prefetchCount(); got != 2 {
 		t.Fatalf("prefetchCount() = %d, want 2", got)
 	}
-	if got := consumer.consumerConcurrency("selection_result"); got != 8 {
-		t.Fatalf("selection_result concurrency = %d, want 8", got)
+	if got := consumer.consumerConcurrency("notification"); got != 8 {
+		t.Fatalf("notification concurrency = %d, want 8", got)
 	}
 	if got := consumer.consumerConcurrency("outbox_events"); got != 4 {
 		t.Fatalf("outbox_events concurrency = %d, want 4", got)
@@ -144,11 +144,11 @@ func TestRabbitMQConsumerUsesQueueConcurrencyMap(t *testing.T) {
 	if got := consumer.consumerConcurrency("unconfigured_topic"); got != 2 {
 		t.Fatalf("unconfigured topic concurrency = %d, want 2", got)
 	}
-	if got := consumer.consumerBatchSize("selection_result"); got != 100 {
-		t.Fatalf("selection_result batch size = %d, want 100", got)
+	if got := consumer.consumerBatchSize("notification"); got != 100 {
+		t.Fatalf("notification batch size = %d, want 100", got)
 	}
-	if got := consumer.consumerBatchWait("selection_result"); got != 10*time.Millisecond {
-		t.Fatalf("selection_result batch wait = %s, want 10ms", got)
+	if got := consumer.consumerBatchWait("notification"); got != 10*time.Millisecond {
+		t.Fatalf("notification batch wait = %s, want 10ms", got)
 	}
 	if got := consumer.consumerBatchSize("unconfigured_topic"); got != 1 {
 		t.Fatalf("unconfigured batch size = %d, want 1", got)
@@ -173,12 +173,12 @@ func TestRabbitMQConsumerBatchesAndUsesMultipleAck(t *testing.T) {
 
 	consumer := NewRabbitMQConsumer(
 		nil,
-		WithQueueBatchSize(map[string]int{"selection_result_queue": 3}),
+		WithQueueBatchSize(map[string]int{"notification_queue": 3}),
 		WithQueueBatchWait(map[string]time.Duration{
-			"selection_result_queue": time.Second,
+			"notification_queue": time.Second,
 		}),
 	)
-	consumer.handle("selection_result", messages, listener, nil)
+	consumer.handle("notification", messages, listener, nil)
 
 	if len(listener.batches) != 2 || len(listener.batches[0]) != 3 ||
 		len(listener.batches[1]) != 2 {
@@ -205,9 +205,9 @@ func TestRabbitMQConsumerRoutesMixedBatchOutcomesIndividually(t *testing.T) {
 
 	consumer := NewRabbitMQConsumer(
 		nil,
-		WithQueueBatchSize(map[string]int{"selection_result_queue": 2}),
+		WithQueueBatchSize(map[string]int{"notification_queue": 2}),
 	)
-	consumer.handle("selection_result", messages, listener, router)
+	consumer.handle("notification", messages, listener, router)
 
 	if len(router.deadLetters) != 1 || len(router.retries) != 0 {
 		t.Fatalf("dead letters/retries = %d/%d, want 1/0", len(router.deadLetters), len(router.retries))
@@ -226,16 +226,16 @@ func TestRabbitMQConsumerFallsBackFromInvalidOptions(t *testing.T) {
 		WithPrefetch(0),
 		WithDefaultConcurrency(0),
 		WithQueueConcurrency(map[string]int{
-			"selection_result_queue": 0,
-			"":                       8,
+			"notification_queue": 0,
+			"":                   8,
 		}),
 	)
 
 	if got := consumer.prefetchCount(); got != 1 {
 		t.Fatalf("prefetchCount() = %d, want 1", got)
 	}
-	if got := consumer.consumerConcurrency("selection_result"); got != 1 {
-		t.Fatalf("selection_result concurrency = %d, want 1", got)
+	if got := consumer.consumerConcurrency("notification"); got != 1 {
+		t.Fatalf("notification concurrency = %d, want 1", got)
 	}
 }
 
@@ -268,7 +268,7 @@ func TestRabbitMQConsumerDeadLettersPermanentError(t *testing.T) {
 	close(messages)
 
 	consumer := NewRabbitMQConsumer(nil)
-	consumer.handle("selection_result", messages, permanentErrorListener{}, router)
+	consumer.handle("notification", messages, permanentErrorListener{}, router)
 
 	if len(acknowledger.acks) != 1 {
 		t.Fatalf("Ack() calls = %d, want 1", len(acknowledger.acks))
@@ -297,7 +297,7 @@ func TestRabbitMQConsumerSchedulesListenerPanicRetry(t *testing.T) {
 	close(messages)
 
 	consumer := NewRabbitMQConsumer(nil)
-	consumer.handle("selection_result", messages, panicListener{}, router)
+	consumer.handle("notification", messages, panicListener{}, router)
 
 	if len(acknowledger.acks) != 1 {
 		t.Fatalf("Ack() calls = %d, want 1", len(acknowledger.acks))
@@ -328,7 +328,7 @@ func TestRabbitMQConsumerSchedulesTimedOutMessageRetry(t *testing.T) {
 
 	consumer := NewRabbitMQConsumer(nil)
 	consumer.handleTimeout = 10 * time.Millisecond
-	consumer.handle("selection_result", messages, contextTimeoutListener{}, router)
+	consumer.handle("notification", messages, contextTimeoutListener{}, router)
 
 	if len(acknowledger.acks) != 1 || len(acknowledger.rejects) != 0 {
 		t.Fatalf("Ack/Reject calls = %d/%d, want 1/0", len(acknowledger.acks), len(acknowledger.rejects))
@@ -353,7 +353,7 @@ func TestRabbitMQConsumerDeadLettersAfterMaxRetries(t *testing.T) {
 	close(messages)
 
 	consumer := NewRabbitMQConsumer(nil)
-	consumer.handle("selection_result", messages, retryableErrorListener{}, router)
+	consumer.handle("notification", messages, retryableErrorListener{}, router)
 
 	if len(router.retries) != 0 || len(router.deadLetters) != 1 || len(acknowledger.acks) != 1 {
 		t.Fatalf(
@@ -371,7 +371,7 @@ func TestRabbitMQConsumerRequeuesOriginalWhenRetryRoutingFails(t *testing.T) {
 	close(messages)
 
 	consumer := NewRabbitMQConsumer(nil)
-	consumer.handle("selection_result", messages, retryableErrorListener{}, router)
+	consumer.handle("notification", messages, retryableErrorListener{}, router)
 
 	if len(acknowledger.acks) != 0 || len(acknowledger.nacks) != 1 ||
 		!acknowledger.nacks[0].requeue {

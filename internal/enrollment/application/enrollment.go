@@ -19,24 +19,19 @@ type SelectCourseCommand struct {
 	Source          enrollment.ApplicationSource
 }
 
-// SelectionReceipt reports the durable-delivery state without naming the
-// concrete cache, broker, or database adapters.
+// SelectionReceipt reports whether Redis recorded the Stream event and whether
+// the corresponding MySQL projection has completed.
 type SelectionReceipt struct {
-	ApplicationID     string
-	State             enrollment.ApplicationState
-	DeliveryConfirmed bool
-	DurablyPersisted  bool
-}
-
-type selectionResultPublisher interface {
-	Publish(context.Context, *SelectionResultPublication) error
+	ApplicationID    string
+	State            enrollment.ApplicationState
+	StreamRecorded   bool
+	DurablyPersisted bool
 }
 
 // EnrollmentUsecase 编排选课主链路，具体一致性与投递机制由端口实现。
 type EnrollmentUsecase struct {
 	queryRepo SelectionQuery
 	appRepo   SelectionStore
-	publisher selectionResultPublisher
 	admission *SelectionAdmissionService
 	now       func() time.Time
 	ids       IDGenerator
@@ -46,7 +41,6 @@ type EnrollmentUsecase struct {
 func NewEnrollmentUsecase(
 	queryRepo SelectionQuery,
 	appRepo SelectionStore,
-	publisher selectionResultPublisher,
 	admission *SelectionAdmissionService,
 	ids IDGenerator,
 	observer EnrollmentObserver,
@@ -54,7 +48,6 @@ func NewEnrollmentUsecase(
 	return &EnrollmentUsecase{
 		queryRepo: queryRepo,
 		appRepo:   appRepo,
-		publisher: publisher,
 		admission: admission,
 		now:       time.Now,
 		ids:       ids,
@@ -97,7 +90,8 @@ func (u *EnrollmentUsecase) ListEnrollments(
 }
 
 // SelectCourse 执行最小选课链路：
-// 资格预检 → 原子完成选课决策与结果出站 → 确认可靠投递。
+// 资格预检 → 原子完成选课决策并写入 Redis Stream Outbox。
+// Stream 写入成功即返回；MySQL 由独立 Consumer Group 异步批量投影。
 func (u *EnrollmentUsecase) SelectCourse(
 	ctx context.Context,
 	command *SelectCourseCommand,
@@ -141,7 +135,7 @@ func (u *EnrollmentUsecase) SelectCourse(
 			return selectionReceiptFromPersisted(existing.Application), nil
 		}
 		if existing.Publication != nil {
-			return u.publishCompleted(ctx, existing.Publication)
+			return selectionReceiptFromPublication(existing.Publication)
 		}
 		return u.commitSelection(ctx, existing.Application)
 	}
@@ -231,39 +225,30 @@ func (u *EnrollmentUsecase) commitSelection(
 	if err != nil {
 		return nil, err
 	}
-	return u.publishCompleted(ctx, publication)
+	return selectionReceiptFromPublication(publication)
 }
 
 func selectionReceiptFromPersisted(
 	application *enrollment.SelectionApplication,
 ) *SelectionReceipt {
 	return &SelectionReceipt{
-		ApplicationID:     application.ApplicationID,
-		State:             application.State,
-		DeliveryConfirmed: true,
-		DurablyPersisted:  true,
+		ApplicationID:    application.ApplicationID,
+		State:            application.State,
+		StreamRecorded:   true,
+		DurablyPersisted: true,
 	}
 }
 
-func (u *EnrollmentUsecase) publishCompleted(
-	ctx context.Context,
+func selectionReceiptFromPublication(
 	publication *SelectionResultPublication,
 ) (*SelectionReceipt, error) {
 	if err := publication.Validate(); err != nil {
 		return nil, err
 	}
-	if !publication.DeliveryConfirmed {
-		if u.publisher == nil {
-			return nil, errors.New("selection result publisher is not configured")
-		}
-		if err := u.publisher.Publish(ctx, publication); err != nil {
-			return nil, fmt.Errorf("%w: %w", enrollment.ErrApplicationInProgress, err)
-		}
-	}
 	return &SelectionReceipt{
-		ApplicationID:     publication.Result.ApplicationID,
-		State:             publication.Result.State,
-		DeliveryConfirmed: true,
-		DurablyPersisted:  false,
+		ApplicationID:    publication.Result.ApplicationID,
+		State:            publication.Result.State,
+		StreamRecorded:   true,
+		DurablyPersisted: publication.DurablyPersisted,
 	}, nil
 }

@@ -44,9 +44,10 @@ rabbitmq:
   listener:
     simple:
       prefetch: 200 # 通用 RabbitMQ 消费者的未确认消息上限
-      default_concurrency: 1
-      concurrency:
-        enrollment.selection.notification_queue: 2
+      # 当前仅有选课通知消费者。Viper 会把 map key 中的点解释为层级，
+      # 因此不要在 concurrency 中直接使用 RabbitMQ 的点分队列名。
+      default_concurrency: 2
+      concurrency: {}
       # 临时错误最多延迟重试 3 次，之后转入 {topic}_dlq。
       max_retries: 3
       retry_delays: [1s, 5s, 30s]

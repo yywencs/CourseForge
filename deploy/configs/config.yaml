@@ -41,9 +41,8 @@ rabbitmq:
   listener:
     simple:
       prefetch: 200
-      default_concurrency: 1
-      concurrency:
-        enrollment.selection.notification_queue: 2
+      default_concurrency: 2
+      concurrency: {}
       max_retries: 3
       retry_delays: [1s, 5s, 30s]
 

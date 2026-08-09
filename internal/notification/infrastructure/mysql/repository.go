@@ -29,7 +29,11 @@ func (r *Repository) Save(ctx context.Context, n *notification.Notification) err
 		return err
 	}
 	result := r.db.WithContext(ctx).Table("student_notification").
-		Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "event_id"}}, DoNothing: true}).
+		// This repository is MySQL-specific. INSERT IGNORE keeps event_id
+		// idempotency while still reporting RowsAffected=0 for duplicates.
+		// GORM cannot infer a conflict update column from the map below and
+		// otherwise emits an invalid empty "ON DUPLICATE KEY UPDATE" clause.
+		Clauses(clause.Insert{Modifier: "IGNORE"}).
 		Create(map[string]any{
 			"event_id":    n.EventID,
 			"student_id":  n.StudentID,

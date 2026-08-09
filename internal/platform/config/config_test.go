@@ -1,12 +1,41 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/viper"
 )
+
+func TestRepositoryYAMLConfigsDecode(t *testing.T) {
+	paths := []string{
+		"../../../configs/config.example.yaml",
+		"../../../deploy/configs/config.yaml",
+		"../../../deploy/benchmark/config.yaml",
+	}
+	for _, path := range paths {
+		path := path
+		t.Run(filepath.Base(filepath.Dir(path))+"/"+filepath.Base(path), func(t *testing.T) {
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read config: %v", err)
+			}
+			v := viper.New()
+			v.SetConfigType("yaml")
+			if err := v.ReadConfig(bytes.NewReader(body)); err != nil {
+				t.Fatalf("parse config: %v", err)
+			}
+			var cfg Config
+			if err := v.Unmarshal(&cfg); err != nil {
+				t.Fatalf("decode config: %v", err)
+			}
+		})
+	}
+}
 
 func TestInitViperConfigEnvironmentOverrides(t *testing.T) {
 	tempDir := t.TempDir()

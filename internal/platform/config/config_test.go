@@ -42,6 +42,10 @@ rabbitmq:
       retry_delays: [1s, 5s, 30s]
       concurrency:
         selection_result_queue: 8
+      batch_size:
+        selection_result_queue: 100
+      batch_wait:
+        selection_result_queue: 10ms
 dcc:
   rate_limit:
     enabled: true
@@ -115,7 +119,9 @@ dcc:
 		Conf.RabbitMQ.Listener.Simple.MaxRetries != 3 ||
 		len(Conf.RabbitMQ.Listener.Simple.RetryDelays) != 3 ||
 		Conf.RabbitMQ.Listener.Simple.RetryDelays[1] != 5*time.Second ||
-		Conf.RabbitMQ.Listener.Simple.Concurrency["selection_result_queue"] != 6 {
+		Conf.RabbitMQ.Listener.Simple.Concurrency["selection_result_queue"] != 6 ||
+		Conf.RabbitMQ.Listener.Simple.BatchSize["selection_result_queue"] != 100 ||
+		Conf.RabbitMQ.Listener.Simple.BatchWait["selection_result_queue"] != 10*time.Millisecond {
 		t.Fatalf("rabbitmq listener config = %#v, want retry and concurrency settings",
 			Conf.RabbitMQ.Listener.Simple)
 	}

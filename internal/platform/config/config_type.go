@@ -173,11 +173,13 @@ type RabbitMQListener struct {
 }
 
 type RabbitMQSimple struct {
-	Prefetch           int             `mapstructure:"prefetch"`
-	DefaultConcurrency int             `mapstructure:"default_concurrency"`
-	Concurrency        map[string]int  `mapstructure:"concurrency"`
-	MaxRetries         int             `mapstructure:"max_retries"`
-	RetryDelays        []time.Duration `mapstructure:"retry_delays"`
+	Prefetch           int                      `mapstructure:"prefetch"`
+	DefaultConcurrency int                      `mapstructure:"default_concurrency"`
+	Concurrency        map[string]int           `mapstructure:"concurrency"`
+	BatchSize          map[string]int           `mapstructure:"batch_size"`
+	BatchWait          map[string]time.Duration `mapstructure:"batch_wait"`
+	MaxRetries         int                      `mapstructure:"max_retries"`
+	RetryDelays        []time.Duration          `mapstructure:"retry_delays"`
 }
 
 type RabbitMQTopicConfig struct {

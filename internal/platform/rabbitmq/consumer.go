@@ -16,6 +16,7 @@ const (
 	defaultFailureRouteTimeout  = 5 * time.Second
 	defaultPrefetchCount        = 1
 	defaultConsumerConcurrency  = 1
+	defaultBatchWait            = 10 * time.Millisecond
 )
 
 // Listener 是 RabbitMQ 消息处理器的统一接口。
@@ -27,6 +28,18 @@ const (
 //   - retry=false → 直接进入死信队列（用于永久性错误）
 type Listener interface {
 	Handle(ctx context.Context, body []byte) (retry bool, err error)
+}
+
+// BatchOutcome 描述批量 Listener 对单条消息的处理结果。
+type BatchOutcome struct {
+	Retry bool
+	Err   error
+}
+
+// BatchListener 允许同一 Channel 内的消息合并持久化，同时保留逐条失败路由语义。
+// 返回结果必须与 bodies 等长；否则整批按可重试错误处理。
+type BatchListener interface {
+	HandleBatch(ctx context.Context, bodies [][]byte) []BatchOutcome
 }
 
 // RabbitMQConsumer 管理 RabbitMQ 消费端的生命周期。
@@ -43,14 +56,16 @@ type Listener interface {
 //	go consumer.Start(ctx)
 //	defer consumer.Shutdown()
 type RabbitMQConsumer struct {
-	conn               *amqp.Connection    // RabbitMQ 连接（复用自 bootstrap 创建的连接）
-	listeners          map[string]Listener // topic → Listener 映射
-	queueConcurrency   map[string]int      // queue → 独立 Channel/消费 goroutine 数
-	channels           []*amqp.Channel     // 所有打开的 channel，Shutdown 时逐个关闭
-	prefetch           int                 // 每个 Channel 最多允许的未确认消息数
-	defaultConcurrency int                 // 未单独配置队列时使用的消费者并发数
-	handleTimeout      time.Duration       // 单条消息处理上限，防止一个调用永久占住消费者
-	retryPolicy        retryPolicy         // 延迟重试次数和每一级重试队列的 TTL
+	conn               *amqp.Connection         // RabbitMQ 连接（复用自 bootstrap 创建的连接）
+	listeners          map[string]Listener      // topic → Listener 映射
+	queueConcurrency   map[string]int           // queue → 独立 Channel/消费 goroutine 数
+	queueBatchSize     map[string]int           // queue → 单批最大消息数
+	queueBatchWait     map[string]time.Duration // queue → 首条消息后的最大聚合等待时间
+	channels           []*amqp.Channel          // 所有打开的 channel，Shutdown 时逐个关闭
+	prefetch           int                      // 每个 Channel 最多允许的未确认消息数
+	defaultConcurrency int                      // 未单独配置队列时使用的消费者并发数
+	handleTimeout      time.Duration            // 单条消息处理上限，防止一个调用永久占住消费者
+	retryPolicy        retryPolicy              // 延迟重试次数和每一级重试队列的 TTL
 }
 
 // ConsumerOption 定制 RabbitMQ 消费端的 QoS 和队列并发度。
@@ -86,6 +101,28 @@ func WithQueueConcurrency(concurrency map[string]int) ConsumerOption {
 	}
 }
 
+// WithQueueBatchSize 设置队列批量上限；未配置或小于 2 时保持逐条消费。
+func WithQueueBatchSize(sizes map[string]int) ConsumerOption {
+	return func(c *RabbitMQConsumer) {
+		for queue, size := range sizes {
+			if queue != "" && size > 1 {
+				c.queueBatchSize[queue] = size
+			}
+		}
+	}
+}
+
+// WithQueueBatchWait 设置队列从收到首条消息到提交当前批次的最大等待时间。
+func WithQueueBatchWait(waits map[string]time.Duration) ConsumerOption {
+	return func(c *RabbitMQConsumer) {
+		for queue, wait := range waits {
+			if queue != "" && wait > 0 {
+				c.queueBatchWait[queue] = wait
+			}
+		}
+	}
+}
+
 // WithRetryPolicy 设置临时错误的最大重试次数和各次延迟。
 // 延迟数量少于最大重试次数时，后续重试沿用最后一个延迟。
 func WithRetryPolicy(maxRetries int, delays []time.Duration) ConsumerOption {
@@ -105,6 +142,8 @@ func NewRabbitMQConsumer(
 		conn:               conn,
 		listeners:          make(map[string]Listener),
 		queueConcurrency:   make(map[string]int),
+		queueBatchSize:     make(map[string]int),
+		queueBatchWait:     make(map[string]time.Duration),
 		prefetch:           defaultPrefetchCount,
 		defaultConcurrency: defaultConsumerConcurrency,
 		handleTimeout:      defaultMessageHandleTimeout,
@@ -237,6 +276,8 @@ func (c *RabbitMQConsumer) startConsumer(topic string, l Listener, workerID, con
 		"worker", workerID,
 		"concurrency", concurrency,
 		"prefetch", c.prefetchCount(),
+		"batch_size", c.consumerBatchSize(topic),
+		"batch_wait", c.consumerBatchWait(topic),
 	)
 	return nil
 }
@@ -253,8 +294,98 @@ func (c *RabbitMQConsumer) handle(
 	l Listener,
 	router failedMessageRouter,
 ) {
+	batchListener, batchEnabled := l.(BatchListener)
+	if batchEnabled && c.consumerBatchSize(topic) > 1 {
+		c.handleBatches(topic, msgs, batchListener, router)
+		return
+	}
 	for d := range msgs {
 		c.handleDelivery(topic, d, l, router)
+	}
+}
+
+func (c *RabbitMQConsumer) handleBatches(
+	topic string,
+	msgs <-chan amqp.Delivery,
+	listener BatchListener,
+	router failedMessageRouter,
+) {
+	batchSize := c.consumerBatchSize(topic)
+	batchWait := c.consumerBatchWait(topic)
+	for {
+		first, ok := <-msgs
+		if !ok {
+			return
+		}
+		batch := make([]amqp.Delivery, 0, batchSize)
+		batch = append(batch, first)
+		timer := time.NewTimer(batchWait)
+		closed := false
+	collect:
+		for len(batch) < batchSize {
+			select {
+			case delivery, open := <-msgs:
+				if !open {
+					closed = true
+					break collect
+				}
+				batch = append(batch, delivery)
+			case <-timer.C:
+				break collect
+			}
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		c.handleBatch(topic, batch, listener, router)
+		if closed {
+			return
+		}
+	}
+}
+
+func (c *RabbitMQConsumer) handleBatch(
+	topic string,
+	deliveries []amqp.Delivery,
+	listener BatchListener,
+	router failedMessageRouter,
+) {
+	bodies := make([][]byte, len(deliveries))
+	for i := range deliveries {
+		bodies[i] = deliveries[i].Body
+	}
+	outcomes := c.invokeBatchListener(listener, bodies)
+	if len(outcomes) != len(deliveries) {
+		err := fmt.Errorf(
+			"RabbitMQ batch listener returned %d outcomes for %d messages",
+			len(outcomes),
+			len(deliveries),
+		)
+		outcomes = make([]BatchOutcome, len(deliveries))
+		for i := range outcomes {
+			outcomes[i] = BatchOutcome{Retry: true, Err: err}
+		}
+	}
+
+	allSucceeded := len(deliveries) > 0
+	for i := range outcomes {
+		if outcomes[i].Err != nil {
+			allSucceeded = false
+			break
+		}
+	}
+	if allSucceeded {
+		for range outcomes {
+			metrics.IncRabbitMQConsume(topic, "success")
+		}
+		_ = deliveries[len(deliveries)-1].Ack(true)
+		return
+	}
+	for i := range deliveries {
+		c.handleDeliveryOutcome(topic, deliveries[i], outcomes[i].Retry, outcomes[i].Err, router)
 	}
 }
 
@@ -265,6 +396,16 @@ func (c *RabbitMQConsumer) handleDelivery(
 	router failedMessageRouter,
 ) {
 	retry, handleErr := c.invokeListener(listener, delivery.Body)
+	c.handleDeliveryOutcome(topic, delivery, retry, handleErr, router)
+}
+
+func (c *RabbitMQConsumer) handleDeliveryOutcome(
+	topic string,
+	delivery amqp.Delivery,
+	retry bool,
+	handleErr error,
+	router failedMessageRouter,
+) {
 	if handleErr == nil {
 		metrics.IncRabbitMQConsume(topic, "success")
 		_ = delivery.Ack(false)
@@ -321,6 +462,24 @@ func (c *RabbitMQConsumer) handleDelivery(
 	_ = delivery.Nack(false, true)
 }
 
+func (c *RabbitMQConsumer) invokeBatchListener(
+	listener BatchListener,
+	bodies [][]byte,
+) (outcomes []BatchOutcome) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err := fmt.Errorf("RabbitMQ batch listener panic: %v", recovered)
+			outcomes = make([]BatchOutcome, len(bodies))
+			for i := range outcomes {
+				outcomes[i] = BatchOutcome{Retry: true, Err: err}
+			}
+		}
+	}()
+	handleCtx, cancel := context.WithTimeout(context.Background(), c.messageHandleTimeout())
+	defer cancel()
+	return listener.HandleBatch(handleCtx, bodies)
+}
+
 func (c *RabbitMQConsumer) invokeListener(
 	listener Listener,
 	body []byte,
@@ -358,4 +517,18 @@ func (c *RabbitMQConsumer) consumerConcurrency(topic string) int {
 		return c.defaultConcurrency
 	}
 	return defaultConsumerConcurrency
+}
+
+func (c *RabbitMQConsumer) consumerBatchSize(topic string) int {
+	if size := c.queueBatchSize[topic+"_queue"]; size > 1 {
+		return size
+	}
+	return 1
+}
+
+func (c *RabbitMQConsumer) consumerBatchWait(topic string) time.Duration {
+	if wait := c.queueBatchWait[topic+"_queue"]; wait > 0 {
+		return wait
+	}
+	return defaultBatchWait
 }

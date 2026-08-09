@@ -494,9 +494,12 @@ CREATE TABLE `selection_event` (
     COMMENT 'reserved/selected/rejected/cancelled/dropped',
   `event_payload` json NOT NULL COMMENT '标准事件载荷快照',
   `occurred_at` datetime(3) NOT NULL COMMENT '业务发生时间',
+  `consume_batch_id` varchar(32) DEFAULT NULL
+    COMMENT '首次取得该事件的RabbitMQ消费批次；用于批量幂等占位',
   `create_time` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_selection_event_id` (`event_id`),
+  KEY `idx_selection_event_consume_batch` (`consume_batch_id`, `id`),
   KEY `idx_event_application_time` (`application_id`, `occurred_at`),
   KEY `idx_event_student_time` (`student_id`, `occurred_at`),
   CONSTRAINT `chk_selection_event_type`

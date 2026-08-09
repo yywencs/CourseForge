@@ -62,6 +62,28 @@ func (retryableErrorListener) Handle(context.Context, []byte) (bool, error) {
 	return true, errors.New("mysql unavailable")
 }
 
+type recordingBatchListener struct {
+	batches  [][][]byte
+	outcomes func([][]byte) []BatchOutcome
+}
+
+func (l *recordingBatchListener) Handle(context.Context, []byte) (bool, error) {
+	return false, nil
+}
+
+func (l *recordingBatchListener) HandleBatch(
+	_ context.Context,
+	bodies [][]byte,
+) []BatchOutcome {
+	batch := make([][]byte, len(bodies))
+	copy(batch, bodies)
+	l.batches = append(l.batches, batch)
+	if l.outcomes != nil {
+		return l.outcomes(bodies)
+	}
+	return make([]BatchOutcome, len(bodies))
+}
+
 type routedFailure struct {
 	retryNumber int
 	err         error
@@ -104,6 +126,10 @@ func TestRabbitMQConsumerUsesQueueConcurrencyMap(t *testing.T) {
 			"selection_result_queue": 8,
 			"outbox_events_queue":    4,
 		}),
+		WithQueueBatchSize(map[string]int{"selection_result_queue": 100}),
+		WithQueueBatchWait(map[string]time.Duration{
+			"selection_result_queue": 10 * time.Millisecond,
+		}),
 	)
 
 	if got := consumer.prefetchCount(); got != 2 {
@@ -118,8 +144,77 @@ func TestRabbitMQConsumerUsesQueueConcurrencyMap(t *testing.T) {
 	if got := consumer.consumerConcurrency("unconfigured_topic"); got != 2 {
 		t.Fatalf("unconfigured topic concurrency = %d, want 2", got)
 	}
+	if got := consumer.consumerBatchSize("selection_result"); got != 100 {
+		t.Fatalf("selection_result batch size = %d, want 100", got)
+	}
+	if got := consumer.consumerBatchWait("selection_result"); got != 10*time.Millisecond {
+		t.Fatalf("selection_result batch wait = %s, want 10ms", got)
+	}
+	if got := consumer.consumerBatchSize("unconfigured_topic"); got != 1 {
+		t.Fatalf("unconfigured batch size = %d, want 1", got)
+	}
 	if consumer.retryPolicy.maxRetries != defaultMaxRetries {
 		t.Fatalf("max retries = %d, want %d", consumer.retryPolicy.maxRetries, defaultMaxRetries)
+	}
+}
+
+func TestRabbitMQConsumerBatchesAndUsesMultipleAck(t *testing.T) {
+	acknowledger := &recordingAcknowledger{}
+	listener := &recordingBatchListener{}
+	messages := make(chan amqp.Delivery, 5)
+	for tag := uint64(1); tag <= 5; tag++ {
+		messages <- amqp.Delivery{
+			Acknowledger: acknowledger,
+			DeliveryTag:  tag,
+			Body:         []byte{byte(tag)},
+		}
+	}
+	close(messages)
+
+	consumer := NewRabbitMQConsumer(
+		nil,
+		WithQueueBatchSize(map[string]int{"selection_result_queue": 3}),
+		WithQueueBatchWait(map[string]time.Duration{
+			"selection_result_queue": time.Second,
+		}),
+	)
+	consumer.handle("selection_result", messages, listener, nil)
+
+	if len(listener.batches) != 2 || len(listener.batches[0]) != 3 ||
+		len(listener.batches[1]) != 2 {
+		t.Fatalf("batch sizes = %#v, want 3 and 2", listener.batches)
+	}
+	if len(acknowledger.acks) != 2 || acknowledger.acks[0].tag != 3 ||
+		!acknowledger.acks[0].multiple || acknowledger.acks[1].tag != 5 ||
+		!acknowledger.acks[1].multiple {
+		t.Fatalf("acks = %#v, want multiple ACK at tags 3 and 5", acknowledger.acks)
+	}
+}
+
+func TestRabbitMQConsumerRoutesMixedBatchOutcomesIndividually(t *testing.T) {
+	acknowledger := &recordingAcknowledger{}
+	router := &failedMessageRouterStub{}
+	listener := &recordingBatchListener{outcomes: func(_ [][]byte) []BatchOutcome {
+		return []BatchOutcome{{}, {Err: errors.New("malformed")}}
+	}}
+	messages := make(chan amqp.Delivery, 2)
+	for tag := uint64(1); tag <= 2; tag++ {
+		messages <- amqp.Delivery{Acknowledger: acknowledger, DeliveryTag: tag}
+	}
+	close(messages)
+
+	consumer := NewRabbitMQConsumer(
+		nil,
+		WithQueueBatchSize(map[string]int{"selection_result_queue": 2}),
+	)
+	consumer.handle("selection_result", messages, listener, router)
+
+	if len(router.deadLetters) != 1 || len(router.retries) != 0 {
+		t.Fatalf("dead letters/retries = %d/%d, want 1/0", len(router.deadLetters), len(router.retries))
+	}
+	if len(acknowledger.acks) != 2 || acknowledger.acks[0].multiple ||
+		acknowledger.acks[1].multiple {
+		t.Fatalf("acks = %#v, want two individual ACKs", acknowledger.acks)
 	}
 }
 

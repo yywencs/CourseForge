@@ -127,7 +127,14 @@ func TestEnrollmentRepositoryMinimalMainChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect selection-result RabbitMQ: %v", err)
 	}
-	consumer := rabbitmq.NewRabbitMQConsumer(connection)
+	consumer := rabbitmq.NewRabbitMQConsumer(
+		connection,
+		rabbitmq.WithPrefetch(100),
+		rabbitmq.WithQueueBatchSize(map[string]int{topic + "_queue": 100}),
+		rabbitmq.WithQueueBatchWait(map[string]time.Duration{
+			topic + "_queue": 10 * time.Millisecond,
+		}),
+	)
 	t.Cleanup(consumer.Shutdown)
 	consumer.RegisterListener(topic, enrollmentasync.NewSelectionResultListener(repo))
 	if err := consumer.Start(ctx); err != nil {
@@ -316,6 +323,28 @@ func TestEnrollmentRepositoryConcurrentCommitDoesNotOversell(t *testing.T) {
 
 	t.Cleanup(func() {
 		integrationCourseForgeDB.Exec(
+			`DELETE delta FROM enrollment_count_delta AS delta
+			 JOIN selection_event AS event ON event.event_id = delta.event_id
+			 WHERE event.student_id > ? AND event.student_id < ?`,
+			studentID,
+			studentID+studentCount,
+		)
+		integrationCourseForgeDB.Exec(
+			"DELETE FROM selection_event WHERE student_id > ? AND student_id < ?",
+			studentID,
+			studentID+studentCount,
+		)
+		integrationCourseForgeDB.Exec(
+			"DELETE FROM student_course_enrollment WHERE student_id > ? AND student_id < ?",
+			studentID,
+			studentID+studentCount,
+		)
+		integrationCourseForgeDB.Exec(
+			"DELETE FROM selection_application WHERE student_id > ? AND student_id < ?",
+			studentID,
+			studentID+studentCount,
+		)
+		integrationCourseForgeDB.Exec(
 			"DELETE FROM student_selection_quota WHERE student_id > ? AND student_id < ?",
 			studentID,
 			studentID+studentCount,
@@ -432,6 +461,7 @@ func TestEnrollmentRepositoryConcurrentCommitDoesNotOversell(t *testing.T) {
 	close(results)
 
 	var committed, full int
+	selectedResults := make([]*enrollment.SelectionResult, 0, capacity)
 	for result := range results {
 		switch {
 		case result.err == nil:
@@ -440,6 +470,7 @@ func TestEnrollmentRepositoryConcurrentCommitDoesNotOversell(t *testing.T) {
 				t.Fatalf("unexpected successful commit: %#v", result.publication)
 			}
 			committed++
+			selectedResults = append(selectedResults, result.publication.Result)
 		case errors.Is(result.err, enrollment.ErrTeachingClassFull):
 			full++
 		default:
@@ -460,6 +491,30 @@ func TestEnrollmentRepositoryConcurrentCommitDoesNotOversell(t *testing.T) {
 		fmt.Sprintf("courseforge:selection:class:seat:%d", classID),
 		0,
 	)
+	if err := repo.SaveSelectionResults(context.Background(), selectedResults); err != nil {
+		t.Fatalf("SaveSelectionResults() error = %v", err)
+	}
+	if err := repo.SaveSelectionResults(context.Background(), selectedResults); err != nil {
+		t.Fatalf("idempotent SaveSelectionResults() error = %v", err)
+	}
+	var applicationCount, enrollmentCount, eventCount int64
+	integrationCourseForgeDB.Table("selection_application").
+		Where("round_id = ?", roundID).Count(&applicationCount)
+	integrationCourseForgeDB.Table("student_course_enrollment").
+		Where("term_id = ? AND teaching_class_id = ?", termID, classID).
+		Count(&enrollmentCount)
+	integrationCourseForgeDB.Table("selection_event").
+		Where("student_id >= ? AND student_id < ?", studentID, studentID+studentCount).
+		Count(&eventCount)
+	if applicationCount != capacity || enrollmentCount != capacity || eventCount != capacity {
+		t.Fatalf(
+			"batch persisted counts = application:%d enrollment:%d event:%d, want %d each",
+			applicationCount,
+			enrollmentCount,
+			eventCount,
+			capacity,
+		)
+	}
 }
 
 // TestEnrollmentRepositoryDropAndProjectionRepair 使用真实 MySQL/Redis 验证：

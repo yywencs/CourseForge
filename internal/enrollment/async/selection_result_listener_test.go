@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -12,8 +13,22 @@ import (
 )
 
 type fakeSelectionPersistenceService struct {
-	result *enrollment.SelectionResult
-	err    error
+	result            *enrollment.SelectionResult
+	results           []*enrollment.SelectionResult
+	individualResults []*enrollment.SelectionResult
+	err               error
+	batchErr          error
+}
+
+func (f *fakeSelectionPersistenceService) SaveSelectionResults(
+	_ context.Context,
+	results []*enrollment.SelectionResult,
+) error {
+	f.results = results
+	if f.batchErr != nil {
+		return f.batchErr
+	}
+	return f.err
 }
 
 func (f *fakeSelectionPersistenceService) SaveSelectionResult(
@@ -21,14 +36,23 @@ func (f *fakeSelectionPersistenceService) SaveSelectionResult(
 	result *enrollment.SelectionResult,
 ) error {
 	f.result = result
+	f.individualResults = append(f.individualResults, result)
 	return f.err
 }
 
 func selectionResultEventBody(t *testing.T) []byte {
 	t.Helper()
-	publication := testListenerSelectionResult()
+	return selectionResultEventBodyFor(t, testListenerSelectionResult())
+}
+
+func selectionResultEventBodyFor(
+	t *testing.T,
+	publication *enrollment.SelectionResult,
+) []byte {
+	t.Helper()
 	body, err := json.Marshal(&rabbitmq.BaseEvent{
-		ID:        "selection:10001:application-001",
+		ID: "selection:" + strconv.FormatUint(publication.StudentID, 10) +
+			":" + publication.ApplicationID,
 		Timestamp: publication.CompletedAt,
 		Data:      newSelectionResultPayload(publication),
 	})
@@ -101,5 +125,62 @@ func TestSelectionResultListenerDoesNotRetryDeterministicBusinessFailure(t *test
 			err,
 			enrollment.ErrTeachingClassFull,
 		)
+	}
+}
+
+func TestSelectionResultListenerPersistsValidBatch(t *testing.T) {
+	service := &fakeSelectionPersistenceService{}
+	second := *testListenerSelectionResult()
+	second.ApplicationID = "application-002"
+	second.RequestID = "request-002"
+	second.StudentID = 10002
+	outcomes := NewSelectionResultListener(service).HandleBatch(
+		context.Background(),
+		[][]byte{
+			selectionResultEventBody(t),
+			selectionResultEventBodyFor(t, &second),
+		},
+	)
+	if len(outcomes) != 2 || outcomes[0].Err != nil || outcomes[1].Err != nil {
+		t.Fatalf("HandleBatch() outcomes = %#v, want two successes", outcomes)
+	}
+	if len(service.results) != 2 || service.results[1].ApplicationID != "application-002" {
+		t.Fatalf("persisted results = %#v, want two results", service.results)
+	}
+}
+
+func TestSelectionResultListenerKeepsMalformedBatchItemPermanent(t *testing.T) {
+	service := &fakeSelectionPersistenceService{}
+	outcomes := NewSelectionResultListener(service).HandleBatch(
+		context.Background(),
+		[][]byte{selectionResultEventBody(t), []byte(`{"data":`)},
+	)
+	if len(outcomes) != 2 || outcomes[0].Err != nil || outcomes[1].Err == nil ||
+		outcomes[1].Retry {
+		t.Fatalf("HandleBatch() outcomes = %#v, want success then permanent error", outcomes)
+	}
+	if len(service.results) != 1 || service.results[0].ApplicationID != "application-001" {
+		t.Fatalf("persisted results = %#v, want only valid result", service.results)
+	}
+}
+
+func TestSelectionResultListenerFallsBackToSinglesForDeterministicBatchFailure(t *testing.T) {
+	service := &fakeSelectionPersistenceService{batchErr: enrollment.ErrCreditQuotaExceeded}
+	second := *testListenerSelectionResult()
+	second.ApplicationID = "application-002"
+	second.RequestID = "request-002"
+	second.StudentID = 10002
+	outcomes := NewSelectionResultListener(service).HandleBatch(
+		context.Background(),
+		[][]byte{
+			selectionResultEventBody(t),
+			selectionResultEventBodyFor(t, &second),
+		},
+	)
+	if len(outcomes) != 2 || outcomes[0].Err != nil || outcomes[1].Err != nil {
+		t.Fatalf("HandleBatch() outcomes = %#v, want fallback successes", outcomes)
+	}
+	if len(service.individualResults) != 2 {
+		t.Fatalf("individual fallback calls = %d, want 2", len(service.individualResults))
 	}
 }

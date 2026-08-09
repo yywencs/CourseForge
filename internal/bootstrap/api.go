@@ -141,6 +141,8 @@ func newAPIRuntime(cfg *config.Config) (*apiRuntime, error) {
 		rabbitmq.WithPrefetch(cfg.RabbitMQ.Listener.Simple.Prefetch),
 		rabbitmq.WithDefaultConcurrency(cfg.RabbitMQ.Listener.Simple.DefaultConcurrency),
 		rabbitmq.WithQueueConcurrency(cfg.RabbitMQ.Listener.Simple.Concurrency),
+		rabbitmq.WithQueueBatchSize(cfg.RabbitMQ.Listener.Simple.BatchSize),
+		rabbitmq.WithQueueBatchWait(cfg.RabbitMQ.Listener.Simple.BatchWait),
 		rabbitmq.WithRetryPolicy(
 			cfg.RabbitMQ.Listener.Simple.MaxRetries,
 			cfg.RabbitMQ.Listener.Simple.RetryDelays,

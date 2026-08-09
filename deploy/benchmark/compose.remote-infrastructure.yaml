@@ -1,0 +1,6 @@
+services:
+  api:
+    extra_hosts:
+      - mysql=172.27.2.177
+      - redis=172.27.2.177
+      - rabbitmq=172.27.2.177

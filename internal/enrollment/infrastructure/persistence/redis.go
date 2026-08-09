@@ -570,29 +570,45 @@ func (r *SelectionStore) MarkSelectionResultPublished(
 	return nil
 }
 
-func (r *ResultStore) clearPersistedSelection(
+func (r *ResultStore) clearPersistedSelections(
 	ctx context.Context,
-	result *enrollment.SelectionResult,
+	results []*enrollment.SelectionResult,
 ) error {
-	raw, err := r.redis.Eval(
-		ctx,
-		clearPersistedSelectionScript,
-		[]string{pendingApplicationKey(result.RoundID, result.StudentID)},
-		result.ApplicationID,
-	)
-	if err != nil {
-		return err
-	}
-	status, ok := raw.(int64)
-	if !ok {
-		return fmt.Errorf("清理选课pending响应非法: %#v", raw)
-	}
-	// -1 表示该学生已经有更新的申请，不能清理新申请。
-	if status == -1 {
+	if len(results) == 0 {
 		return nil
 	}
-	if status < -1 {
-		return fmt.Errorf("清理选课pending失败: status=%d", status)
+	pipeline := r.redis.Pipeline()
+	if pipeline == nil {
+		return errors.New("Redis pipeline is unavailable")
+	}
+	commands := make([]*redislib.Cmd, 0, len(results))
+	for _, result := range results {
+		if result == nil {
+			return enrollment.ErrInvalidParams
+		}
+		commands = append(commands, pipeline.Eval(
+			ctx,
+			clearPersistedSelectionScript,
+			[]string{pendingApplicationKey(result.RoundID, result.StudentID)},
+			result.ApplicationID,
+		))
+	}
+	if _, err := pipeline.Exec(ctx); err != nil {
+		return err
+	}
+	for _, command := range commands {
+		raw, err := command.Result()
+		if err != nil {
+			return err
+		}
+		status, ok := raw.(int64)
+		if !ok {
+			return fmt.Errorf("清理选课pending响应非法: %#v", raw)
+		}
+		// -1 表示该学生已经有更新的申请，不能清理新申请。
+		if status < -1 {
+			return fmt.Errorf("清理选课pending失败: status=%d", status)
+		}
 	}
 	return nil
 }

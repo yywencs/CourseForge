@@ -16,18 +16,20 @@ import (
 )
 
 type benchmarkSummary struct {
-	SchemaVersion              int            `json:"schema_version"`
-	Status                     string         `json:"status"`
-	StartedAt                  string         `json:"started_at"`
-	GoVersion                  string         `json:"go_version"`
-	Targets                    []string       `json:"targets"`
-	VideoID                    uint64         `json:"video_id"`
-	Clients                    int            `json:"clients"`
-	Publishers                 int            `json:"publishers"`
-	MeasurementDurationSeconds float64        `json:"measurement_duration_seconds"`
-	AveragePublishQPS          float64        `json:"average_publish_qps"`
-	AverageDeliveryQPS         float64        `json:"average_delivery_qps"`
-	Metrics                    metricSnapshot `json:"metrics"`
+	SchemaVersion              int                  `json:"schema_version"`
+	Status                     string               `json:"status"`
+	StartedAt                  string               `json:"started_at"`
+	GoVersion                  string               `json:"go_version"`
+	Targets                    []string             `json:"targets"`
+	VideoID                    uint64               `json:"video_id_start"`
+	RoomCount                  int                  `json:"room_count"`
+	Clients                    int                  `json:"clients"`
+	Publishers                 int                  `json:"publishers"`
+	MeasurementDurationSeconds float64              `json:"measurement_duration_seconds"`
+	AveragePublishQPS          float64              `json:"average_publish_qps"`
+	AverageDeliveryQPS         float64              `json:"average_delivery_qps"`
+	Metrics                    metricSnapshot       `json:"metrics"`
+	Rooms                      []roomMetricSnapshot `json:"rooms"`
 }
 
 func main() {
@@ -46,7 +48,7 @@ func main() {
 
 func run(signalCtx context.Context, cfg benchmarkConfig) error {
 	startedAt := time.Now()
-	state, metrics := &runState{}, &benchmarkMetrics{}
+	state, metrics := &runState{}, newBenchmarkMetrics(cfg.Rooms)
 	clientCtx, closeClients := context.WithCancel(context.Background())
 	defer closeClients()
 
@@ -139,7 +141,7 @@ func run(signalCtx context.Context, cfg benchmarkConfig) error {
 	if !completed {
 		status = "interrupted"
 	}
-	summary := buildSummary(cfg, startedAt, status, state.duration(), metrics.snapshot())
+	summary := buildSummary(cfg, startedAt, status, state.duration(), metrics.snapshot(), metrics)
 	resultPath, err := writeSummary(cfg.ResultRoot, startedAt, summary)
 	if err != nil {
 		return err
@@ -182,14 +184,22 @@ func monitor(ctx context.Context, metrics *benchmarkMetrics, done chan<- struct{
 	}
 }
 
-func buildSummary(cfg benchmarkConfig, startedAt time.Time, status string, duration time.Duration, snapshot metricSnapshot) benchmarkSummary {
+func buildSummary(
+	cfg benchmarkConfig,
+	startedAt time.Time,
+	status string,
+	duration time.Duration,
+	snapshot metricSnapshot,
+	metrics *benchmarkMetrics,
+) benchmarkSummary {
 	seconds := duration.Seconds()
 	return benchmarkSummary{
-		SchemaVersion: 1, Status: status, StartedAt: startedAt.Format(time.RFC3339), GoVersion: runtime.Version(),
-		Targets: append([]string(nil), cfg.Targets...), VideoID: cfg.VideoID, Clients: cfg.Clients,
+		SchemaVersion: 2, Status: status, StartedAt: startedAt.Format(time.RFC3339), GoVersion: runtime.Version(),
+		Targets: append([]string(nil), cfg.Targets...), VideoID: cfg.VideoID, RoomCount: cfg.Rooms, Clients: cfg.Clients,
 		Publishers: cfg.Publishers, MeasurementDurationSeconds: seconds,
 		AveragePublishQPS:  averageRate(snapshot.PublishSucceeded, seconds),
 		AverageDeliveryQPS: averageRate(snapshot.Received, seconds), Metrics: snapshot,
+		Rooms: metrics.roomSnapshots(cfg.VideoID),
 	}
 }
 

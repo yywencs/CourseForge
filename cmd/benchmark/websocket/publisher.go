@@ -44,27 +44,40 @@ func runPublisher(
 		case <-ctx.Done():
 			return
 		case sentAt := <-ticker.C:
+			// 停止信号和 ticker 同时就绪时，避免随机多发一条测量窗口外消息。
+			if ctx.Err() != nil {
+				return
+			}
 			seq := sequence.Add(1)
+			roomIndex := int((seq - 1) % uint64(cfg.Rooms))
 			content := fmt.Sprintf("cfbench:%d:%d", sentAt.UnixNano(), seq)
 			body, _ := json.Marshal(publishRequest{
 				ClientMessageID: uuid.NewString(), VideoTimeMS: seq % 600_000, Content: content,
 			})
-			request, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.publishURL(workerIndex), bytes.NewReader(body))
+			// 停止发布只阻止新请求；已经发出的 HTTP 请求应自然完成，否则服务端
+			// 可能已落库并广播、客户端却把被取消的响应统计成发布失败。
+			requestCtx, cancelRequest := context.WithTimeout(context.WithoutCancel(ctx), cfg.Timeout)
+			request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, cfg.publishURL(workerIndex, roomIndex), bytes.NewReader(body))
 			if err == nil {
 				request.Header.Set("Authorization", "Bearer "+token)
 				request.Header.Set("Content-Type", "application/json")
 				err = publish(client, request)
 			}
+			cancelRequest()
 			if !state.shouldRecord(sentAt) {
 				continue
 			}
 			if err != nil {
 				metrics.publishFailed.Add(1)
+				metrics.rooms[roomIndex].publishFailed.Add(1)
 				continue
 			}
 			metrics.publishSucceeded.Add(1)
+			metrics.rooms[roomIndex].publishSucceeded.Add(1)
 			// 发布期间连接数稳定时，该值可用于估算消息遗漏；连接抖动需结合 connected 一起判断。
-			metrics.expected.Add(metrics.connected.Load())
+			expected := metrics.rooms[roomIndex].connected.Load()
+			metrics.expected.Add(expected)
+			metrics.rooms[roomIndex].expected.Add(expected)
 		}
 	}
 }

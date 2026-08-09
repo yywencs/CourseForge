@@ -14,6 +14,7 @@ import (
 type benchmarkConfig struct {
 	Targets       []string
 	VideoID       uint64
+	Rooms         int
 	Clients       int
 	Publishers    int
 	PublishEvery  time.Duration
@@ -36,7 +37,8 @@ func parseConfig(args []string, output io.Writer) (benchmarkConfig, error) {
 	flags := flag.NewFlagSet("websocket-benchmark", flag.ContinueOnError)
 	flags.SetOutput(output)
 	flags.StringVar(&targets, "targets", "http://127.0.0.1:8080", "逗号分隔的 API 实例根地址")
-	flags.Uint64Var(&cfg.VideoID, "video-id", 0, "可播放的预览视频 ID")
+	flags.Uint64Var(&cfg.VideoID, "video-id", 0, "连续可播放预览视频 ID 的起点")
+	flags.IntVar(&cfg.Rooms, "rooms", 1, "房间数量；客户端和发布消息在连续视频 ID 间均匀分配")
 	flags.IntVar(&cfg.Clients, "clients", 1000, "WebSocket 客户端数")
 	flags.IntVar(&cfg.Publishers, "publishers", 4, "HTTP 弹幕发布协程数")
 	flags.DurationVar(&cfg.PublishEvery, "publish-every", 100*time.Millisecond, "每个发布协程的发送间隔")
@@ -81,8 +83,14 @@ func (c benchmarkConfig) validate() error {
 	if c.VideoID == 0 || c.StudentIDBase == 0 {
 		return fmt.Errorf("video-id 和 student-id-start 必须大于 0")
 	}
+	if c.Rooms <= 0 || uint64(c.Rooms-1) > ^uint64(0)-c.VideoID {
+		return fmt.Errorf("rooms 必须大于 0，且连续 video-id 不能溢出")
+	}
 	if c.Clients <= 0 || c.Publishers <= 0 {
 		return fmt.Errorf("clients 和 publishers 必须大于 0")
+	}
+	if c.Rooms > c.Clients {
+		return fmt.Errorf("rooms 不能大于 clients，否则会产生没有连接的空房间")
 	}
 	if c.PublishEvery <= 0 || c.RampUpEvery < 0 || c.Warmup < 0 || c.Duration <= 0 || c.Drain < 0 || c.Timeout <= 0 {
 		return fmt.Errorf("时长参数不合法")
@@ -103,10 +111,16 @@ func (c benchmarkConfig) websocketURL(clientIndex int) string {
 	} else {
 		parsed.Scheme = "ws"
 	}
-	parsed.Path = "/api/v1/course-videos/" + strconv.FormatUint(c.VideoID, 10) + "/danmakus/realtime"
+	parsed.Path = "/api/v1/course-videos/" + strconv.FormatUint(c.videoID(c.roomIndex(clientIndex)), 10) + "/danmakus/realtime"
 	return parsed.String()
 }
 
-func (c benchmarkConfig) publishURL(workerIndex int) string {
-	return c.Targets[workerIndex%len(c.Targets)] + "/api/v1/course-videos/" + strconv.FormatUint(c.VideoID, 10) + "/danmakus"
+func (c benchmarkConfig) publishURL(workerIndex, roomIndex int) string {
+	return c.Targets[workerIndex%len(c.Targets)] + "/api/v1/course-videos/" + strconv.FormatUint(c.videoID(roomIndex), 10) + "/danmakus"
+}
+
+func (c benchmarkConfig) roomIndex(sequence int) int { return sequence % c.Rooms }
+
+func (c benchmarkConfig) videoID(roomIndex int) uint64 {
+	return c.VideoID + uint64(roomIndex)
 }

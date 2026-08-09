@@ -8,6 +8,8 @@ import (
 
 const maxLatencyMilliseconds = 60_000
 
+const roomLatencyBucketWidthMilliseconds = 10
+
 type benchmarkMetrics struct {
 	connectAttempted atomic.Int64
 	connectSucceeded atomic.Int64
@@ -20,6 +22,35 @@ type benchmarkMetrics struct {
 	duplicates       atomic.Int64
 	protocolErrors   atomic.Int64
 	latency          latencyHistogram
+	rooms            []roomMetrics
+}
+
+type roomMetrics struct {
+	connected        atomic.Int64
+	publishSucceeded atomic.Int64
+	publishFailed    atomic.Int64
+	received         atomic.Int64
+	expected         atomic.Int64
+	duplicates       atomic.Int64
+	protocolErrors   atomic.Int64
+	latency          roomLatencyHistogram
+}
+
+type roomMetricSnapshot struct {
+	RoomIndex          int                `json:"room_index"`
+	VideoID            uint64             `json:"video_id"`
+	PublishSucceeded   int64              `json:"publish_succeeded"`
+	PublishFailed      int64              `json:"publish_failed"`
+	Received           int64              `json:"received"`
+	Expected           int64              `json:"expected_received"`
+	DeliveryPercentage float64            `json:"delivery_percentage"`
+	Duplicates         int64              `json:"duplicates"`
+	ProtocolErrors     int64              `json:"protocol_errors"`
+	Latency            latencyPercentiles `json:"latency"`
+}
+
+func newBenchmarkMetrics(roomCount int) *benchmarkMetrics {
+	return &benchmarkMetrics{rooms: make([]roomMetrics, roomCount)}
 }
 
 type metricSnapshot struct {
@@ -44,6 +75,16 @@ func (m *benchmarkMetrics) resetMeasurement() {
 	m.duplicates.Store(0)
 	m.protocolErrors.Store(0)
 	m.latency.reset()
+	for index := range m.rooms {
+		room := &m.rooms[index]
+		room.publishSucceeded.Store(0)
+		room.publishFailed.Store(0)
+		room.received.Store(0)
+		room.expected.Store(0)
+		room.duplicates.Store(0)
+		room.protocolErrors.Store(0)
+		room.latency.reset()
+	}
 }
 
 func (m *benchmarkMetrics) snapshot() metricSnapshot {
@@ -54,6 +95,28 @@ func (m *benchmarkMetrics) snapshot() metricSnapshot {
 		Received: m.received.Load(), Expected: m.expected.Load(), Duplicates: m.duplicates.Load(),
 		ProtocolErrors: m.protocolErrors.Load(), Latency: m.latency.percentiles(),
 	}
+}
+
+func (m *benchmarkMetrics) roomSnapshots(videoIDStart uint64) []roomMetricSnapshot {
+	result := make([]roomMetricSnapshot, len(m.rooms))
+	for index := range m.rooms {
+		room := &m.rooms[index]
+		expected := room.expected.Load()
+		received := room.received.Load()
+		percentage := float64(0)
+		if expected > 0 {
+			percentage = float64(received) * 100 / float64(expected)
+		}
+		result[index] = roomMetricSnapshot{
+			RoomIndex: index, VideoID: videoIDStart + uint64(index),
+			PublishSucceeded: room.publishSucceeded.Load(),
+			PublishFailed:    room.publishFailed.Load(), Received: received,
+			Expected: expected, DeliveryPercentage: percentage,
+			Duplicates: room.duplicates.Load(), ProtocolErrors: room.protocolErrors.Load(),
+			Latency: room.latency.percentiles(),
+		}
+	}
+	return result
 }
 
 // latencyHistogram 使用固定毫秒桶，避免在高并发接收路径保存每个样本。
@@ -117,6 +180,72 @@ func (h *latencyHistogram) quantile(q float64) int64 {
 		count += bucket
 		if count >= target {
 			return int64(index)
+		}
+	}
+	return maxLatencyMilliseconds
+}
+
+// roomLatencyHistogram 使用 10ms 精度降低大量房间场景的统计内存开销。
+// buckets 延迟到首次收到消息时分配，空房间不会占用直方图空间。
+type roomLatencyHistogram struct {
+	mu      sync.Mutex
+	buckets []uint64
+	total   uint64
+}
+
+func (h *roomLatencyHistogram) record(value time.Duration) {
+	milliseconds := value.Milliseconds()
+	if milliseconds < 0 {
+		milliseconds = 0
+	} else if milliseconds > maxLatencyMilliseconds {
+		milliseconds = maxLatencyMilliseconds
+	}
+	index := int((milliseconds + roomLatencyBucketWidthMilliseconds - 1) /
+		roomLatencyBucketWidthMilliseconds)
+	h.mu.Lock()
+	if h.buckets == nil {
+		h.buckets = make([]uint64, maxLatencyMilliseconds/roomLatencyBucketWidthMilliseconds+1)
+	}
+	h.buckets[index]++
+	h.total++
+	h.mu.Unlock()
+}
+
+func (h *roomLatencyHistogram) reset() {
+	h.mu.Lock()
+	if h.buckets != nil {
+		clear(h.buckets)
+	}
+	h.total = 0
+	h.mu.Unlock()
+}
+
+func (h *roomLatencyHistogram) percentiles() latencyPercentiles {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	result := latencyPercentiles{Samples: int64(h.total)}
+	if h.total == 0 {
+		return result
+	}
+	result.P50Millis = h.quantile(0.50)
+	result.P95Millis = h.quantile(0.95)
+	result.P99Millis = h.quantile(0.99)
+	for index := len(h.buckets) - 1; index >= 0; index-- {
+		if h.buckets[index] != 0 {
+			result.MaxMillis = int64(index * roomLatencyBucketWidthMilliseconds)
+			break
+		}
+	}
+	return result
+}
+
+func (h *roomLatencyHistogram) quantile(q float64) int64 {
+	target := uint64(float64(h.total-1)*q) + 1
+	var count uint64
+	for index, bucket := range h.buckets {
+		count += bucket
+		if count >= target {
+			return int64(index * roomLatencyBucketWidthMilliseconds)
 		}
 	}
 	return maxLatencyMilliseconds

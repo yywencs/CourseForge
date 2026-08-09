@@ -21,6 +21,8 @@ CourseForge 是一个面向高校选课场景的课程管理与高并发选课�
 - 历史弹幕分段查询，以及基于 WebSocket 和 Redis Pub/Sub 的多实例实时弹幕。
 - Prometheus 指标和选课、WebSocket 压测工具。
 
+三机环境的选课压测参数、统计口径和历次结果见 [性能测试记录](docs/benchmark-results.md)。
+
 ## 技术栈
 
 - 后端：Go、Gin、GORM

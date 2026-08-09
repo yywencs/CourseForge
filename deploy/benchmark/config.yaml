@@ -25,14 +25,14 @@ rabbitmq:
     pool_size: 16
   listener:
     simple:
-      prefetch: 200
+      prefetch: 400
       default_concurrency: 4
       max_retries: 3
       retry_delays: [1s, 5s, 30s]
       concurrency:
         selection_result_queue: 2
       batch_size:
-        selection_result_queue: 100
+        selection_result_queue: 200
       batch_wait:
         selection_result_queue: 10ms
   topic:

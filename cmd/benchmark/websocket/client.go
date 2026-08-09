@@ -41,6 +41,7 @@ func runClient(
 	metrics *benchmarkMetrics,
 	connectionResult chan<- bool,
 ) {
+	roomIndex := cfg.roomIndex(index)
 	metrics.connectAttempted.Add(1)
 	dialer := *websocket.DefaultDialer
 	dialer.HandshakeTimeout = cfg.Timeout
@@ -62,15 +63,17 @@ func runClient(
 		},
 	})
 	if err != nil || connection.WriteMessage(websocket.BinaryMessage, authentication) != nil ||
-		waitUntilReady(connection, cfg.VideoID, cfg.Timeout) != nil {
+		waitUntilReady(connection, cfg.videoID(roomIndex), cfg.Timeout) != nil {
 		metrics.connectFailed.Add(1)
 		connectionResult <- false
 		return
 	}
 	metrics.connectSucceeded.Add(1)
 	metrics.connected.Add(1)
+	metrics.rooms[roomIndex].connected.Add(1)
 	connectionResult <- true
 	defer metrics.connected.Add(-1)
+	defer metrics.rooms[roomIndex].connected.Add(-1)
 
 	closeDone := make(chan struct{})
 	go func() {
@@ -93,17 +96,20 @@ func runClient(
 		}
 		if messageType != websocket.BinaryMessage {
 			metrics.protocolErrors.Add(1)
+			metrics.rooms[roomIndex].protocolErrors.Add(1)
 			continue
 		}
 		var frame danmakuv1.ServerFrame
 		if proto.Unmarshal(payload, &frame) != nil {
 			metrics.protocolErrors.Add(1)
+			metrics.rooms[roomIndex].protocolErrors.Add(1)
 			continue
 		}
 		published := frame.GetDanmakuPublished()
 		if published == nil {
 			if frame.GetError() != nil {
 				metrics.protocolErrors.Add(1)
+				metrics.rooms[roomIndex].protocolErrors.Add(1)
 			}
 			continue
 		}
@@ -112,10 +118,14 @@ func runClient(
 			continue
 		}
 		metrics.received.Add(1)
+		metrics.rooms[roomIndex].received.Add(1)
 		if tracker.isDuplicate(published.GetId()) {
 			metrics.duplicates.Add(1)
+			metrics.rooms[roomIndex].duplicates.Add(1)
 		}
-		metrics.latency.record(time.Since(sentAt))
+		latency := time.Since(sentAt)
+		metrics.latency.record(latency)
+		metrics.rooms[roomIndex].latency.record(latency)
 	}
 }
 
